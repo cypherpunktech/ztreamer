@@ -121,7 +121,7 @@ pub enum PipelineError {
     Panic,
 }
 
-/// A segment-oriented source seam: production keeps its native range iterators.
+/// A segment-oriented source seam: production scans raw transactions by range.
 /// Implementations must send every height in the inclusive range, or return an error.
 pub(crate) trait HistoricalSource: Sync {
     fn tip(&self) -> Option<(Height, block::Hash)>;
@@ -161,34 +161,28 @@ impl HistoricalSource for ZakuraDb {
         parsed_tx: &SyncSender<ParsedCompactBlock>,
         stats: &mut WorkerStats,
     ) -> Result<(), PipelineError> {
-        let mut headers = self.block_headers_by_height_range(Height(start)..=Height(end));
         let transaction_range = TransactionLocation::min_for_height(Height(start))
             ..=TransactionLocation::max_for_height(Height(end));
         let mut transactions = self
-            .raw_transactions_by_location_range(transaction_range.clone())
-            .peekable();
-        let mut transaction_hashes = self
-            .transaction_hashes_by_location_range(transaction_range)
+            .raw_transactions_by_location_range(transaction_range)
             .peekable();
 
         for raw_height in start..=end {
             let height = Height(raw_height);
             let started = Instant::now();
-            let header = headers.next();
+            let header = self.block_header(height.into());
             stats.header_read += started.elapsed();
-            let (actual_height, header) = header.ok_or(PipelineError::SourceGap {
+            let header = header.ok_or(PipelineError::SourceGap {
                 expected: raw_height,
                 actual: None,
             })?;
-            if actual_height != height {
-                return Err(PipelineError::SourceGap {
-                    expected: raw_height,
-                    actual: Some(actual_height.0),
-                });
-            }
+
+            let started = Instant::now();
+            let txids = self.transaction_hashes_for_block(height.into());
+            stats.txid_read += started.elapsed();
+            let txids = txids.ok_or(PipelineError::MissingBody { height: raw_height })?;
 
             let mut block_transactions = Vec::new();
-            let mut txids = Vec::new();
             loop {
                 let started = Instant::now();
                 let transaction = transactions.next_if(|(location, _)| location.height == height);
@@ -196,26 +190,19 @@ impl HistoricalSource for ZakuraDb {
                 let Some((transaction_location, transaction)) = transaction else {
                     break;
                 };
-                block_transactions.push(transaction);
-
-                let started = Instant::now();
-                let txid = transaction_hashes.next();
-                stats.txid_read += started.elapsed();
-                let Some((location, txid)) = txid else {
-                    return Err(PipelineError::SourceChanged);
-                };
-                if location != transaction_location {
+                // Hashes are returned in block order; reject gaps in the raw body
+                // before pairing them with transactions.
+                if transaction_location
+                    != TransactionLocation::from_usize(height, block_transactions.len())
+                {
                     return Err(PipelineError::SourceChanged);
                 }
-                txids.push(txid);
+                block_transactions.push(transaction);
             }
             if block_transactions.is_empty() {
                 return Err(PipelineError::MissingBody { height: raw_height });
             }
-            if transaction_hashes
-                .peek()
-                .is_some_and(|(location, _)| location.height == height)
-            {
+            if block_transactions.len() != txids.len() {
                 return Err(PipelineError::SourceChanged);
             }
 
@@ -267,7 +254,7 @@ impl HistoricalSource for ZakuraDb {
                 u32::try_from(header.time.timestamp()).expect("stored block time is a u32"),
                 block_transactions
                     .iter()
-                    .zip(txids)
+                    .zip(txids.iter().copied())
                     .map(|(transaction, txid)| (transaction.raw_bytes().as_slice(), txid)),
             );
             stats.parse += started.elapsed();

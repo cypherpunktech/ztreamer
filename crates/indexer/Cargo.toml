@@ -23,6 +23,7 @@ ztreamer-protocol = { path = "../protocol" }
 criterion = "0.7"
 metrics-util = { version = "0.19.1", default-features = false, features = ["debugging"] }
 tempfile = "3"
+tower = { version = "0.4.13", features = ["util"] }
 zakura-test.workspace = true
 
 [[bench]]

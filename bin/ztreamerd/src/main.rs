@@ -96,8 +96,9 @@ async fn main() -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
 
-    let mut config =
-        ZakuradConfig::load(cli.zakura_config.clone()).context("load Zakura configuration")?;
+    let mut config = ZakuradConfig::load(cli.zakura_config.clone())
+        .map_err(anyhow::Error::from_boxed)
+        .context("load Zakura configuration")?;
     config.metrics.endpoint_addr = Some(cli.metrics_listen);
     let _metrics = MetricsEndpoint::new(&config.metrics).context("start Prometheus endpoint")?;
     let network = config.network.network.clone();

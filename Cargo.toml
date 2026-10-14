@@ -3,9 +3,9 @@ resolver = "3"
 members = ["bin/ztreamerd", "crates/indexer", "crates/node", "crates/protocol", "crates/service"]
 
 [workspace.dependencies]
-zakura-chain = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0" }
-zakura-network = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0" }
-zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0" }
-zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0" }
-zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0", default-features = false }
-zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.6.0" }
+zakura-chain = { git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc" }
+zakura-network = { git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc" }
+zakura-state = { git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc" }
+zakura-test = { git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc" }
+zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc", default-features = false }
+zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", rev = "e33dc43089acca2fe2c6516927932f2b7618b8bc" }

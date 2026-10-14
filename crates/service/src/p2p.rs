@@ -318,6 +318,7 @@ async fn send_bytes(send: &FramedSend, message: Message, payload: Vec<u8>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::HashMap, time::Duration};
     use zakura_chain::{block, parameters::Network};
     use zakura_network::zakura::framed_channel;
     use zakura_state::Config;
@@ -351,7 +352,20 @@ mod tests {
         let registration = service.registration();
         assert_eq!(registration.provides[0].as_str(), SERVICE_ID);
         assert!(service.install(compact).is_ok());
-        let (send, mut recv) = framed_channel(3);
+        let (request_send, request_recv) = framed_channel(1);
+        let (response_send, mut recv) = framed_channel(3);
+        let peer_id = ZakuraPeerId::new(vec![7; 32]).unwrap();
+        let peer = Peer::new(
+            peer_id.clone(),
+            None,
+            CAPABILITY,
+            HashMap::from([(STREAM_KIND, (request_recv, response_send))]),
+            Default::default(),
+        );
+        let conn_id = peer.conn_id;
+        let cancel = peer.service_cancel_token();
+        service.add_peer(peer);
+        assert!(service.owns_connection_for_peer(&peer_id, conn_id));
         let request = proto::BlockRange {
             start: Some(proto::BlockId {
                 height: 0,
@@ -364,17 +378,20 @@ mod tests {
             pool_types: Vec::new(),
         };
 
-        service
-            .dispatch(
-                Message::GetBlockRangeRequest,
-                &request.encode_to_vec(),
-                &send,
-            )
+        request_send
+            .send(Frame {
+                message_type: Message::GetBlockRangeRequest.into(),
+                flags: 0,
+                payload: request.encode_to_vec(),
+            })
             .await
             .unwrap();
 
         for height in 0..=1 {
-            let frame = recv.recv().await.unwrap();
+            let frame = tokio::time::timeout(Duration::from_secs(5), recv.recv())
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 frame.message_type,
                 u16::from(Message::GetBlockRangeResponse)
@@ -387,9 +404,20 @@ mod tests {
                 height
             );
         }
-        let end = recv.recv().await.unwrap();
+        let end = tokio::time::timeout(Duration::from_secs(5), recv.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(end.message_type, u16::from(Message::StreamEnd));
         assert!(end.payload.is_empty());
+        cancel.cancel();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while service.owns_connection_for_peer(&peer_id, conn_id) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     fn record(height: u32, hash: Digest, previous_hash: Digest) -> CompactBlockRecord {

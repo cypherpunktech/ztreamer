@@ -13,7 +13,7 @@
         "aarch64-darwin"
       ];
       eachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      zakuraHash = "sha256-ucq4wyMq8onrF4XgafECngcejaFLa1MZiQKdTXGLCPM=";
+      zakuraHash = "sha256-1GNbFnmRl1fALD8wo9BWVjCHqsKx5UvQ1hLJfzK5k7c=";
     in
     {
       packages = eachSystem (pkgs: {
@@ -24,19 +24,21 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = pkgs.lib.genAttrs [
-              "zakura-1.6.0"
-              "zakura-chain-9.0.0"
-              "zakura-consensus-10.0.0"
-              "zakura-header-chain-4.0.0"
+              "zakura-1.7.0-rc0"
+              "zakura-chain-10.0.0-rc0"
+              "zakura-consensus-11.0.0-rc0"
+              "zakura-header-chain-4.1.0-rc0"
               "zakura-jsonl-trace-1.2.0"
-              "zakura-network-9.0.0"
-              "zakura-node-services-4.0.0"
-              "zakura-rpc-12.0.0"
-              "zakura-script-4.0.0"
-              "zakura-state-10.0.0"
-              "zakura-test-2.2.0"
-              "zakura-tower-batch-control-1.3.0"
-              "zakura-tower-fallback-1.2.0"
+              "zakura-mmr-tree-0.0.1"
+              "zakura-network-10.0.0-rc0"
+              "zakura-node-services-5.0.0-rc0"
+              "zakura-quic-0.1.0"
+              "zakura-rpc-13.0.0-rc0"
+              "zakura-script-5.0.0-rc0"
+              "zakura-state-11.0.0-rc0"
+              "zakura-test-3.0.0-rc0"
+              "zakura-tower-batch-control-1.4.0-rc0"
+              "zakura-tower-fallback-1.3.0-rc0"
             ] (_: zakuraHash);
           };
           nativeBuildInputs = with pkgs; [

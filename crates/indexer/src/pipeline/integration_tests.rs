@@ -9,6 +9,74 @@ use crate::{
     parser::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction},
 };
 
+#[tokio::test]
+async fn zakura_segments_match_block_parsing_and_enforce_limits() {
+    use tower::ServiceExt;
+    use zakura_chain::{parameters::Network, serialization::ZcashDeserialize};
+    use zakura_state::{CheckpointVerifiedBlock, Config, Request};
+    use zakura_test::vectors::CONTINUOUS_MAINNET_BLOCKS;
+
+    let (mut state, read, _tip, _change) =
+        zakura_state::init(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0)
+            .await
+            .unwrap();
+    let mut expected = Vec::new();
+    for (&height, &bytes) in CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let block = Arc::new(block::Block::zcash_deserialize(bytes).unwrap());
+        expected.push(
+            crate::parser::parse_block(&crate::parser::RawIndexBlock {
+                height: Height(height),
+                hash: block.hash(),
+                bytes: bytes.to_vec(),
+                txids: block.transactions.iter().map(|tx| tx.hash()).collect(),
+            })
+            .unwrap(),
+        );
+        (&mut state)
+            .oneshot(Request::CommitCheckpointVerifiedBlock(
+                CheckpointVerifiedBlock::from(block),
+            ))
+            .await
+            .unwrap();
+    }
+    let db = read.db();
+    for blocks in expected.chunks(3) {
+        let start = blocks.first().unwrap().height;
+        let end = blocks.last().unwrap();
+        let (send, receive) = sync_channel(blocks.len());
+        let mut stats = WorkerStats::default();
+        db.process_segment(
+            start,
+            end.height,
+            Some(block::Hash(end.hash)),
+            MIB,
+            &send,
+            &mut stats,
+        )
+        .unwrap();
+        drop(send);
+        assert_eq!(receive.into_iter().collect::<Vec<_>>(), blocks);
+        assert_eq!(stats.blocks, blocks.len() as u64);
+        assert_eq!(stats.transactions, blocks.len() as u64);
+    }
+    let (send, _receive) = sync_channel(1);
+    assert!(matches!(
+        db.process_segment(1, 1, None, 1, &send, &mut WorkerStats::default()),
+        Err(PipelineError::BlockExceedsByteLimit { height: 1, .. })
+    ));
+    assert!(matches!(
+        db.process_segment(
+            1,
+            1,
+            Some(block::Hash([0; 32])),
+            MIB,
+            &send,
+            &mut WorkerStats::default(),
+        ),
+        Err(PipelineError::SourceChanged)
+    ));
+}
+
 struct Fixture {
     count: u32,
     fail_at: Option<u32>,
