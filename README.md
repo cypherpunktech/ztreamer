@@ -1,15 +1,22 @@
-# ztreamer
+![ztreamer](./banner.png)
 
-`ztreamer` is a heavily optimized zcash indexer and `lightwallet-protocol` implementation backed by an embedded [zakura](https://github.com/zakura-core/zakura) node.
+# ztreamer [![GitHub Actions][gha-badge]][gha] [![X][x-badge]][x]
 
-`ztreamer` additionally adds a `CompactTxStreamer` server over v2 p2p, which enables p2p light wallets.
+[gha]: https://github.com/cypherpunktech/ztreamer/actions
+[gha-badge]: https://github.com/cypherpunktech/ztreamer/actions/workflows/ci.yml/badge.svg
+[x]: https://x.com/cypherpunk
+[x-badge]: https://img.shields.io/twitter/follow/cypherpunk
+
+A high-performance [Zcash](https://z.cash) indexer and light-wallet server, powered by an embedded [zakura](https://github.com/zakura-core/zakura) node.
+
+Implements `lightwallet-protocol` over gRPC and serves `CompactTxStreamer` over v2 P2P for peer-to-peer light wallets.
 
 ## Install
 
 Install [Protocol Buffers](https://protobuf.dev/installation/), then:
 
 ```console
-cargo install --git https://github.com/distractedm1nd/ztreamer ztreamerd
+cargo install ztreamerd
 ```
 
 ## Run
@@ -31,7 +38,7 @@ Certificate changes require a restart. The Prometheus listener is not covered by
 
 ## Protocol compatibility
 
-All `lightwallet-protocol` methods are implemented. We intentionally deviate `lightwallet-protocol` for `GetBlock`, to exclude transparent data which current wallets do not use. `GetBlockRange` will accept transparent filters, but this will not hit the index as transparent scanning is not a recommended use case.
+All `lightwallet-protocol` methods are implemented. `GetBlock` intentionally differs from the protocol by excluding transparent data, which current wallets do not use. `GetBlockRange` accepts transparent filters, but these requests bypass the index; transparent scanning is not a recommended use case.
 
 `GetTaddressBalanceStream` counts each address once and accepts up to 10,000 distinct addresses per request. An additional distinct address returns `ResourceExhausted`; repeated addresses do not count toward the limit.
 
