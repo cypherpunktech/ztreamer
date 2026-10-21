@@ -124,13 +124,11 @@ async fn signal_drains_both_futures_concurrently_even_on_error() {
         app_started_rx.await.unwrap();
         Ok(())
     };
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(node, application, shutdown.clone(), signal),
-    )
-    .await
-    .unwrap()
-    .unwrap_err();
+    let error =
+        timeout(Duration::from_secs(5), supervise(node, application, shutdown.clone(), signal))
+            .await
+            .unwrap()
+            .unwrap_err();
     assert_eq!(error.to_string(), "node cleanup failed");
 }
 
@@ -171,14 +169,9 @@ async fn startup_failure_returns_original_error() {
     let shutdown = CancellationToken::new();
     let (ready_tx, ready_rx) = oneshot::channel();
     let node = async {
-        Box::pin(zakurad::node::run_with_services_ready(
-            config,
-            vec![],
-            shutdown.clone(),
-            ready_tx,
-        ))
-        .await
-        .map_err(|error| anyhow!("{error}"))
+        Box::pin(zakurad::node::run_with_services_ready(config, vec![], shutdown.clone(), ready_tx))
+            .await
+            .map_err(|error| anyhow!("{error}"))
     };
     let application = async {
         tokio::select! {
@@ -196,10 +189,7 @@ async fn startup_failure_returns_original_error() {
     .await
     .unwrap()
     .unwrap_err();
-    assert!(
-        error.to_string().contains("block_gossip_peer_ips requires"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("block_gossip_peer_ips requires"), "{error}");
 }
 
 #[tokio::test]
@@ -271,10 +261,7 @@ fn run_in_subprocess(test: &str) -> bool {
         .env(CHILD, test)
         .status()
         .expect("lifecycle test subprocess starts");
-    assert!(
-        status.success(),
-        "lifecycle test subprocess failed: {status}"
-    );
+    assert!(status.success(), "lifecycle test subprocess failed: {status}");
     true
 }
 
@@ -297,9 +284,7 @@ async fn embedded_node_stops_after_signal() {
 async fn embedded_node_lifecycle(stop_by_signal: bool) {
     let _guard = zakura_test::init();
     let native_socket = UdpSocket::bind("127.0.0.1:0").expect("test UDP port is available");
-    let native_addr = native_socket
-        .local_addr()
-        .expect("test UDP socket has an address");
+    let native_addr = native_socket.local_addr().expect("test UDP socket has an address");
     drop(native_socket);
     let identity_dir = tempfile::tempdir().expect("temporary identity directory is created");
 
@@ -344,22 +329,10 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
             .expect("tip changes within the test timeout")
             .expect("tip change listener remains open");
         assert_eq!(client.tip(), Some((BlockHeight(0), genesis_hash)));
+        assert_eq!(client.database().tip(), Some((BlockHeight(0), genesis_hash)));
+        assert!(client.mempool_transactions().await.expect("mempool query succeeds").is_empty());
         assert_eq!(
-            client.database().tip(),
-            Some((BlockHeight(0), genesis_hash))
-        );
-        assert!(
-            client
-                .mempool_transactions()
-                .await
-                .expect("mempool query succeeds")
-                .is_empty()
-        );
-        assert_eq!(
-            client
-                .block(BlockHeight(0))
-                .await
-                .expect("block query succeeds"),
+            client.block(BlockHeight(0)).await.expect("block query succeeds"),
             Some(genesis)
         );
 
@@ -373,13 +346,10 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
         signal_requested.cancelled().await;
         Ok(())
     };
-    timeout(
-        Duration::from_secs(30),
-        supervise(node, application, shutdown.clone(), signal),
-    )
-    .await
-    .expect("node lifecycle finishes within timeout")
-    .expect("node lifecycle succeeds");
+    timeout(Duration::from_secs(30), supervise(node, application, shutdown.clone(), signal))
+        .await
+        .expect("node lifecycle finishes within timeout")
+        .expect("node lifecycle succeeds");
     // Endpoint shutdown can finish before the transport's socket task is dropped.
     let socket = timeout(Duration::from_secs(5), async {
         loop {
@@ -420,12 +390,9 @@ async fn signal_waits_for_an_active_blocking_writer() {
         started_rx.await.unwrap();
         Ok(())
     };
-    timeout(
-        Duration::from_secs(5),
-        supervise(node, application, shutdown.clone(), signal),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    timeout(Duration::from_secs(5), supervise(node, application, shutdown.clone(), signal))
+        .await
+        .unwrap()
+        .unwrap();
     assert!(writer_finished.load(Ordering::SeqCst));
 }

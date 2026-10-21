@@ -30,20 +30,11 @@ impl PoolSelection {
     /// Empty means every shielded pool, for compatibility with legacy clients.
     pub(crate) fn from_mempool_request(pool_types: &[i32]) -> Result<Self, Status> {
         if pool_types.is_empty() {
-            return Ok(Self {
-                transparent: false,
-                sapling: true,
-                orchard: true,
-                ironwood: true,
-            });
+            return Ok(Self { transparent: false, sapling: true, orchard: true, ironwood: true });
         }
 
-        let mut selection = Self {
-            transparent: false,
-            sapling: false,
-            orchard: false,
-            ironwood: false,
-        };
+        let mut selection =
+            Self { transparent: false, sapling: false, orchard: false, ironwood: false };
         for &pool_type in pool_types {
             match proto::PoolType::try_from(pool_type) {
                 Ok(proto::PoolType::Sapling) => selection.sapling = true,
@@ -51,9 +42,7 @@ impl PoolSelection {
                 Ok(proto::PoolType::Ironwood) => selection.ironwood = true,
                 Ok(proto::PoolType::Transparent) => selection.transparent = true,
                 Ok(proto::PoolType::Invalid) | Err(_) => {
-                    return Err(Status::invalid_argument(format!(
-                        "invalid pool type {pool_type}"
-                    )));
+                    return Err(Status::invalid_argument(format!("invalid pool type {pool_type}")));
                 }
             }
         }
@@ -130,11 +119,7 @@ pub(crate) fn add_transparent_txs(
             Err(position) => {
                 block.vtx.insert(
                     position,
-                    proto::CompactTx {
-                        index,
-                        txid: tx.hash().0.to_vec(),
-                        ..Default::default()
-                    },
+                    proto::CompactTx { index, txid: tx.hash().0.to_vec(), ..Default::default() },
                 );
                 position
             }
@@ -149,10 +134,8 @@ pub(crate) fn compact_mempool_txs(
     pools: PoolSelection,
     exclude_txid_suffixes: &[Vec<u8>],
 ) -> Result<Vec<proto::CompactTx>, Status> {
-    let excluded = excluded_txids(
-        transactions.iter().map(|(_, txid)| txid.0),
-        exclude_txid_suffixes,
-    );
+    let excluded =
+        excluded_txids(transactions.iter().map(|(_, txid)| txid.0), exclude_txid_suffixes);
     let mut compact = Vec::with_capacity(transactions.len().saturating_sub(excluded.len()));
     for (bytes, txid) in transactions {
         if excluded.contains(&txid.0) {
@@ -216,9 +199,7 @@ pub(crate) fn excluded_txids(
         let prefix: Vec<_> = suffix.iter().rev().copied().collect();
         let start = reversed.partition_point(|txid| txid.as_slice() < prefix.as_slice());
         if let Some(txid) = reversed.get(start).filter(|txid| txid.starts_with(&prefix))
-            && !reversed
-                .get(start + 1)
-                .is_some_and(|next| next.starts_with(&prefix))
+            && !reversed.get(start + 1).is_some_and(|next| next.starts_with(&prefix))
         {
             let mut txid = *txid;
             txid.reverse();
@@ -237,9 +218,7 @@ fn convert_transaction(
         transaction
             .sapling_spends
             .iter()
-            .map(|nullifier| proto::CompactSaplingSpend {
-                nf: nullifier.to_vec(),
-            })
+            .map(|nullifier| proto::CompactSaplingSpend { nf: nullifier.to_vec() })
             .collect()
     } else {
         Vec::new()
@@ -294,21 +273,9 @@ fn convert_actions(
         .iter()
         .map(|action| proto::CompactOrchardAction {
             nullifier: action.nullifier.to_vec(),
-            cmx: if nullifiers_only {
-                Vec::new()
-            } else {
-                action.commitment.to_vec()
-            },
-            ephemeral_key: if nullifiers_only {
-                Vec::new()
-            } else {
-                action.ephemeral_key.to_vec()
-            },
-            ciphertext: if nullifiers_only {
-                Vec::new()
-            } else {
-                action.ciphertext.to_vec()
-            },
+            cmx: if nullifiers_only { Vec::new() } else { action.commitment.to_vec() },
+            ephemeral_key: if nullifiers_only { Vec::new() } else { action.ephemeral_key.to_vec() },
+            ciphertext: if nullifiers_only { Vec::new() } else { action.ciphertext.to_vec() },
         })
         .collect()
 }
@@ -347,11 +314,7 @@ mod tests {
                 orchard_actions: vec![action(11)],
                 ironwood_actions: vec![action(12)],
             }],
-            end_tree_sizes: TreeSizes {
-                sapling: 13,
-                orchard: 14,
-                ironwood: 15,
-            },
+            end_tree_sizes: TreeSizes { sapling: 13, orchard: 14, ironwood: 15 },
         };
 
         let orchard = project_block(
@@ -363,27 +326,15 @@ mod tests {
         assert!(orchard.vtx[0].spends.is_empty());
         assert_eq!(orchard.vtx[0].actions[0].cmx, vec![11; 32]);
         assert!(orchard.vtx[0].ironwood_actions.is_empty());
-        assert_eq!(
-            orchard
-                .chain_metadata
-                .unwrap()
-                .ironwood_commitment_tree_size,
-            15
-        );
+        assert_eq!(orchard.chain_metadata.unwrap().ironwood_commitment_tree_size, 15);
 
-        let nullifiers = project_block(
-            record.to_proto(),
-            PoolSelection::from_request(&[]).unwrap(),
-            true,
-        );
+        let nullifiers =
+            project_block(record.to_proto(), PoolSelection::from_request(&[]).unwrap(), true);
         assert_eq!(nullifiers.vtx[0].spends[0].nf, vec![7; 32]);
         assert!(nullifiers.vtx[0].outputs.is_empty());
         assert!(nullifiers.vtx[0].actions[0].cmx.is_empty());
         assert!(nullifiers.vtx[0].ironwood_actions[0].ciphertext.is_empty());
-        assert_eq!(
-            nullifiers.chain_metadata.unwrap(),
-            proto::ChainMetadata::default()
-        );
+        assert_eq!(nullifiers.chain_metadata.unwrap(), proto::ChainMetadata::default());
 
         let transparent =
             PoolSelection::from_request(&[proto::PoolType::Transparent as i32]).unwrap();
@@ -404,11 +355,7 @@ mod tests {
                 height: block.coinbase_height().unwrap(),
                 hash: block.hash(),
                 bytes: encoded.to_vec(),
-                txids: block
-                    .transactions
-                    .iter()
-                    .map(|transaction| transaction.hash())
-                    .collect(),
+                txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
             })
             .unwrap();
             let record = CompactBlockRecord {
@@ -425,17 +372,12 @@ mod tests {
                 .transactions
                 .iter()
                 .filter(|transaction| {
-                    mined
-                        .vtx
-                        .iter()
-                        .any(|compact| compact.txid == transaction.hash().0.to_vec())
+                    mined.vtx.iter().any(|compact| compact.txid == transaction.hash().0.to_vec())
                 })
                 .map(|transaction| transaction.as_ref())
                 .collect();
-            let entries: Vec<(Vec<u8>, transaction::Hash)> = shielded
-                .iter()
-                .map(|transaction| entry(transaction))
-                .collect();
+            let entries: Vec<(Vec<u8>, transaction::Hash)> =
+                shielded.iter().map(|transaction| entry(transaction)).collect();
             let compact = compact_mempool_txs(&entries, all_pools(), &[]).unwrap();
 
             assert_eq!(compact.len(), mined.vtx.len());
@@ -443,13 +385,7 @@ mod tests {
             for (mempool, mined) in compact.iter().zip(&mined.vtx) {
                 saw_mined_index |= mined.index != 0;
                 assert_eq!(mempool.index, 0);
-                assert_eq!(
-                    mempool,
-                    &proto::CompactTx {
-                        index: 0,
-                        ..mined.clone()
-                    }
-                );
+                assert_eq!(mempool, &proto::CompactTx { index: 0, ..mined.clone() });
             }
             for (mempool, transaction) in compact.iter().zip(&shielded) {
                 assert_shielded_fields(mempool, transaction);
@@ -501,11 +437,7 @@ mod tests {
         assert!(!compact[0].actions.is_empty());
 
         let pools = PoolSelection::from_request(&[proto::PoolType::Ironwood as i32]).unwrap();
-        assert!(
-            compact_mempool_txs(&transactions, pools, &[])
-                .unwrap()
-                .is_empty()
-        );
+        assert!(compact_mempool_txs(&transactions, pools, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -538,23 +470,14 @@ mod tests {
 
         for types in [
             vec![proto::PoolType::Transparent as i32],
-            vec![
-                proto::PoolType::Transparent as i32,
-                proto::PoolType::Orchard as i32,
-            ],
+            vec![proto::PoolType::Transparent as i32, proto::PoolType::Orchard as i32],
         ] {
             let pools = PoolSelection::from_mempool_request(&types).unwrap();
             let compact = compact_mempool_txs(&entries, pools, &[]).unwrap();
-            let mut block = proto::CompactBlock {
-                vtx: legacy.clone(),
-                ..Default::default()
-            };
+            let mut block = proto::CompactBlock { vtx: legacy.clone(), ..Default::default() };
             block.vtx[0].index = 1;
             let mut block = project_block(block, pools, false);
-            add_transparent_txs(
-                &mut block,
-                &[transparent.clone().into(), orchard.clone().into()],
-            );
+            add_transparent_txs(&mut block, &[transparent.clone().into(), orchard.clone().into()]);
             let mut expected = compact.clone();
             if expected.len() > 1 {
                 expected[1].index = 1;
@@ -568,10 +491,7 @@ mod tests {
                         prevout_txid: prevout.clone(),
                         prevout_index: 7
                     }],
-                    vout: vec![proto::TxOut {
-                        value: 123,
-                        script_pub_key: vec![0x51]
-                    }],
+                    vout: vec![proto::TxOut { value: 123, script_pub_key: vec![0x51] }],
                     ..Default::default()
                 }
             );
@@ -603,10 +523,7 @@ mod tests {
             (bytes, transaction::Hash(shared)),
         ];
         let txids = |compact: Vec<proto::CompactTx>| {
-            compact
-                .into_iter()
-                .map(|transaction| transaction.txid)
-                .collect::<Vec<_>>()
+            compact.into_iter().map(|transaction| transaction.txid).collect::<Vec<_>>()
         };
 
         assert_eq!(
@@ -648,11 +565,8 @@ mod tests {
             for txid in &txids {
                 for len in 0..=32 {
                     let suffix = txid[32 - len..].to_vec();
-                    let matches: Vec<_> = txids[..count]
-                        .iter()
-                        .filter(|id| id.ends_with(&suffix))
-                        .copied()
-                        .collect();
+                    let matches: Vec<_> =
+                        txids[..count].iter().filter(|id| id.ends_with(&suffix)).copied().collect();
                     let expected = if matches.len() == 1 {
                         HashSet::from([matches[0]])
                     } else {
@@ -684,21 +598,14 @@ mod tests {
 
         let compact = compact_mempool_txs(&transactions, all_pools(), &[vec![4; 32]]).unwrap();
         assert_eq!(
-            compact
-                .into_iter()
-                .map(|transaction| transaction.txid)
-                .collect::<Vec<_>>(),
+            compact.into_iter().map(|transaction| transaction.txid).collect::<Vec<_>>(),
             [orchard.hash().0.to_vec()]
         );
     }
 
     #[test]
     fn an_empty_mempool_projects_to_nothing() {
-        assert!(
-            compact_mempool_txs(&[], all_pools(), &[vec![1]])
-                .unwrap()
-                .is_empty()
-        );
+        assert!(compact_mempool_txs(&[], all_pools(), &[vec![1]]).unwrap().is_empty());
     }
 
     fn all_pools() -> PoolSelection {
@@ -706,10 +613,7 @@ mod tests {
     }
 
     fn entry(transaction: &Transaction) -> (Vec<u8>, transaction::Hash) {
-        (
-            transaction.zcash_serialize_to_vec().unwrap(),
-            transaction.hash(),
-        )
+        (transaction.zcash_serialize_to_vec().unwrap(), transaction.hash())
     }
 
     fn shielded_transaction(block: &[u8], shielded: impl Fn(&Transaction) -> bool) -> Transaction {

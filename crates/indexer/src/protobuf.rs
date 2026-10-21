@@ -27,10 +27,7 @@ impl CompactBlockRecord {
     pub(crate) fn from_proto(block: compact_bytes::CompactBlock) -> Result<Self, CodecError> {
         let trees = block.chain_metadata.ok_or(CodecError::InvalidRecord)?;
         Ok(Self {
-            height: block
-                .height
-                .try_into()
-                .map_err(|_| CodecError::InvalidRecord)?,
+            height: block.height.try_into().map_err(|_| CodecError::InvalidRecord)?,
             hash: array(block.hash)?,
             previous_hash: array(block.prev_hash)?,
             time: block.time,
@@ -124,8 +121,5 @@ fn decode_action(
 }
 
 fn array<const N: usize>(bytes: impl AsRef<[u8]>) -> Result<[u8; N], CodecError> {
-    bytes
-        .as_ref()
-        .try_into()
-        .map_err(|_| CodecError::InvalidRecord)
+    bytes.as_ref().try_into().map_err(|_| CodecError::InvalidRecord)
 }

@@ -45,9 +45,7 @@ impl Fixture {
 
 impl HistoricalSource for Fixture {
     fn tip(&self) -> Option<(Height, block::Hash)> {
-        self.count
-            .checked_sub(1)
-            .map(|height| (Height(height), block::Hash(hash(height))))
+        self.count.checked_sub(1).map(|height| (Height(height), block::Hash(hash(height))))
     }
 
     fn block_hash(&self, height: u32) -> Option<block::Hash> {
@@ -72,10 +70,7 @@ impl HistoricalSource for Fixture {
             let (sent, timeout) = ready
                 .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(5), |sent| !*sent)
                 .unwrap();
-            assert!(
-                *sent && !timeout.timed_out(),
-                "a later block must arrive before block zero"
-            );
+            assert!(*sent && !timeout.timed_out(), "a later block must arrive before block zero");
         }
         let mut heights: Vec<_> = (start..=end).collect();
         if self.descending {
@@ -172,10 +167,7 @@ fn open(dir: &tempfile::TempDir, size: usize) -> Index {
 /// Independent expected records: no OrderedBuilder in the oracle.
 fn verify(index: &Index, count: u32) -> Vec<CompactBlockRecord> {
     let state = index.state().unwrap();
-    assert_eq!(
-        state.durable_tip().map(|tip| tip.height),
-        count.checked_sub(1)
-    );
+    assert_eq!(state.durable_tip().map(|tip| tip.height), count.checked_sub(1));
     let mut sizes = TreeSizes::default();
     let records = (0..count)
         .map(|height| {
@@ -210,10 +202,7 @@ fn sequential_parallel_and_skewed_ingestion_match_and_reopen() {
         let index = open(&dir, 32 * MIB);
         let mut source = Fixture::new(1_107); // Cross sealed/mutable boundary.
         source.reorder = workers > 1;
-        HistoricalPipeline::new(&index, &source, config(workers))
-            .unwrap()
-            .sync()
-            .unwrap();
+        HistoricalPipeline::new(&index, &source, config(workers)).unwrap().sync().unwrap();
         let records = verify(&index, source.count);
         if let Some(baseline) = &baseline {
             assert_eq!(&records, baseline);
@@ -230,10 +219,7 @@ fn sequential_parallel_and_skewed_ingestion_match_and_reopen() {
 /// push.
 fn tight(workers: usize) -> PipelineConfig {
     let config = config(workers);
-    PipelineConfig {
-        max_pending_bytes: crate::codec::MAX_RECORD_BYTES + 4 * 1024,
-        ..config
-    }
+    PipelineConfig { max_pending_bytes: crate::codec::MAX_RECORD_BYTES + 4 * 1024, ..config }
 }
 
 /// Stops the test process if the pass does not complete in 30 seconds.
@@ -252,9 +238,7 @@ fn sync_within(
             std::process::abort();
         }
     });
-    let result = HistoricalPipeline::new(index, source, config)
-        .unwrap()
-        .sync();
+    let result = HistoricalPipeline::new(index, source, config).unwrap().sync();
     drop(done_tx);
     watchdog.join().unwrap();
     result
@@ -278,10 +262,7 @@ fn zero_channel_limit_completes() {
     // channel limit is zero. Only the block at `next_height` can go through.
     // The pending bytes must not become more than `max_pending_bytes`.
     let base = config(8);
-    let config = PipelineConfig {
-        max_pending_bytes: base.max_batch_bytes,
-        ..base
-    };
+    let config = PipelineConfig { max_pending_bytes: base.max_batch_bytes, ..base };
     let dir = tempfile::tempdir().unwrap();
     let index = open(&dir, 32 * MIB);
     let source = Fixture::new(1_107);
@@ -306,10 +287,7 @@ fn missing_or_unordered_height_fails_instead_of_waiting() {
     let index = open(&dir, 32 * MIB);
     let mut source = Fixture::new(1_107);
     source.descending = true;
-    assert!(matches!(
-        sync_within(&index, &source, tight(4)),
-        Err(PipelineError::SourceGap { .. })
-    ));
+    assert!(matches!(sync_within(&index, &source, tight(4)), Err(PipelineError::SourceGap { .. })));
 }
 
 #[test]
@@ -323,10 +301,7 @@ fn failed_worker_stops_workers_that_wait() {
     let mut source = Fixture::new(1_107);
     source.fail_at = Some(500);
     let result = metrics::with_local_recorder(&recorder, || sync_within(&index, &source, tight(8)));
-    assert!(matches!(
-        result,
-        Err(PipelineError::MissingBody { height: 500 })
-    ));
+    assert!(matches!(result, Err(PipelineError::MissingBody { height: 500 })));
     // Only the segment that failed records the outcome "error". The segments that the failure
     // stopped record no outcome.
     let segment_errors: usize = snapshotter
@@ -346,11 +321,7 @@ fn failed_worker_stops_workers_that_wait() {
         })
         .sum();
     assert_eq!(segment_errors, 1);
-    let count = index
-        .state()
-        .unwrap()
-        .durable_tip()
-        .map_or(0, |tip| tip.height + 1);
+    let count = index.state().unwrap().durable_tip().map_or(0, |tip| tip.height + 1);
     assert!(count <= 500);
     verify(&index, count);
 }
@@ -366,10 +337,7 @@ fn historical_pass_seals_a_range_that_the_head_follower_left_in_mutable_rows() {
     for height in 0..=1_088 {
         builder.push(prepared(height)).unwrap();
     }
-    let batch = builder
-        .build_batch(Some(1_088), Some(998), 32 * MIB)
-        .unwrap()
-        .unwrap();
+    let batch = builder.build_batch(Some(1_088), Some(998), 32 * MIB).unwrap().unwrap();
     let state = index.write(batch).unwrap();
     assert_eq!(state.sealed_through(), None);
 
@@ -425,26 +393,14 @@ fn source_failure_leaves_a_resumable_prefix() {
     let index = open(&dir, 32 * MIB);
     let mut source = Fixture::new(1_107);
     source.fail_at = Some(1_000);
-    assert!(
-        HistoricalPipeline::new(&index, &source, config(1))
-            .unwrap()
-            .sync()
-            .is_err()
-    );
-    let count = index
-        .state()
-        .unwrap()
-        .durable_tip()
-        .map_or(0, |tip| tip.height + 1);
+    assert!(HistoricalPipeline::new(&index, &source, config(1)).unwrap().sync().is_err());
+    let count = index.state().unwrap().durable_tip().map_or(0, |tip| tip.height + 1);
     assert!(count > 0 && count <= 1_000);
     verify(&index, count);
     drop(index);
     let index = open(&dir, 32 * MIB);
     source.fail_at = None;
-    HistoricalPipeline::new(&index, &source, config(4))
-        .unwrap()
-        .sync()
-        .unwrap();
+    HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync().unwrap();
     verify(&index, source.count);
 }
 
@@ -456,16 +412,10 @@ fn missing_block_cannot_report_a_successful_pass() {
         let mut source = Fixture::new(120);
         source.omit = Some(omitted);
         assert!(matches!(
-            HistoricalPipeline::new(&index, &source, config(4))
-                .unwrap()
-                .sync(),
+            HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync(),
             Err(PipelineError::SourceGap { .. })
         ));
-        let count = index
-            .state()
-            .unwrap()
-            .durable_tip()
-            .map_or(0, |tip| tip.height + 1);
+        let count = index.state().unwrap().durable_tip().map_or(0, |tip| tip.height + 1);
         assert!(count <= omitted);
         verify(&index, count);
     }
@@ -481,15 +431,11 @@ fn writer_failure_stops_the_encode_of_later_batches() {
     let index = open(&dir, 256 * 1024);
     let source = Fixture::new(20_000);
     let result = metrics::with_local_recorder(&recorder, || {
-        HistoricalPipeline::new(&index, &source, config(4))
-            .unwrap()
-            .sync()
+        HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync()
     });
     assert!(matches!(
         result,
-        Err(PipelineError::Index(IndexError::Heed(heed::Error::Mdb(
-            heed::MdbError::MapFull
-        ))))
+        Err(PipelineError::Index(IndexError::Heed(heed::Error::Mdb(heed::MdbError::MapFull))))
     ));
     let values = snapshotter.snapshot().into_vec();
     let samples = |name: &str| -> usize {
@@ -505,10 +451,7 @@ fn writer_failure_stops_the_encode_of_later_batches() {
     let writes = samples("ztreamer.pipeline.commit.seconds");
     let encodes = samples("ztreamer.pipeline.encode.seconds");
     // After the failed write, at most one batch waits in the channel and one is in encode.
-    assert!(
-        encodes <= writes + 2,
-        "{encodes} encodes for {writes} writes"
-    );
+    assert!(encodes <= writes + 2, "{encodes} encodes for {writes} writes");
 }
 
 #[test]
@@ -516,18 +459,11 @@ fn failed_lmdb_transaction_never_advances_checkpoint_and_can_resume() {
     let dir = tempfile::tempdir().unwrap();
     let index = open(&dir, 256 * 1024);
     let prefix = Fixture::new(12);
-    HistoricalPipeline::new(&index, &prefix, config(1))
-        .unwrap()
-        .sync()
-        .unwrap();
+    HistoricalPipeline::new(&index, &prefix, config(1)).unwrap().sync().unwrap();
     let source = Fixture::new(1_107);
     assert!(matches!(
-        HistoricalPipeline::new(&index, &source, config(4))
-            .unwrap()
-            .sync(),
-        Err(PipelineError::Index(IndexError::Heed(heed::Error::Mdb(
-            heed::MdbError::MapFull
-        ))))
+        HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync(),
+        Err(PipelineError::Index(IndexError::Heed(heed::Error::Mdb(heed::MdbError::MapFull))))
     ));
     let count = index.state().unwrap().durable_tip().unwrap().height + 1;
     assert!(count >= prefix.count && count < source.count);
@@ -535,10 +471,7 @@ fn failed_lmdb_transaction_never_advances_checkpoint_and_can_resume() {
     drop(index);
     let index = open(&dir, 32 * MIB);
     verify(&index, count);
-    HistoricalPipeline::new(&index, &source, config(4))
-        .unwrap()
-        .sync()
-        .unwrap();
+    HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync().unwrap();
     verify(&index, source.count);
 }
 
@@ -553,39 +486,16 @@ fn failed_pass_exports_partial_work_and_resets_live_gauges() {
     let mut source = Fixture::new(120);
     source.fail_at = Some(10);
     metrics::with_local_recorder(&recorder, || {
-        assert!(
-            HistoricalPipeline::new(&index, &source, config(1))
-                .unwrap()
-                .sync()
-                .is_err()
-        );
+        assert!(HistoricalPipeline::new(&index, &source, config(1)).unwrap().sync().is_err());
     });
     let values = snapshotter.snapshot().into_vec();
-    let metric = |name: &str| {
-        &values
-            .iter()
-            .find(|(key, _, _, _)| key.key().name() == name)
-            .unwrap()
-            .3
-    };
-    assert_eq!(
-        metric("ztreamer.pipeline.source.blocks"),
-        &DebugValue::Counter(10)
-    );
-    let committed = index
-        .state()
-        .unwrap()
-        .durable_tip()
-        .map_or(0, |tip| u64::from(tip.height) + 1);
-    assert_eq!(
-        metric("ztreamer.pipeline.committed.blocks"),
-        &DebugValue::Counter(committed)
-    );
+    let metric =
+        |name: &str| &values.iter().find(|(key, _, _, _)| key.key().name() == name).unwrap().3;
+    assert_eq!(metric("ztreamer.pipeline.source.blocks"), &DebugValue::Counter(10));
+    let committed = index.state().unwrap().durable_tip().map_or(0, |tip| u64::from(tip.height) + 1);
+    assert_eq!(metric("ztreamer.pipeline.committed.blocks"), &DebugValue::Counter(committed));
     for name in ["workers.active", "pending.bytes", "ready.bytes"] {
-        assert_eq!(
-            metric(&format!("ztreamer.pipeline.{name}")),
-            &DebugValue::Gauge(0.0.into())
-        );
+        assert_eq!(metric(&format!("ztreamer.pipeline.{name}")), &DebugValue::Gauge(0.0.into()));
     }
     for name in ["pass", "segment"] {
         let outcome = values
@@ -609,16 +519,10 @@ fn worker_panic_returns_an_error_and_keeps_a_valid_prefix() {
     let mut source = Fixture::new(120);
     source.panic_at = Some(10);
     assert!(matches!(
-        HistoricalPipeline::new(&index, &source, config(1))
-            .unwrap()
-            .sync(),
+        HistoricalPipeline::new(&index, &source, config(1)).unwrap().sync(),
         Err(PipelineError::Panic)
     ));
-    let count = index
-        .state()
-        .unwrap()
-        .durable_tip()
-        .map_or(0, |tip| tip.height + 1);
+    let count = index.state().unwrap().durable_tip().map_or(0, |tip| tip.height + 1);
     assert!(count <= 10);
     verify(&index, count);
 }
@@ -663,17 +567,9 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
     let dir = tempfile::tempdir().unwrap();
     let index = open(&dir, 32 * MIB);
     let source = Fixture::new(120);
-    let historical = HistoricalPipeline::new(&index, &source, config(4))
-        .unwrap()
-        .sync()
-        .unwrap();
-    let mut live = Live {
-        anchor: 119,
-        tip: 124,
-    };
-    let (state, head) = sync_head_once(&index, &mut live, &[], config(4))
-        .await
-        .unwrap();
+    let historical = HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync().unwrap();
+    let mut live = Live { anchor: 119, tip: 124 };
+    let (state, head) = sync_head_once(&index, &mut live, &[], config(4)).await.unwrap();
     assert_eq!(state, historical);
     assert_eq!(
         head.iter().map(|block| block.height).collect::<Vec<_>>(),

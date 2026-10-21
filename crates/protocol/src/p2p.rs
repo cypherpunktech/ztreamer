@@ -93,10 +93,7 @@ impl TryFrom<u16> for Message {
             Message::StreamEnd,
             Message::ErrorResponse,
         ];
-        MESSAGES
-            .get(value as usize)
-            .copied()
-            .ok_or_else(|| format!("invalid message type {value}"))
+        MESSAGES.get(value as usize).copied().ok_or_else(|| format!("invalid message type {value}"))
     }
 }
 
@@ -123,11 +120,7 @@ impl MessageDecoder {
             return Err(format!("invalid frame flags {flags}"));
         }
         let message = Message::try_from(message_type)?;
-        if self
-            .0
-            .as_ref()
-            .is_some_and(|(current, _)| *current != message)
-        {
+        if self.0.as_ref().is_some_and(|(current, _)| *current != message) {
             return Err("message type changed before the final frame".into());
         }
         let current_len = self.0.as_ref().map_or(0, |(_, bytes)| bytes.len());
@@ -150,10 +143,7 @@ mod tests {
             let message = Message::try_from(number).unwrap();
             assert_eq!(u16::from(message), number);
         }
-        assert_eq!(
-            Message::GetBlockRangeRequest.response(),
-            Some(Message::GetBlockRangeResponse)
-        );
+        assert_eq!(Message::GetBlockRangeRequest.response(), Some(Message::GetBlockRangeResponse));
 
         let mut decoder = MessageDecoder::default();
         assert!(
@@ -163,15 +153,9 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            decoder
-                .push(Message::GetBlockRequest.into(), 0, vec![3])
-                .unwrap(),
+            decoder.push(Message::GetBlockRequest.into(), 0, vec![3]).unwrap(),
             Some((Message::GetBlockRequest, vec![1, 2, 3]))
         );
-        assert!(
-            decoder
-                .push(Message::GetBlockRequest.into(), 2, Vec::new())
-                .is_err()
-        );
+        assert!(decoder.push(Message::GetBlockRequest.into(), 2, Vec::new()).is_err());
     }
 }

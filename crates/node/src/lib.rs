@@ -80,21 +80,14 @@ impl NodeClient {
             .services
             .mempool
             .clone()
-            .oneshot(zakura_node_services::mempool::Request::Queue(vec![
-                transaction.into(),
-            ]))
+            .oneshot(zakura_node_services::mempool::Request::Queue(vec![transaction.into()]))
             .await
             .map_err(|error| eyre!("mempool request failed: {error}"))?;
         let zakura_node_services::mempool::Response::Queued(mut results) = response else {
-            return Err(eyre!(
-                "mempool returned an unexpected response: {response:?}"
-            ));
+            return Err(eyre!("mempool returned an unexpected response: {response:?}"));
         };
         if results.len() != 1 {
-            return Err(eyre!(
-                "mempool returned {} results for one transaction",
-                results.len()
-            ));
+            return Err(eyre!("mempool returned {} results for one transaction", results.len()));
         }
 
         results
@@ -122,15 +115,10 @@ impl NodeClient {
         let zakura_node_services::mempool::Response::FullTransactions { transactions, .. } =
             response
         else {
-            return Err(eyre!(
-                "mempool returned an unexpected response: {response:?}"
-            ));
+            return Err(eyre!("mempool returned an unexpected response: {response:?}"));
         };
 
-        Ok(transactions
-            .into_iter()
-            .map(|transaction| transaction.transaction)
-            .collect())
+        Ok(transactions.into_iter().map(|transaction| transaction.transaction).collect())
     }
 
     /// Returns an independent listener for best chain tip changes.

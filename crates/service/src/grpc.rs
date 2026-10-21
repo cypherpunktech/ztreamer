@@ -35,36 +35,28 @@ impl CompactTxStreamer for CompactService {
         &self,
         request: Request<proto::BlockId>,
     ) -> Result<Response<EncodedCompactBlock>, Status> {
-        Ok(Response::new(
-            self.encoded_block(request.into_inner(), false).await?,
-        ))
+        Ok(Response::new(self.encoded_block(request.into_inner(), false).await?))
     }
 
     async fn get_block_nullifiers(
         &self,
         request: Request<proto::BlockId>,
     ) -> Result<Response<EncodedCompactBlock>, Status> {
-        Ok(Response::new(
-            self.encoded_block(request.into_inner(), true).await?,
-        ))
+        Ok(Response::new(self.encoded_block(request.into_inner(), true).await?))
     }
 
     async fn get_block_range(
         &self,
         request: Request<proto::BlockRange>,
     ) -> Result<Response<Self::GetBlockRangeStream>, Status> {
-        Ok(Response::new(
-            self.encoded_range(request.into_inner(), false).await?,
-        ))
+        Ok(Response::new(self.encoded_range(request.into_inner(), false).await?))
     }
 
     async fn get_block_range_nullifiers(
         &self,
         request: Request<proto::BlockRange>,
     ) -> Result<Response<Self::GetBlockRangeNullifiersStream>, Status> {
-        Ok(Response::new(
-            self.encoded_range(request.into_inner(), true).await?,
-        ))
+        Ok(Response::new(self.encoded_range(request.into_inner(), true).await?))
     }
 
     async fn get_transaction(
@@ -92,9 +84,7 @@ impl CompactTxStreamer for CompactService {
         &self,
         request: Request<proto::GetSubtreeRootsArg>,
     ) -> Result<Response<Self::GetSubtreeRootsStream>, Status> {
-        Ok(Response::new(
-            self.subtree_roots(request.into_inner()).await?,
-        ))
+        Ok(Response::new(self.subtree_roots(request.into_inner()).await?))
     }
 
     async fn get_lightd_info(
@@ -115,37 +105,28 @@ impl CompactTxStreamer for CompactService {
         &self,
         request: Request<proto::RawTransaction>,
     ) -> Result<Response<proto::SendResponse>, Status> {
-        Ok(Response::new(
-            self.send_transaction(request.into_inner()).await?,
-        ))
+        Ok(Response::new(self.send_transaction(request.into_inner()).await?))
     }
 
     async fn get_taddress_txids(
         &self,
         request: Request<proto::TransparentAddressBlockFilter>,
     ) -> Result<Response<Self::GetTaddressTxidsStream>, Status> {
-        Ok(Response::new(
-            self.taddress_transactions(request.into_inner()).await?,
-        ))
+        Ok(Response::new(self.taddress_transactions(request.into_inner()).await?))
     }
 
     async fn get_taddress_transactions(
         &self,
         request: Request<proto::TransparentAddressBlockFilter>,
     ) -> Result<Response<Self::GetTaddressTransactionsStream>, Status> {
-        Ok(Response::new(
-            self.taddress_transactions(request.into_inner()).await?,
-        ))
+        Ok(Response::new(self.taddress_transactions(request.into_inner()).await?))
     }
 
     async fn get_taddress_balance(
         &self,
         request: Request<proto::AddressList>,
     ) -> Result<Response<proto::Balance>, Status> {
-        Ok(Response::new(
-            self.taddress_balance(request.into_inner().addresses)
-                .await?,
-        ))
+        Ok(Response::new(self.taddress_balance(request.into_inner().addresses).await?))
     }
 
     async fn get_taddress_balance_stream(
@@ -167,10 +148,7 @@ impl CompactTxStreamer for CompactService {
                 )));
             }
             seen.insert(parsed);
-            let balance = self
-                .taddress_balance_parsed(HashSet::from([parsed]))
-                .await?
-                .value_zat;
+            let balance = self.taddress_balance_parsed(HashSet::from([parsed])).await?.value_zat;
             value_zat = value_zat
                 .checked_add(balance)
                 .ok_or_else(|| Status::out_of_range("transparent balance exceeds i64"))?;
@@ -206,8 +184,6 @@ impl CompactTxStreamer for CompactService {
         request: Request<proto::GetAddressUtxosArg>,
     ) -> Result<Response<Self::GetAddressUtxosStreamStream>, Status> {
         let utxos = self.address_utxos(request.into_inner()).await?;
-        Ok(Response::new(Box::pin(tokio_stream::iter(
-            utxos.into_iter().map(Ok),
-        ))))
+        Ok(Response::new(Box::pin(tokio_stream::iter(utxos.into_iter().map(Ok)))))
     }
 }

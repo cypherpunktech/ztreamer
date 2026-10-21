@@ -34,11 +34,7 @@ fn shielded_transactions() -> Vec<CompactTransaction> {
         height: block.coinbase_height().unwrap(),
         hash: block.hash(),
         bytes,
-        txids: block
-            .transactions
-            .iter()
-            .map(|transaction| transaction.hash())
-            .collect(),
+        txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
     })
     .unwrap()
     .transactions
@@ -62,49 +58,34 @@ fn index_through(index: &Index, tip: u32) -> IndexState {
             .unwrap();
     }
     let mut state = IndexState::default();
-    while let Some(batch) = builder
-        .build_batch(Some(tip), Some(tip), 64 * 1024 * 1024)
-        .unwrap()
-    {
+    while let Some(batch) = builder.build_batch(Some(tip), Some(tip), 64 * 1024 * 1024).unwrap() {
         state = index.write(batch).unwrap();
     }
     state
 }
 
 fn block_id(height: u32) -> Option<proto::BlockId> {
-    Some(proto::BlockId {
-        height: u64::from(height),
-        hash: Vec::new(),
-    })
+    Some(proto::BlockId { height: u64::from(height), hash: Vec::new() })
 }
 
 fn get_block_range(c: &mut Criterion) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let index = Arc::new(Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
     let state = index_through(&index, TIP);
     let (_state_service, read_service, _tip, _change) = runtime.block_on(async {
-        zakura_state::init(
-            Config::ephemeral(),
-            &Network::Mainnet,
-            block::Height::MAX,
-            0,
-        )
-        .await
-        .expect("ephemeral state initializes")
+        zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+            .await
+            .expect("ephemeral state initializes")
     });
     let service = CompactService::new(index, state, "main", read_service);
 
     let mut group = c.benchmark_group("get_block_range");
     for blocks in [100, 200, 600, 1_000, 2_000] {
         group.throughput(Throughput::Elements(u64::from(blocks)));
-        for (direction, start, end) in [
-            ("ascending", TIP - blocks, TIP - 1),
-            ("descending", TIP - 1, TIP - blocks),
-        ] {
+        for (direction, start, end) in
+            [("ascending", TIP - blocks, TIP - 1), ("descending", TIP - 1, TIP - blocks)]
+        {
             let range = proto::BlockRange {
                 start: block_id(start),
                 end: block_id(end),
@@ -115,11 +96,7 @@ fn get_block_range(c: &mut Criterion) {
                 let mut count = 0;
                 while let Some(block) = stream.next().await {
                     let block = block.unwrap();
-                    let expected = if start <= end {
-                        start + count
-                    } else {
-                        start - count
-                    };
+                    let expected = if start <= end { start + count } else { start - count };
                     assert_eq!(block.height, u64::from(expected));
                     count += 1;
                 }
@@ -139,11 +116,8 @@ fn get_block_range(c: &mut Criterion) {
 }
 
 fn mixed_ranges(c: &mut Criterion) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
     let fixture = runtime.block_on(support::Fixture::new());
     let mut group = c.benchmark_group("range_paths_mixed_v1");
     for (name, start, end, nullifiers, pools) in [
@@ -155,13 +129,7 @@ fn mixed_ranges(c: &mut Criterion) {
         ("durable-volatile", 2_150, 2_209, false, vec![]),
         ("volatile-durable", 2_209, 2_150, false, vec![]),
         ("nullifiers", 100, 199, true, vec![]),
-        (
-            "orchard-only",
-            100,
-            199,
-            false,
-            vec![proto::PoolType::Orchard as i32],
-        ),
+        ("orchard-only", 100, 199, false, vec![proto::PoolType::Orchard as i32]),
     ] {
         let mut request = support::range(start, end);
         request.pool_types = pools;
@@ -171,11 +139,7 @@ fn mixed_ranges(c: &mut Criterion) {
             let mut count = 0;
             while let Some(block) = stream.next().await {
                 let block = block.unwrap();
-                let expected = if start <= end {
-                    start + count
-                } else {
-                    start - count
-                };
+                let expected = if start <= end { start + count } else { start - count };
                 assert_eq!(block.height, u64::from(expected));
                 black_box(block);
                 count += 1;
@@ -192,11 +156,7 @@ fn mixed_ranges(c: &mut Criterion) {
     for (name, height) in [("sealed", 199), ("mutable", 2_099), ("volatile", 2_209)] {
         group.bench_function(name, |b| {
             b.to_async(&runtime).iter(|| async {
-                let block = fixture
-                    .service
-                    .block(block_id(height).unwrap(), false)
-                    .await
-                    .unwrap();
+                let block = fixture.service.block(block_id(height).unwrap(), false).await.unwrap();
                 assert_eq!(block.height, u64::from(height));
                 black_box(block)
             })

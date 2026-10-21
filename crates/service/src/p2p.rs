@@ -49,26 +49,18 @@ impl std::fmt::Debug for P2pCompactService {
 impl P2pCompactService {
     pub fn new(compact: CompactService) -> Self {
         let service = Self::pending();
-        service
-            .compact
-            .set(compact)
-            .unwrap_or_else(|_| unreachable!("new OnceLock is empty"));
+        service.compact.set(compact).unwrap_or_else(|_| unreachable!("new OnceLock is empty"));
         service
     }
 
     /// Creates a frontend that can be registered before embedded Zakura starts.
     pub fn pending() -> Self {
-        Self {
-            compact: Arc::default(),
-            active_peers: Arc::default(),
-        }
+        Self { compact: Arc::default(), active_peers: Arc::default() }
     }
 
     /// Attaches the backend after Zakura exposes its `ReadStateService`.
     pub fn install(&self, compact: CompactService) -> Result<(), &'static str> {
-        self.compact
-            .set(compact)
-            .map_err(|_| "compact service is already installed")
+        self.compact.set(compact).map_err(|_| "compact service is already installed")
     }
 
     pub fn registration(self: &Arc<Self>) -> CustomService {
@@ -191,9 +183,7 @@ impl Service for P2pCompactService {
     }
 
     fn owns_connection_for_peer(&self, peer: &ZakuraPeerId, conn_id: ZakuraConnId) -> bool {
-        self.active_peers
-            .lock()
-            .is_ok_and(|peers| peers.contains(&(peer.clone(), conn_id)))
+        self.active_peers.lock().is_ok_and(|peers| peers.contains(&(peer.clone(), conn_id)))
     }
 
     fn add_peer(&self, mut peer: Peer) {
@@ -228,10 +218,7 @@ impl Service for P2pCompactService {
                     }
                 };
                 if request.0.response().is_none()
-                    || service
-                        .dispatch(request.0, &request.1, &send)
-                        .await
-                        .is_err()
+                    || service.dispatch(request.0, &request.1, &send).await.is_err()
                 {
                     connection_cancel.cancel();
                     break;
@@ -267,10 +254,7 @@ async fn send_status(send: &FramedSend, status: Status) -> Result<(), ()> {
     send_message(
         send,
         Message::ErrorResponse,
-        &P2pStatus {
-            code: status.code() as i32,
-            message: status.message().to_owned(),
-        },
+        &P2pStatus { code: status.code() as i32, message: status.message().to_owned() },
     )
     .await
 }
@@ -291,22 +275,14 @@ async fn send_bytes(send: &FramedSend, message: Message, payload: Vec<u8>) -> Re
     let mut chunks = payload.chunks(FRAME_PAYLOAD_BYTES).peekable();
     if chunks.peek().is_none() {
         return send
-            .send(Frame {
-                message_type: message.into(),
-                flags: 0,
-                payload,
-            })
+            .send(Frame { message_type: message.into(), flags: 0, payload })
             .await
             .map_err(|_| ());
     }
     while let Some(chunk) = chunks.next() {
         send.send(Frame {
             message_type: message.into(),
-            flags: if chunks.peek().is_some() {
-                FRAME_FLAG_MORE
-            } else {
-                0
-            },
+            flags: if chunks.peek().is_some() { FRAME_FLAG_MORE } else { 0 },
             payload: chunk.to_vec(),
         })
         .await
@@ -332,14 +308,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let index =
             Arc::new(Index::open(directory.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
-        let (_state, read_state, _tip, _change) = zakura_state::init(
-            Config::ephemeral(),
-            &Network::Mainnet,
-            block::Height::MAX,
-            0,
-        )
-        .await
-        .expect("ephemeral state initializes");
+        let (_state, read_state, _tip, _change) =
+            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+                .await
+                .expect("ephemeral state initializes");
         let compact = CompactService::new(index, IndexState::default(), "main", read_state);
         compact
             .publish_head(
@@ -353,37 +325,22 @@ mod tests {
         assert!(service.install(compact).is_ok());
         let (send, mut recv) = framed_channel(3);
         let request = proto::BlockRange {
-            start: Some(proto::BlockId {
-                height: 0,
-                hash: Vec::new(),
-            }),
-            end: Some(proto::BlockId {
-                height: 1,
-                hash: Vec::new(),
-            }),
+            start: Some(proto::BlockId { height: 0, hash: Vec::new() }),
+            end: Some(proto::BlockId { height: 1, hash: Vec::new() }),
             pool_types: Vec::new(),
         };
 
         service
-            .dispatch(
-                Message::GetBlockRangeRequest,
-                &request.encode_to_vec(),
-                &send,
-            )
+            .dispatch(Message::GetBlockRangeRequest, &request.encode_to_vec(), &send)
             .await
             .unwrap();
 
         for height in 0..=1 {
             let frame = recv.recv().await.unwrap();
-            assert_eq!(
-                frame.message_type,
-                u16::from(Message::GetBlockRangeResponse)
-            );
+            assert_eq!(frame.message_type, u16::from(Message::GetBlockRangeResponse));
             assert_eq!(frame.flags, 0);
             assert_eq!(
-                proto::CompactBlock::decode(frame.payload.as_slice())
-                    .unwrap()
-                    .height,
+                proto::CompactBlock::decode(frame.payload.as_slice()).unwrap().height,
                 height
             );
         }

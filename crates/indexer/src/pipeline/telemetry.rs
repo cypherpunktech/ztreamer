@@ -57,11 +57,7 @@ impl PipelineMetrics {
     pub fn pass(&self) -> PassMetrics<'_> {
         self.first_missing.set(f64::NAN);
         self.target.set(f64::NAN);
-        PassMetrics {
-            metrics: self,
-            start: Instant::now(),
-            outcome: 2,
-        }
+        PassMetrics { metrics: self, start: Instant::now(), outcome: 2 }
     }
 
     pub fn worker(&self) -> ActiveWorker<'_> {
@@ -72,8 +68,7 @@ impl PipelineMetrics {
     pub fn buffer(&self, builder: &OrderedBuilder) {
         self.pending_bytes.set(builder.pending_bytes() as f64);
         self.ready_bytes.set(builder.ready_bytes() as f64);
-        self.first_missing
-            .set(builder.first_missing_height() as f64);
+        self.first_missing.set(builder.first_missing_height() as f64);
     }
 
     pub fn commit(&self, elapsed: Duration, success: bool, blocks: u64) {

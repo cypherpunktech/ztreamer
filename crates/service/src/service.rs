@@ -107,9 +107,7 @@ impl ServingSnapshot {
         state: IndexState,
         volatile_head: Vec<CompactBlockRecord>,
     ) -> Result<Self, SnapshotError> {
-        let mut expected_height = state
-            .durable_tip()
-            .map_or(0, |tip| tip.height.saturating_add(1));
+        let mut expected_height = state.durable_tip().map_or(0, |tip| tip.height.saturating_add(1));
         let mut previous_hash = state.durable_tip().map(|tip| tip.hash);
         for block in &volatile_head {
             if block.height != expected_height
@@ -255,17 +253,12 @@ impl CompactService {
             self.begin_recovery();
         }
         let (state, head) = result.inspect_err(|_| {
-            self.metrics
-                .head_error
-                .record(started.elapsed().as_secs_f64());
+            self.metrics.head_error.record(started.elapsed().as_secs_f64());
         })?;
         self.publish_head(state, head)
             .expect("head reconciliation must produce a connected snapshot");
-        self.metrics
-            .published(observed.observed, self.snapshot().visible_tip);
-        self.metrics
-            .head_success
-            .record(started.elapsed().as_secs_f64());
+        self.metrics.published(observed.observed, self.snapshot().visible_tip);
+        self.metrics.head_success.record(started.elapsed().as_secs_f64());
         Ok(state)
     }
 
@@ -279,8 +272,7 @@ impl CompactService {
         let snapshot = self.snapshot();
         let (state, head) =
             recover_deep_reorg(&self.index, source, &snapshot.volatile_head, config).await?;
-        self.publish_head(state, head)
-            .expect("deep recovery must produce a connected snapshot");
+        self.publish_head(state, head).expect("deep recovery must produce a connected snapshot");
         Ok(state)
     }
 
@@ -347,9 +339,8 @@ impl CompactService {
 
     fn mark_source_failure(&self, error: String, freshness_timeout: Duration) {
         let mut snapshot = self.snapshot();
-        snapshot.tip_fresh = snapshot
-            .last_source_success
-            .is_some_and(|last| last.elapsed() < freshness_timeout);
+        snapshot.tip_fresh =
+            snapshot.last_source_success.is_some_and(|last| last.elapsed() < freshness_timeout);
         snapshot.source_error = Some(error.into());
         self.metrics.snapshot(&snapshot);
         self.snapshot.send_replace(snapshot);
@@ -382,11 +373,7 @@ impl CompactService {
                 .as_slice()
                 .try_into()
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            if let Some(record) = snapshot
-                .volatile_head
-                .iter()
-                .find(|record| record.hash == hash)
-            {
+            if let Some(record) = snapshot.volatile_head.iter().find(|record| record.hash == hash) {
                 ensure_tip_ready(&snapshot)?;
                 return Ok(T::from_record(record));
             }
@@ -449,13 +436,10 @@ impl CompactService {
     ) -> Result<RpcStream<EncodedCompactBlock>, Status> {
         let pools = PoolSelection::from_request(&request.pool_types)?;
         if !nullifiers && pools.is_all() {
-            self.range_as(request, |record: EncodedBlockRecord| record.block)
-                .await
+            self.range_as(request, |record: EncodedBlockRecord| record.block).await
         } else {
             Ok(Box::pin(
-                self.range_inner(request, nullifiers)
-                    .await?
-                    .map(|block| block.map(Into::into)),
+                self.range_inner(request, nullifiers).await?.map(|block| block.map(Into::into)),
             ))
         }
     }
@@ -498,10 +482,8 @@ impl CompactService {
                         .try_into()
                         .map_err(|_| Status::internal("invalid compact block hash"))?,
                 );
-                let response = source
-                    .oneshot(ReadRequest::Block(hash.into()))
-                    .await
-                    .map_err(source_status)?;
+                let response =
+                    source.oneshot(ReadRequest::Block(hash.into())).await.map_err(source_status)?;
                 let full = match response {
                     ReadResponse::Block(Some(block)) => block,
                     ReadResponse::Block(None) => return Err(reorganized(block.height as u32)),
@@ -521,9 +503,8 @@ impl CompactService {
         let (start, end) = range_heights(&request)?;
         let snapshot = self.snapshot();
         ensure_ready(&snapshot)?;
-        let visible_tip = snapshot
-            .visible_tip
-            .ok_or_else(|| Status::unavailable("compact index is empty"))?;
+        let visible_tip =
+            snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
         if start > visible_tip.height || end > visible_tip.height {
             return Err(Status::out_of_range(format!(
                 "range exceeds compact tip {}",
@@ -539,9 +520,7 @@ impl CompactService {
         }
         let admission_started = Instant::now();
         let permit = Arc::clone(&self.range_streams).acquire_owned().await;
-        self.metrics
-            .admission
-            .record(admission_started.elapsed().as_secs_f64());
+        self.metrics.admission.record(admission_started.elapsed().as_secs_f64());
         let permit = permit.map_err(|_| Status::unavailable("range stream pool is closed"))?;
         let index = Arc::clone(&self.index);
         let ascending = start <= end;
@@ -554,8 +533,8 @@ impl CompactService {
         let mut records = Vec::<T>::new().into_iter();
         // (hash, previous_hash) of the last record sent; every chunk must chain onto it.
         let mut last: Option<(Digest, Digest)> = None;
-        Ok(Box::pin(tokio_stream::iter(std::iter::from_fn(
-            move || loop {
+        Ok(Box::pin(tokio_stream::iter(std::iter::from_fn(move || {
+            loop {
                 let _ = &permit;
                 if let Some(record) = records.next() {
                     last = Some((record.hash(), record.previous_hash()));
@@ -583,15 +562,9 @@ impl CompactService {
                     })
                 } else {
                     (0..=height.abs_diff(chunk_end)).try_for_each(|offset| {
-                        let height = if ascending {
-                            height + offset
-                        } else {
-                            height - offset
-                        };
+                        let height = if ascending { height + offset } else { height - offset };
                         chunk.push(T::from_record(
-                            snapshot
-                                .volatile(height)
-                                .ok_or(IndexError::Coverage { height })?,
+                            snapshot.volatile(height).ok_or(IndexError::Coverage { height })?,
                         ));
                         Ok(())
                     })
@@ -623,8 +596,8 @@ impl CompactService {
                     chunk_end - 1
                 });
                 records = chunk.into_iter();
-            },
-        ))))
+            }
+        }))))
     }
 
     pub(crate) async fn tree_state(
@@ -635,32 +608,28 @@ impl CompactService {
         let source = self.zakura.clone();
         let hash = block::Hash(record.hash);
         let (sapling, orchard, ironwood) = tokio::try_join!(
-            source
-                .clone()
-                .oneshot(ReadRequest::SaplingTree(hash.into())),
-            source
-                .clone()
-                .oneshot(ReadRequest::OrchardTree(hash.into())),
+            source.clone().oneshot(ReadRequest::SaplingTree(hash.into())),
+            source.clone().oneshot(ReadRequest::OrchardTree(hash.into())),
             source.oneshot(ReadRequest::IronwoodTree(hash.into())),
         )
         .map_err(source_status)?;
 
         let sapling_tree = match sapling {
-            ReadResponse::SaplingTree(tree) => tree
-                .map(|tree| hex::encode(tree.to_rpc_bytes()))
-                .unwrap_or_default(),
+            ReadResponse::SaplingTree(tree) => {
+                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
+            }
             _ => return Err(Status::internal("unexpected Sapling tree response")),
         };
         let orchard_tree = match orchard {
-            ReadResponse::OrchardTree(tree) => tree
-                .map(|tree| hex::encode(tree.to_rpc_bytes()))
-                .unwrap_or_default(),
+            ReadResponse::OrchardTree(tree) => {
+                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
+            }
             _ => return Err(Status::internal("unexpected Orchard tree response")),
         };
         let ironwood_tree = match ironwood {
-            ReadResponse::IronwoodTree(tree) => tree
-                .map(|tree| hex::encode(tree.to_rpc_bytes()))
-                .unwrap_or_default(),
+            ReadResponse::IronwoodTree(tree) => {
+                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
+            }
             _ => return Err(Status::internal("unexpected Ironwood tree response")),
         };
 
@@ -712,23 +681,17 @@ impl CompactService {
     pub(crate) fn latest_block(&self) -> Result<proto::BlockId, Status> {
         let snapshot = self.snapshot();
         ensure_tip_ready(&snapshot)?;
-        let tip = snapshot
-            .visible_tip
-            .ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        Ok(proto::BlockId {
-            height: u64::from(tip.height),
-            hash: tip.hash.to_vec(),
-        })
+        let tip =
+            snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
+        Ok(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.to_vec() })
     }
 
     pub(crate) fn lightd_info(&self) -> proto::LightdInfo {
         let tip = self.snapshot().visible_tip;
         let tip_height = tip.map_or(0, |tip| tip.height);
         let network = self.zakura.db().network();
-        let next_upgrade = network
-            .activation_list()
-            .into_iter()
-            .find(|(height, _)| height.0 > tip_height);
+        let next_upgrade =
+            network.activation_list().into_iter().find(|(height, _)| height.0 > tip_height);
         proto::LightdInfo {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             vendor: "Ztreamer".to_owned(),
@@ -815,14 +778,10 @@ impl CompactService {
     pub(crate) async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {
         let snapshot = self.snapshot();
         ensure_tip_ready(&snapshot)?;
-        let tip = snapshot
-            .visible_tip
-            .ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        self.tree_state(proto::BlockId {
-            height: u64::from(tip.height),
-            hash: tip.hash.to_vec(),
-        })
-        .await
+        let tip =
+            snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
+        self.tree_state(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.to_vec() })
+            .await
     }
 
     pub(crate) async fn subtree_roots(
@@ -837,26 +796,22 @@ impl CompactService {
         );
         let limit = match request.max_entries {
             0 => None,
-            limit => Some(NoteCommitmentSubtreeIndex(limit.try_into().map_err(
-                |_| Status::invalid_argument("subtree entry limit exceeds u16"),
-            )?)),
+            limit => Some(NoteCommitmentSubtreeIndex(
+                limit
+                    .try_into()
+                    .map_err(|_| Status::invalid_argument("subtree entry limit exceeds u16"))?,
+            )),
         };
         let source = self.zakura.clone();
         let response = match proto::ShieldedProtocol::try_from(request.shielded_protocol) {
             Ok(proto::ShieldedProtocol::Sapling) => {
-                source
-                    .oneshot(ReadRequest::SaplingSubtrees { start_index, limit })
-                    .await
+                source.oneshot(ReadRequest::SaplingSubtrees { start_index, limit }).await
             }
             Ok(proto::ShieldedProtocol::Orchard) => {
-                source
-                    .oneshot(ReadRequest::OrchardSubtrees { start_index, limit })
-                    .await
+                source.oneshot(ReadRequest::OrchardSubtrees { start_index, limit }).await
             }
             Ok(proto::ShieldedProtocol::Ironwood) => {
-                source
-                    .oneshot(ReadRequest::IronwoodSubtrees { start_index, limit })
-                    .await
+                source.oneshot(ReadRequest::IronwoodSubtrees { start_index, limit }).await
             }
             Err(_) => return Err(Status::invalid_argument("invalid shielded protocol")),
         }
@@ -897,10 +852,7 @@ impl CompactService {
         .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
         .map_err(|error| Status::invalid_argument(format!("Zakura rejected transaction: {error}")))?
         .mined_id();
-        Ok(proto::SendResponse {
-            error_code: 0,
-            error_message: txid.to_string(),
-        })
+        Ok(proto::SendResponse { error_code: 0, error_message: txid.to_string() })
     }
 
     pub(crate) async fn mempool_stream(&self) -> Result<RpcStream<proto::RawTransaction>, Status> {
@@ -983,9 +935,7 @@ impl CompactService {
         let runtime = tokio::runtime::Handle::current();
         // Zakura's mempool service future is not Send.
         tokio::task::spawn_blocking(move || {
-            runtime
-                .block_on(node.mempool_transactions())
-                .map_err(|error| error.to_string())
+            runtime.block_on(node.mempool_transactions()).map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
@@ -997,9 +947,8 @@ impl CompactService {
         request: proto::TransparentAddressBlockFilter,
     ) -> Result<RpcStream<proto::RawTransaction>, Status> {
         let address = self.parse_address(&request.address)?;
-        let range = request
-            .range
-            .ok_or_else(|| Status::invalid_argument("block range is required"))?;
+        let range =
+            request.range.ok_or_else(|| Status::invalid_argument("block range is required"))?;
         let tip = self.zakura_tip().await?;
         let endpoint = |endpoint: Option<proto::BlockId>| -> Result<Option<u32>, Status> {
             endpoint
@@ -1063,8 +1012,7 @@ impl CompactService {
         &self,
         addresses: Vec<String>,
     ) -> Result<proto::Balance, Status> {
-        self.taddress_balance_parsed(self.parse_addresses(addresses)?)
-            .await
+        self.taddress_balance_parsed(self.parse_addresses(addresses)?).await
     }
 
     pub(crate) async fn taddress_balance_parsed(
@@ -1132,10 +1080,7 @@ impl CompactService {
         &self,
         addresses: impl IntoIterator<Item = String>,
     ) -> Result<HashSet<transparent::Address>, Status> {
-        addresses
-            .into_iter()
-            .map(|address| self.parse_address(&address))
-            .collect()
+        addresses.into_iter().map(|address| self.parse_address(&address)).collect()
     }
 
     pub(crate) fn parse_address(&self, address: &str) -> Result<transparent::Address, Status> {
@@ -1146,12 +1091,8 @@ impl CompactService {
     }
 
     async fn zakura_tip(&self) -> Result<u32, Status> {
-        let response = self
-            .zakura
-            .clone()
-            .oneshot(ReadRequest::Tip)
-            .await
-            .map_err(source_status)?;
+        let response =
+            self.zakura.clone().oneshot(ReadRequest::Tip).await.map_err(source_status)?;
         match response {
             ReadResponse::Tip(Some((height, _))) => Ok(height.0),
             ReadResponse::Tip(None) => Err(Status::unavailable("Zakura chain is empty")),
@@ -1200,18 +1141,11 @@ fn range_heights(request: &proto::BlockRange) -> Result<(u32, u32), Status> {
         u32::try_from(endpoint.height)
             .map_err(|_| Status::invalid_argument("range height exceeds u32"))
     };
-    Ok((
-        endpoint("start", &request.start)?,
-        endpoint("end", &request.end)?,
-    ))
+    Ok((endpoint("start", &request.start)?, endpoint("end", &request.end)?))
 }
 
 fn ensure_ready(snapshot: &ServingSnapshot) -> Result<(), Status> {
-    if snapshot.ready {
-        Ok(())
-    } else {
-        Err(Status::unavailable("deep reorg recovery is active"))
-    }
+    if snapshot.ready { Ok(()) } else { Err(Status::unavailable("deep reorg recovery is active")) }
 }
 
 fn ensure_tip_ready(snapshot: &ServingSnapshot) -> Result<(), Status> {
@@ -1270,11 +1204,8 @@ mod tests {
 
     #[test]
     fn follower_polls_until_shutdown() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1318,53 +1249,37 @@ mod tests {
                 assert_eq!(service.snapshot().visible_tip.unwrap().height, 12);
                 shutdown.send(true).unwrap();
                 follower.await.unwrap().unwrap();
-            });
+            },
+        );
     }
 
     #[test]
     fn ping_answers_only_when_enabled() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
-                );
-                let (_state_service, read_service, _tip, _change) = zakura_state::init(
-                    Config::ephemeral(),
-                    &Network::Mainnet,
-                    block::Height::MAX,
-                    0,
-                )
-                .await
-                .expect("ephemeral state initializes");
-                let service =
-                    CompactService::new(index, IndexState::default(), "main", read_service);
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index =
+                Arc::new(Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+            let (_state_service, read_service, _tip, _change) =
+                zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+                    .await
+                    .expect("ephemeral state initializes");
+            let service = CompactService::new(index, IndexState::default(), "main", read_service);
 
-                assert_eq!(
-                    service
-                        .clone()
-                        .with_ping_enabled(false)
-                        .ping()
-                        .unwrap_err()
-                        .code(),
-                    tonic::Code::Unimplemented
-                );
-                assert_eq!(
-                    service.with_ping_enabled(true).ping().unwrap(),
-                    proto::PingResponse { entry: 1, exit: 0 }
-                );
-            });
+            assert_eq!(
+                service.clone().with_ping_enabled(false).ping().unwrap_err().code(),
+                tonic::Code::Unimplemented
+            );
+            assert_eq!(
+                service.with_ping_enabled(true).ping().unwrap(),
+                proto::PingResponse { entry: 1, exit: 0 }
+            );
+        });
     }
 
     #[test]
     fn streams_cross_range_descending_and_fetches_transparent_data() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1400,9 +1315,7 @@ mod tests {
                 }
                 assert_eq!(heights, [1_002, 1_001, 1_000, 999, 998]);
 
-                service
-                    .publish_head(state, vec![record(1_006), record(1_007)])
-                    .unwrap();
+                service.publish_head(state, vec![record(1_006), record(1_007)]).unwrap();
                 assert!(service.readiness().tip);
                 let mut stream = service
                     .get_block_range(Request::new(range(1_004, 1_007)))
@@ -1436,9 +1349,7 @@ mod tests {
                     heights.push(block.unwrap().into_decoded().unwrap().height);
                 }
                 assert_eq!(heights, [1_004, 1_005, 1_006, 1_007]);
-                service
-                    .publish_head(state, vec![record(1_006), record(1_007)])
-                    .unwrap();
+                service.publish_head(state, vec![record(1_006), record(1_007)]).unwrap();
                 service.mark_source_failure("offline".to_owned(), Duration::ZERO);
                 assert!(!service.readiness().tip);
                 assert_eq!(
@@ -1451,10 +1362,7 @@ mod tests {
                 );
                 assert!(
                     service
-                        .get_block(Request::new(proto::BlockId {
-                            height: 1_000,
-                            hash: Vec::new(),
-                        }))
+                        .get_block(Request::new(proto::BlockId { height: 1_000, hash: Vec::new() }))
                         .await
                         .is_ok()
                 );
@@ -1538,50 +1446,37 @@ mod tests {
                 assert_eq!(info.block_height, 3_464_754);
                 assert!(!info.zcashd_build.is_empty());
                 assert!(!info.zcashd_subversion.is_empty());
-            });
+            },
+        );
     }
 
     #[test]
     fn subtree_stream_resolves_volatile_completion_blocks() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
-                );
-                let state = index_through(&index, 1_005);
-                let (_state_service, read_service, _tip, _change) = zakura_state::init(
-                    Config::ephemeral(),
-                    &Network::Mainnet,
-                    block::Height::MAX,
-                    0,
-                )
-                .await
-                .expect("ephemeral state initializes");
-                let service = CompactService::new(index, state, "main", read_service);
-                service
-                    .publish_head(state, vec![record(1_006), record(1_007)])
-                    .unwrap();
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index =
+                Arc::new(Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+            let state = index_through(&index, 1_005);
+            let (_state_service, read_service, _tip, _change) =
+                zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+                    .await
+                    .expect("ephemeral state initializes");
+            let service = CompactService::new(index, state, "main", read_service);
+            service.publish_head(state, vec![record(1_006), record(1_007)]).unwrap();
 
-                let mut stream =
-                    service.subtree_stream(vec![(vec![7; 32], 1_007)], service.snapshot());
-                let root = stream.next().await.unwrap().unwrap();
+            let mut stream = service.subtree_stream(vec![(vec![7; 32], 1_007)], service.snapshot());
+            let root = stream.next().await.unwrap().unwrap();
 
-                assert_eq!(root.root_hash, vec![7; 32]);
-                assert_eq!(root.completing_block_hash, hash(1_007));
-                assert_eq!(root.completing_block_height, 1_007);
-            });
+            assert_eq!(root.root_hash, vec![7; 32]);
+            assert_eq!(root.completing_block_hash, hash(1_007));
+            assert_eq!(root.completing_block_height, 1_007);
+        });
     }
 
     #[test]
     fn range_admission_is_shared_and_releases_on_drop() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1631,16 +1526,14 @@ mod tests {
                 .await
                 .expect("completed response frees a slot")
                 .unwrap();
-            });
+            },
+        );
     }
 
     #[test]
     fn range_stream_survives_a_durable_advance_mid_flight() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1680,16 +1573,14 @@ mod tests {
                     heights.push(block.unwrap().height);
                 }
                 assert_eq!(heights, (0..=200).collect::<Vec<_>>());
-            });
+            },
+        );
     }
 
     #[test]
     fn range_stream_refuses_a_reorg_it_cannot_chain_onto() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1753,16 +1644,14 @@ mod tests {
                     refusal.expect("the boundary is refused").code(),
                     tonic::Code::Unavailable
                 );
-            });
+            },
+        );
     }
 
     #[test]
     fn descending_range_from_the_volatile_head_survives_an_advance() {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
+            async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
                     Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
@@ -1777,9 +1666,7 @@ mod tests {
                 .await
                 .expect("ephemeral state initializes");
                 let service = CompactService::new(Arc::clone(&index), state, "main", read_service);
-                service
-                    .publish_head(state, vec![record(201), record(202)])
-                    .unwrap();
+                service.publish_head(state, vec![record(201), record(202)]).unwrap();
 
                 // The first chunk is volatile, the rest is durable and read after an advance.
                 let mut stream = service
@@ -1803,7 +1690,8 @@ mod tests {
                     heights.push(block.unwrap().height);
                 }
                 assert_eq!(heights, (100..=202).rev().collect::<Vec<_>>());
-            });
+            },
+        );
     }
 
     #[test]
@@ -1818,18 +1706,12 @@ mod tests {
         let orchard_txid = orchard.id().mined_id().0.to_vec();
         let mempool = vec![sapling, orchard];
         let txids = |compact: Vec<proto::CompactTx>| {
-            compact
-                .into_iter()
-                .map(|transaction| transaction.txid)
-                .collect::<Vec<_>>()
+            compact.into_iter().map(|transaction| transaction.txid).collect::<Vec<_>>()
         };
 
         let compact =
             mempool_compact(mempool.clone(), &proto::GetMempoolTxRequest::default()).unwrap();
-        assert_eq!(
-            txids(compact.clone()),
-            [sapling_txid.clone(), orchard_txid.clone()]
-        );
+        assert_eq!(txids(compact.clone()), [sapling_txid.clone(), orchard_txid.clone()]);
         assert!(!compact[0].outputs.is_empty());
         assert!(!compact[1].actions.is_empty());
 
@@ -1846,10 +1728,7 @@ mod tests {
             exclude_txid_suffixes: vec![orchard_txid[30..].to_vec()],
             ..Default::default()
         };
-        assert_eq!(
-            txids(mempool_compact(mempool.clone(), &excluded).unwrap()),
-            [sapling_txid]
-        );
+        assert_eq!(txids(mempool_compact(mempool.clone(), &excluded).unwrap()), [sapling_txid]);
 
         let transparent = proto::GetMempoolTxRequest {
             pool_types: vec![proto::PoolType::Transparent as i32],
@@ -1879,14 +1758,8 @@ mod tests {
 
     fn range(start: u32, end: u32) -> proto::BlockRange {
         proto::BlockRange {
-            start: Some(proto::BlockId {
-                height: u64::from(start),
-                hash: Vec::new(),
-            }),
-            end: Some(proto::BlockId {
-                height: u64::from(end),
-                hash: Vec::new(),
-            }),
+            start: Some(proto::BlockId { height: u64::from(start), hash: Vec::new() }),
+            end: Some(proto::BlockId { height: u64::from(end), hash: Vec::new() }),
             pool_types: Vec::new(),
         }
     }
@@ -1934,10 +1807,7 @@ mod tests {
             builder.push(parsed(height)).unwrap();
         }
         let mut state = IndexState::default();
-        while let Some(batch) = builder
-            .build_batch(Some(tip), Some(tip), 1024 * 1024)
-            .unwrap()
-        {
+        while let Some(batch) = builder.build_batch(Some(tip), Some(tip), 1024 * 1024).unwrap() {
             state = index.write(batch).unwrap();
         }
         state

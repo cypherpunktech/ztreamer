@@ -89,12 +89,8 @@ struct RangeRequestCount {
 fn parse_range_request_count(value: &str) -> Result<RangeRequestCount, String> {
     let (blocks, requests) = value.split_once('=').ok_or("expected BLOCKS=REQUESTS")?;
     Ok(RangeRequestCount {
-        blocks: blocks
-            .parse()
-            .map_err(|_| "BLOCKS must be a positive integer")?,
-        requests: requests
-            .parse()
-            .map_err(|_| "REQUESTS must be a positive integer")?,
+        blocks: blocks.parse().map_err(|_| "BLOCKS must be a positive integer")?,
+        requests: requests.parse().map_err(|_| "REQUESTS must be a positive integer")?,
     })
 }
 
@@ -133,26 +129,18 @@ struct Observation {
 
 impl Observation {
     fn message<M: Message>(&mut self, m: &M, started: Instant) {
-        self.first_us
-            .get_or_insert(started.elapsed().as_secs_f64() * 1e6);
+        self.first_us.get_or_insert(started.elapsed().as_secs_f64() * 1e6);
         self.messages += 1;
         self.bytes += m.encoded_len() as u64;
     }
 }
 
 fn block(height: u32) -> proto::BlockId {
-    proto::BlockId {
-        height: height.into(),
-        hash: vec![],
-    }
+    proto::BlockId { height: height.into(), hash: vec![] }
 }
 
 fn range(start: u32, end: u32) -> proto::BlockRange {
-    proto::BlockRange {
-        start: Some(block(start)),
-        end: Some(block(end)),
-        pool_types: vec![],
-    }
+    proto::BlockRange { start: Some(block(start)), end: Some(block(end)), pool_types: vec![] }
 }
 
 async fn drain<M: Message + Default>(
@@ -177,17 +165,10 @@ async fn measure(
     let t = Instant::now();
     let result = tokio::time::timeout(timeout, async {
         match rpc {
-            Rpc::Info => o.message(
-                &client.get_lightd_info(proto::Empty {}).await?.into_inner(),
-                t,
-            ),
-            Rpc::LatestBlock => o.message(
-                &client
-                    .get_latest_block(proto::ChainSpec {})
-                    .await?
-                    .into_inner(),
-                t,
-            ),
+            Rpc::Info => o.message(&client.get_lightd_info(proto::Empty {}).await?.into_inner(), t),
+            Rpc::LatestBlock => {
+                o.message(&client.get_latest_block(proto::ChainSpec {}).await?.into_inner(), t)
+            }
             Rpc::Block => {
                 let m = client.get_block(block(height)).await?.into_inner();
                 if m.height != u64::from(height) {
@@ -197,13 +178,9 @@ async fn measure(
                 o.blocks = 1;
             }
             Rpc::Tree => o.message(&client.get_tree_state(block(height)).await?.into_inner(), t),
-            Rpc::LatestTree => o.message(
-                &client
-                    .get_latest_tree_state(proto::Empty {})
-                    .await?
-                    .into_inner(),
-                t,
-            ),
+            Rpc::LatestTree => {
+                o.message(&client.get_latest_tree_state(proto::Empty {}).await?.into_inner(), t)
+            }
             Rpc::Subtrees(pool) => {
                 drain(
                     client
@@ -232,10 +209,7 @@ async fn measure(
             }
             Rpc::Transaction(hash) => o.message(
                 &client
-                    .get_transaction(proto::TxFilter {
-                        hash: hash.clone(),
-                        ..Default::default()
-                    })
+                    .get_transaction(proto::TxFilter { hash: hash.clone(), ..Default::default() })
                     .await?
                     .into_inner(),
                 t,
@@ -254,9 +228,7 @@ async fn measure(
             }
             Rpc::Balance(address) => o.message(
                 &client
-                    .get_taddress_balance(proto::AddressList {
-                        addresses: vec![address.clone()],
-                    })
+                    .get_taddress_balance(proto::AddressList { addresses: vec![address.clone()] })
                     .await?
                     .into_inner(),
                 t,
@@ -273,10 +245,8 @@ async fn measure(
                 t,
             ),
             Rpc::Range(count) => {
-                let mut stream = client
-                    .get_block_range(range(height, height + (count - 1)))
-                    .await?
-                    .into_inner();
+                let mut stream =
+                    client.get_block_range(range(height, height + (count - 1))).await?.into_inner();
                 while let Some(m) = stream.message().await? {
                     if o.blocks >= u64::from(*count) || m.height != u64::from(height) + o.blocks {
                         return Err(tonic::Status::data_loss(
@@ -331,9 +301,7 @@ async fn connect(endpoint: &str, timeout: Duration) -> Result<Client, Error> {
 fn quantile(values: &mut [f64], p: f64) -> Option<f64> {
     values.sort_by(f64::total_cmp);
     (!values.is_empty()).then(|| {
-        values[((values.len() as f64 * p).ceil() as usize)
-            .saturating_sub(1)
-            .min(values.len() - 1)]
+        values[((values.len() as f64 * p).ceil() as usize).saturating_sub(1).min(values.len() - 1)]
     })
 }
 
@@ -421,20 +389,9 @@ impl Output {
         fs::create_dir(&args.output)?;
         let mut samples = BufWriter::new(File::create(args.output.join("samples.csv"))?);
         let mut summaries = BufWriter::new(File::create(args.output.join("summary.csv"))?);
-        csv_row(
-            &mut samples,
-            &SAMPLE_COLUMNS.iter().map(|s| json!(s)).collect::<Vec<_>>(),
-        )?;
-        csv_row(
-            &mut summaries,
-            &SUMMARY_COLUMNS.iter().map(|s| json!(s)).collect::<Vec<_>>(),
-        )?;
-        Ok(Self {
-            samples,
-            summaries,
-            rows: vec![],
-            failed: false,
-        })
+        csv_row(&mut samples, &SAMPLE_COLUMNS.iter().map(|s| json!(s)).collect::<Vec<_>>())?;
+        csv_row(&mut summaries, &SUMMARY_COLUMNS.iter().map(|s| json!(s)).collect::<Vec<_>>())?;
+        Ok(Self { samples, summaries, rows: vec![], failed: false })
     }
 
     fn record(
@@ -444,12 +401,7 @@ impl Output {
         samples: &[Sample],
         wall: f64,
     ) -> Result<(), Error> {
-        let Scenario {
-            suite,
-            case,
-            repeat,
-            clients,
-        } = scenario;
+        let Scenario { suite, case, repeat, clients } = scenario;
         for s in samples {
             let o = &s.o;
             csv_row(
@@ -479,9 +431,7 @@ impl Output {
         let measured: Vec<_> = samples.iter().filter(|s| s.phase == "measure").collect();
         let good: Vec<_> = measured.iter().filter(|s| s.o.status == "ok").collect();
         let errors = measured.len() - good.len();
-        let warmup_failed = samples
-            .iter()
-            .any(|s| s.phase == "warmup" && s.o.status != "ok");
+        let warmup_failed = samples.iter().any(|s| s.phase == "warmup" && s.o.status != "ok");
         let status = if warmup_failed {
             "warmup_failed"
         } else if errors > 0 {
@@ -516,10 +466,7 @@ impl Output {
         }
         csv_row(
             &mut self.summaries,
-            &SUMMARY_COLUMNS
-                .iter()
-                .map(|k| row[*k].clone())
-                .collect::<Vec<_>>(),
+            &SUMMARY_COLUMNS.iter().map(|k| row[*k].clone()).collect::<Vec<_>>(),
         )?;
         self.summaries.flush()?;
         self.rows.push(row);
@@ -707,49 +654,31 @@ fn cases(fixtures: &Value) -> Result<Vec<Case>, Error> {
         ("GetMempoolTx", Rpc::Mempool),
     ]
     .into_iter()
-    .map(|(name, rpc)| Case {
-        name: name.into(),
-        rpc,
-    })
+    .map(|(name, rpc)| Case { name: name.into(), rpc })
     .collect();
     if let Some(addresses) = fixtures.get("addresses") {
-        for (label, value) in addresses
-            .as_object()
-            .ok_or("fixtures.addresses must be an object")?
-        {
+        for (label, value) in addresses.as_object().ok_or("fixtures.addresses must be an object")? {
             let a = value.as_str().ok_or("fixture address must be a string")?;
             for (method, rpc) in [
                 ("GetTaddressTxids", Rpc::AddressHistory(a.into(), true)),
-                (
-                    "GetTaddressTransactions",
-                    Rpc::AddressHistory(a.into(), false),
-                ),
+                ("GetTaddressTransactions", Rpc::AddressHistory(a.into(), false)),
                 ("GetTaddressBalance", Rpc::Balance(a.into())),
                 ("GetAddressUtxos", Rpc::Utxos(a.into())),
             ] {
-                cases.push(Case {
-                    name: format!("{method}/{label}"),
-                    rpc,
-                });
+                cases.push(Case { name: format!("{method}/{label}"), rpc });
             }
         }
     }
     if let Some(txids) = fixtures.get("txids") {
-        for (i, value) in txids
-            .as_array()
-            .ok_or("fixtures.txids must be an array")?
-            .iter()
-            .enumerate()
+        for (i, value) in
+            txids.as_array().ok_or("fixtures.txids must be an array")?.iter().enumerate()
         {
             let mut hash = hex::decode(value.as_str().ok_or("txid must be a string")?)?;
             if hash.len() != 32 {
                 return Err("txid must contain exactly 32 bytes".into());
             }
             hash.reverse();
-            cases.push(Case {
-                name: format!("GetTransaction/{i}"),
-                rpc: Rpc::Transaction(hash),
-            });
+            cases.push(Case { name: format!("GetTransaction/{i}"), rpc: Rpc::Transaction(hash) });
         }
     }
     Ok(cases)
@@ -758,15 +687,12 @@ fn cases(fixtures: &Value) -> Result<Vec<Case>, Error> {
 async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
     let timeout = Duration::from_secs(args.timeout_seconds.get() as u64);
     let mut client = connect(&args.endpoint, timeout).await?;
-    let info = tokio::time::timeout(timeout, client.get_lightd_info(proto::Empty {}))
-        .await??
-        .into_inner();
+    let info =
+        tokio::time::timeout(timeout, client.get_lightd_info(proto::Empty {})).await??.into_inner();
     let tip = tokio::time::timeout(timeout, client.get_latest_block(proto::ChainSpec {}))
         .await??
         .into_inner();
-    let start = args
-        .start
-        .unwrap_or(u32::try_from(info.sapling_activation_height)?);
+    let start = args.start.unwrap_or(u32::try_from(info.sapling_activation_height)?);
     let end = args.end.unwrap_or(u32::try_from(tip.height)?);
     if start > end || u64::from(end) > tip.height {
         return Err("require start <= end <= observed server tip".into());
@@ -781,15 +707,10 @@ async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
             return Err("range-request-counts must name distinct configured range sizes".into());
         }
     }
-    for size in args
-        .range_sizes
-        .iter()
-        .filter(|_| args.suites.contains(&Suite::Ranges))
-        .chain(
-            std::iter::once(&args.concurrency_blocks)
-                .filter(|_| args.suites.contains(&Suite::Concurrency)),
-        )
-    {
+    for size in args.range_sizes.iter().filter(|_| args.suites.contains(&Suite::Ranges)).chain(
+        std::iter::once(&args.concurrency_blocks)
+            .filter(|_| args.suites.contains(&Suite::Concurrency)),
+    ) {
         if size.get() as u64 > available || size.get() as u64 > u64::from(u32::MAX) {
             return Err(format!(
                 "range size {size} exceeds selected height interval or u32 capacity"
@@ -805,9 +726,8 @@ async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
         return Err("fixtures must be a JSON object".into());
     }
     let cases = cases(&fixtures)?;
-    let end_block = tokio::time::timeout(timeout, client.get_block(block(end)))
-        .await??
-        .into_inner();
+    let end_block =
+        tokio::time::timeout(timeout, client.get_block(block(end))).await??.into_inner();
     if end_block.height != u64::from(end) {
         return Err("server returned the wrong block during preflight".into());
     }
@@ -826,10 +746,7 @@ async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
         "percentiles": "nearest-rank, successful requests only; empty streams have no first-message latency",
         "throughput": "successful protobuf payload only, excluding transport framing; null if scenario failed",
     });
-    fs::write(
-        args.output.join("metadata.json"),
-        serde_json::to_vec_pretty(&metadata)?,
-    )?;
+    fs::write(args.output.join("metadata.json"), serde_json::to_vec_pretty(&metadata)?)?;
     for repeat in 1..=args.repeats.get() {
         for suite in &args.suites {
             match suite {
@@ -861,12 +778,7 @@ async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
                             sequential(args, &mut client, case, start, end, n, timeout).await;
                         output.record(
                             args,
-                            Scenario {
-                                suite,
-                                case: &case.name,
-                                repeat,
-                                clients: 1,
-                            },
+                            Scenario { suite, case: &case.name, repeat, clients: 1 },
                             &samples,
                             wall,
                         )?;
@@ -897,12 +809,7 @@ async fn run(args: &Args, output: &mut Output) -> Result<(), Error> {
                     let name = format!("GetBlockRange/chunk-{}", args.sync_chunk);
                     output.record(
                         args,
-                        Scenario {
-                            suite: "sync",
-                            case: &name,
-                            repeat,
-                            clients: 1,
-                        },
+                        Scenario { suite: "sync", case: &name, repeat, clients: 1 },
                         &samples,
                         wall,
                     )?;
@@ -1012,42 +919,23 @@ mod tests {
         assert!(samples.contains("\"test,\"\"version\"\"\""));
         // Last wallet-sync chunk is inclusive and shorter than the configured chunk.
         assert!(
-            samples
-                .lines()
-                .any(|l| l.contains("\"sync\"") && l.contains("\"8\",\"9\",\"ok\""))
+            samples.lines().any(|l| l.contains("\"sync\"") && l.contains("\"8\",\"9\",\"ok\""))
         );
         let metadata: Value =
             serde_json::from_slice(&fs::read(args.output.join("metadata.json")).unwrap()).unwrap();
         assert_eq!(metadata["end_height"], 9);
         assert_eq!(metadata["omitted_fixture_cases"]["addresses"], true);
-        assert!(
-            Output::new(&args).is_err(),
-            "must refuse to overwrite prior data"
-        );
-        let mut client = connect(&server.endpoint, Duration::from_secs(10))
-            .await
-            .unwrap();
-        let case = Case {
-            name: "GetBlock".into(),
-            rpc: Rpc::Block,
-        };
+        assert!(Output::new(&args).is_err(), "must refuse to overwrite prior data");
+        let mut client = connect(&server.endpoint, Duration::from_secs(10)).await.unwrap();
+        let case = Case { name: "GetBlock".into(), rpc: Rpc::Block };
         let (samples, wall) =
             sequential(&args, &mut client, &case, 0, 9, 3, Duration::from_secs(10)).await;
         assert_eq!(samples.len(), 4); // One warmup and three measured requests.
-        assert!(
-            samples
-                .iter()
-                .all(|s| s.o.status == "ok" && s.o.blocks == 1)
-        );
+        assert!(samples.iter().all(|s| s.o.status == "ok" && s.o.blocks == 1));
         output
             .record(
                 &args,
-                Scenario {
-                    suite: "latency",
-                    case: &case.name,
-                    repeat: 1,
-                    clients: 1,
-                },
+                Scenario { suite: "latency", case: &case.name, repeat: 1, clients: 1 },
                 &samples,
                 wall,
             )
@@ -1061,9 +949,7 @@ mod tests {
         let server = support::LocalServer::start().await;
         let dir = tempfile::tempdir().unwrap();
         let args = args(&server.endpoint, &dir.path().join("run"));
-        let mut client = connect(&server.endpoint, Duration::from_secs(10))
-            .await
-            .unwrap();
+        let mut client = connect(&server.endpoint, Duration::from_secs(10)).await.unwrap();
         // The synthetic index ends at 2209. Request beyond it and verify we stop.
         let (samples, wall) = sync(&args, &mut client, 2208, 2220, Duration::from_secs(10)).await;
         assert_eq!(samples.len(), 1);
@@ -1072,12 +958,7 @@ mod tests {
         output
             .record(
                 &args,
-                Scenario {
-                    suite: "sync",
-                    case: "failure",
-                    repeat: 1,
-                    clients: 1,
-                },
+                Scenario { suite: "sync", case: "failure", repeat: 1, clients: 1 },
                 &samples,
                 wall,
             )
@@ -1092,29 +973,13 @@ mod tests {
                 .contains(&samples[0].o.status)
         );
 
-        let case = Case {
-            name: "unavailable".into(),
-            rpc: Rpc::Range(3),
-        };
-        let (warmup, wall) = sequential(
-            &args,
-            &mut client,
-            &case,
-            2210,
-            2220,
-            5,
-            Duration::from_secs(10),
-        )
-        .await;
+        let case = Case { name: "unavailable".into(), rpc: Rpc::Range(3) };
+        let (warmup, wall) =
+            sequential(&args, &mut client, &case, 2210, 2220, 5, Duration::from_secs(10)).await;
         output
             .record(
                 &args,
-                Scenario {
-                    suite: "ranges",
-                    case: "unavailable",
-                    repeat: 1,
-                    clients: 1,
-                },
+                Scenario { suite: "ranges", case: "unavailable", repeat: 1, clients: 1 },
                 &warmup,
                 wall,
             )

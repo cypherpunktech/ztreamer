@@ -54,23 +54,14 @@ impl ServiceMetrics {
     }
 
     pub fn snapshot(&self, snapshot: &ServingSnapshot) {
-        self.visible.set(
-            snapshot
-                .visible_tip
-                .map_or(f64::NAN, |tip| f64::from(tip.height)),
-        );
+        self.visible.set(snapshot.visible_tip.map_or(f64::NAN, |tip| f64::from(tip.height)));
         self.ready.set(f64::from(snapshot.ready));
         self.fresh.set(f64::from(snapshot.tip_fresh));
     }
 
     pub fn range(self: &Arc<Self>) -> RangeGuard {
         self.active.increment(1.0);
-        RangeGuard {
-            metrics: Arc::clone(self),
-            start: Instant::now(),
-            emitted: 0,
-            outcome: 2,
-        }
+        RangeGuard { metrics: Arc::clone(self), start: Instant::now(), emitted: 0, outcome: 2 }
     }
 
     pub fn published(&self, observed: Option<(BlockId, Instant)>, visible: Option<BlockId>) {
@@ -94,9 +85,7 @@ pub(crate) struct ObservedSource<'a, S> {
 impl<S: CanonicalBlockSource> CanonicalBlockSource for ObservedSource<'_, S> {
     async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
         let tip = self.source.tip().await?;
-        self.metrics
-            .source_tip
-            .set(tip.map_or(f64::NAN, |tip| f64::from(tip.height)));
+        self.metrics.source_tip.set(tip.map_or(f64::NAN, |tip| f64::from(tip.height)));
         if tip != self.previous {
             self.observed = tip.map(|tip| (tip, Instant::now()));
         }
@@ -121,10 +110,7 @@ impl RangeGuard {
         result: Result<RpcStream<T>, Status>,
     ) -> Result<RpcStream<T>, Status> {
         match result {
-            Ok(inner) => Ok(Box::pin(MeasuredStream {
-                inner,
-                guard: Some(self),
-            })),
+            Ok(inner) => Ok(Box::pin(MeasuredStream { inner, guard: Some(self) })),
             Err(error) => {
                 self.outcome = 1;
                 Err(error)
@@ -160,10 +146,7 @@ impl<T> Stream for MeasuredStream<T> {
             Poll::Ready(Some(Ok(_))) => {
                 let guard = this.guard.as_mut().unwrap();
                 if guard.emitted == 0 {
-                    guard
-                        .metrics
-                        .first
-                        .record(guard.start.elapsed().as_secs_f64());
+                    guard.metrics.first.record(guard.start.elapsed().as_secs_f64());
                 }
                 guard.emitted += 1;
             }
@@ -189,10 +172,8 @@ mod tests {
         let snapshotter = recorder.snapshotter();
         let metrics = metrics::with_local_recorder(&recorder, || Arc::new(ServiceMetrics::new()));
 
-        let mut complete = metrics
-            .range()
-            .response(Ok(Box::pin(tokio_stream::iter([Ok(1), Ok(2)]))))
-            .unwrap();
+        let mut complete =
+            metrics.range().response(Ok(Box::pin(tokio_stream::iter([Ok(1), Ok(2)])))).unwrap();
         assert_eq!(complete.next().await.unwrap().unwrap(), 1);
         assert_eq!(complete.next().await.unwrap().unwrap(), 2);
         assert!(complete.next().await.is_none());
@@ -201,38 +182,23 @@ mod tests {
 
         let mut failed = metrics
             .range()
-            .response(Ok(Box::pin(tokio_stream::iter([
-                Ok(3),
-                Err(Status::internal("injected")),
-            ]))))
+            .response(Ok(Box::pin(tokio_stream::iter([Ok(3), Err(Status::internal("injected"))]))))
             .unwrap();
         assert!(failed.next().await.unwrap().is_ok());
         assert!(failed.next().await.unwrap().is_err());
         drop(failed);
 
-        let mut cancelled = metrics
-            .range()
-            .response(Ok(Box::pin(tokio_stream::iter([Ok(4), Ok(5)]))))
-            .unwrap();
+        let mut cancelled =
+            metrics.range().response(Ok(Box::pin(tokio_stream::iter([Ok(4), Ok(5)])))).unwrap();
         assert!(cancelled.next().await.unwrap().is_ok());
         drop(cancelled);
         // Cancellation before first poll, validation failure, and empty success.
-        drop(
-            metrics
-                .range()
-                .response::<u32>(Ok(Box::pin(tokio_stream::pending())))
-                .unwrap(),
-        );
+        drop(metrics.range().response::<u32>(Ok(Box::pin(tokio_stream::pending()))).unwrap());
         assert!(
-            metrics
-                .range()
-                .response::<u32>(Err(Status::invalid_argument("injected")))
-                .is_err()
+            metrics.range().response::<u32>(Err(Status::invalid_argument("injected"))).is_err()
         );
-        let mut empty = metrics
-            .range()
-            .response::<u32>(Ok(Box::pin(tokio_stream::empty())))
-            .unwrap();
+        let mut empty =
+            metrics.range().response::<u32>(Ok(Box::pin(tokio_stream::empty()))).unwrap();
         assert!(empty.next().await.is_none());
 
         for (key, _, _, value) in snapshotter.snapshot().into_vec() {

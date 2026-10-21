@@ -8,11 +8,8 @@ use support::{Client, LocalServer, consume, range};
 use tokio::{sync::Barrier, task::JoinSet};
 
 fn grpc(c: &mut Criterion) {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
     let server = runtime.block_on(LocalServer::start());
     let clients = runtime.block_on(async {
         let mut clients = Vec::new();
@@ -22,10 +19,9 @@ fn grpc(c: &mut Criterion) {
         }
         clients
     });
-    for (name, delay) in [
-        ("grpc_mixed_v1", Duration::ZERO),
-        ("grpc_slow_mixed_v1", Duration::from_millis(1)),
-    ] {
+    for (name, delay) in
+        [("grpc_mixed_v1", Duration::ZERO), ("grpc_slow_mixed_v1", Duration::from_millis(1))]
+    {
         let mut group = c.benchmark_group(name);
         for concurrency in [1, 8, 16, 32] {
             group.throughput(Throughput::Elements(2_000 * concurrency as u64));

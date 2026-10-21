@@ -36,15 +36,9 @@ struct Args {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let args = Args::parse();
-    let server = if args.endpoint.is_none() {
-        Some(LocalServer::start().await)
-    } else {
-        None
-    };
-    let endpoint = args
-        .endpoint
-        .clone()
-        .unwrap_or_else(|| server.as_ref().unwrap().endpoint.clone());
+    let server = if args.endpoint.is_none() { Some(LocalServer::start().await) } else { None };
+    let endpoint =
+        args.endpoint.clone().unwrap_or_else(|| server.as_ref().unwrap().endpoint.clone());
     let timeout = Duration::from_secs(args.timeout_seconds.get() as u64);
     let delay = Duration::from_millis(args.delay_ms);
     let request = range(args.start, args.end);
@@ -52,11 +46,8 @@ async fn main() -> Result<(), Error> {
     for _ in 0..args.clients.get() {
         let mut client = tokio::time::timeout(timeout, Client::connect(endpoint.clone())).await??;
         // Warm the connection and validate the request before collecting samples.
-        tokio::time::timeout(
-            timeout,
-            consume(&mut client, request.clone(), Duration::ZERO),
-        )
-        .await??;
+        tokio::time::timeout(timeout, consume(&mut client, request.clone(), Duration::ZERO))
+            .await??;
         clients.push(client);
     }
     let barrier = Arc::new(Barrier::new(clients.len() + 1));
@@ -76,12 +67,8 @@ async fn main() -> Result<(), Error> {
                     .await
                 {
                     Ok(Ok(result)) => {
-                        first
-                            .record(result.first.as_micros().max(1) as u64)
-                            .unwrap();
-                        complete
-                            .record(result.complete.as_micros().max(1) as u64)
-                            .unwrap();
+                        first.record(result.first.as_micros().max(1) as u64).unwrap();
+                        complete.record(result.complete.as_micros().max(1) as u64).unwrap();
                         blocks += result.blocks;
                         bytes += result.bytes;
                     }

@@ -108,11 +108,7 @@ pub enum PipelineError {
     #[error("Zakura has pruned the required block body at height {height}")]
     MissingBody { height: u32 },
     #[error("Zakura block at height {height} needs {required} source bytes, limit is {limit}")]
-    BlockExceedsByteLimit {
-        height: u32,
-        required: usize,
-        limit: usize,
-    },
+    BlockExceedsByteLimit { height: u32, required: usize, limit: usize },
     #[error("Zakura source size overflowed at height {height}")]
     SourceSize { height: u32 },
     #[error("Zakura source changed during historical ingestion")]
@@ -151,8 +147,7 @@ impl HistoricalSource for ZakuraDb {
     }
 
     fn block_hash(&self, height: u32) -> Option<block::Hash> {
-        self.block_header(Height(height).into())
-            .map(|header| header.hash())
+        self.block_header(Height(height).into()).map(|header| header.hash())
     }
 
     fn prune_height(&self) -> u32 {
@@ -171,22 +166,18 @@ impl HistoricalSource for ZakuraDb {
         let mut headers = self.block_headers_by_height_range(Height(start)..=Height(end));
         let transaction_range = TransactionLocation::min_for_height(Height(start))
             ..=TransactionLocation::max_for_height(Height(end));
-        let mut transactions = self
-            .raw_transactions_by_location_range(transaction_range.clone())
-            .peekable();
-        let mut transaction_hashes = self
-            .transaction_hashes_by_location_range(transaction_range)
-            .peekable();
+        let mut transactions =
+            self.raw_transactions_by_location_range(transaction_range.clone()).peekable();
+        let mut transaction_hashes =
+            self.transaction_hashes_by_location_range(transaction_range).peekable();
 
         for raw_height in start..=end {
             let height = Height(raw_height);
             let started = Instant::now();
             let header = headers.next();
             stats.header_read += started.elapsed();
-            let (actual_height, header) = header.ok_or(PipelineError::SourceGap {
-                expected: raw_height,
-                actual: None,
-            })?;
+            let (actual_height, header) =
+                header.ok_or(PipelineError::SourceGap { expected: raw_height, actual: None })?;
             if actual_height != height {
                 return Err(PipelineError::SourceGap {
                     expected: raw_height,
@@ -219,10 +210,7 @@ impl HistoricalSource for ZakuraDb {
             if block_transactions.is_empty() {
                 return Err(PipelineError::MissingBody { height: raw_height });
             }
-            if transaction_hashes
-                .peek()
-                .is_some_and(|(location, _)| location.height == height)
-            {
+            if transaction_hashes.peek().is_some_and(|(location, _)| location.height == height) {
                 return Err(PipelineError::SourceChanged);
             }
 
@@ -238,11 +226,9 @@ impl HistoricalSource for ZakuraDb {
                 .zcash_serialized_size()
                 .checked_add(tx_count.zcash_serialized_size())
                 .and_then(|size| {
-                    block_transactions
-                        .iter()
-                        .try_fold(size, |size, transaction| {
-                            size.checked_add(transaction.raw_bytes().len())
-                        })
+                    block_transactions.iter().try_fold(size, |size, transaction| {
+                        size.checked_add(transaction.raw_bytes().len())
+                    })
                 })
                 .ok_or(PipelineError::SourceSize { height: raw_height })?;
             let block_bytes = size
@@ -306,13 +292,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         db: &'a S,
         config: PipelineConfig,
     ) -> Result<Self, PipelineError> {
-        let pipeline = Self {
-            index,
-            db,
-            config,
-            metrics: PipelineMetrics::new(),
-            stop: None,
-        };
+        let pipeline = Self { index, db, config, metrics: PipelineMetrics::new(), stop: None };
         pipeline.validate_config()?;
         Ok(pipeline)
     }
@@ -344,9 +324,8 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         // read local resume point
         let initial_state = self.index.state()?;
         let durable_tip = initial_state.durable_tip();
-        let start = durable_tip.map_or(Ok(0), |tip| {
-            tip.height.checked_add(1).ok_or(IngestError::Overflow)
-        })?;
+        let start = durable_tip
+            .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
 
         let (tip_height, tip_hash) = self.db.tip().ok_or(PipelineError::NoSourceTip)?;
         // The live-head reconciler validates durable records newer than Zakura's finalized tip.
@@ -354,14 +333,9 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             return Ok(initial_state);
         }
         if let Some(durable_tip) = durable_tip
-            && self
-                .db
-                .block_hash(durable_tip.height)
-                .is_none_or(|hash| hash.0 != durable_tip.hash)
+            && self.db.block_hash(durable_tip.height).is_none_or(|hash| hash.0 != durable_tip.hash)
         {
-            return Err(PipelineError::DurableTipMismatch {
-                height: durable_tip.height,
-            });
+            return Err(PipelineError::DurableTipMismatch { height: durable_tip.height });
         }
         if start < self.db.prune_height() {
             return Err(PipelineError::MissingBody { height: start });
@@ -516,10 +490,8 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             if self.stopped() {
                 return Ok(stats);
             }
-            let segment_start = next.fetch_add(
-                u64::from(self.config.source_segment_blocks),
-                Ordering::Relaxed,
-            );
+            let segment_start =
+                next.fetch_add(u64::from(self.config.source_segment_blocks), Ordering::Relaxed);
             if segment_start > u64::from(target) {
                 return Ok(stats);
             }
@@ -644,9 +616,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         batch_tx: &SyncSender<EncodedBatch>,
     ) -> Result<Duration, PipelineError> {
         let started = Instant::now();
-        let batch = batch
-            .encode(self.config.workers)
-            .map_err(IngestError::from)?;
+        let batch = batch.encode(self.config.workers).map_err(IngestError::from)?;
         self.metrics.encode.record(started.elapsed().as_secs_f64());
         let started = Instant::now();
         let sent = batch_tx.send(batch);
@@ -685,10 +655,7 @@ mod tests {
             builder.push(prepared(height)).unwrap();
         }
         let batch_bytes = CompactBlockRecord::encoded_size_bound(&[]).unwrap();
-        let first = builder
-            .build_batch(Some(20), Some(20), batch_bytes)
-            .unwrap()
-            .unwrap();
+        let first = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
         let (batch_tx, batch_rx) = sync_channel::<WriteBatch>(1);
         let (started_tx, started_rx) = sync_channel(0);
         let (release_tx, release_rx) = sync_channel(0);
@@ -703,20 +670,11 @@ mod tests {
 
             batch_tx.send(first).unwrap();
             started_rx.recv().unwrap();
-            let second = builder
-                .build_batch(Some(20), Some(20), batch_bytes)
-                .unwrap()
-                .unwrap();
+            let second = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
             assert_eq!(second.records[0].height, 1);
             batch_tx.send(second).unwrap();
-            let third = builder
-                .build_batch(Some(20), Some(20), batch_bytes)
-                .unwrap()
-                .unwrap();
-            assert!(matches!(
-                batch_tx.try_send(third),
-                Err(TrySendError::Full(_))
-            ));
+            let third = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
+            assert!(matches!(batch_tx.try_send(third), Err(TrySendError::Full(_))));
 
             release_tx.send(()).unwrap();
             writer.join().unwrap();

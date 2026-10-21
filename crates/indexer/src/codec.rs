@@ -56,11 +56,7 @@ impl StoredBlock for ProtobufBlockRecord {
         self.0.hash.as_slice().try_into().expect("validated hash")
     }
     fn previous_hash(&self) -> Digest {
-        self.0
-            .prev_hash
-            .as_slice()
-            .try_into()
-            .expect("validated previous hash")
+        self.0.prev_hash.as_slice().try_into().expect("validated previous hash")
     }
 }
 
@@ -182,10 +178,7 @@ impl CompactBlockRecord {
         self.check()?;
         let block = self.to_proto();
         let len = block.encoded_len();
-        if len
-            .checked_add(PROTOBUF_ENVELOPE_BYTES)
-            .is_none_or(|len| len > MAX_RECORD_BYTES)
-        {
+        if len.checked_add(PROTOBUF_ENVELOPE_BYTES).is_none_or(|len| len > MAX_RECORD_BYTES) {
             return Err(CodecError::Length);
         }
         bytes.reserve(PROTOBUF_ENVELOPE_BYTES + len);
@@ -257,8 +250,7 @@ pub fn encode_range(records: &[CompactBlockRecord]) -> Result<Vec<u8>, CodecErro
 /// the records. It reads only the envelope of each record to check the height sequence.
 pub fn encode_range_from_bytes(parts: &[&[u8]]) -> Result<Vec<u8>, CodecError> {
     let body_len = parts.iter().try_fold(0usize, |len, part| {
-        len.checked_add(size_of::<u32>() + part.len())
-            .ok_or(CodecError::Length)
+        len.checked_add(size_of::<u32>() + part.len()).ok_or(CodecError::Length)
     })?;
     write_range(parts, body_len)
 }
@@ -379,11 +371,7 @@ fn write_range<R: RangeRecord>(records: &[R], body_len: usize) -> Result<Vec<u8>
     }
     // write the 1001st offset to mark end of the body
     let final_offset = bytes.len() - body_start;
-    set_u32(
-        &mut bytes,
-        offsets_start + records.len() * size_of::<u32>(),
-        final_offset,
-    )?;
+    set_u32(&mut bytes, offsets_start + records.len() * size_of::<u32>(), final_offset)?;
     Ok(bytes)
 }
 
@@ -405,10 +393,7 @@ impl<'a> RangeDecoder<'a> {
         let mut reader = Reader::new(bytes);
         let version = reader.u8()?;
         if version != RANGE_FORMAT_VERSION {
-            return Err(CodecError::Version {
-                kind: "range",
-                version,
-            });
+            return Err(CodecError::Version { kind: "range", version });
         }
         let start = reader.u32()?;
         let end = reader.u32()?;
@@ -420,13 +405,7 @@ impl<'a> RangeDecoder<'a> {
 
         let offsets = reader.take((RANGE_SIZE as usize + 1) * size_of::<u32>())?;
         let body = reader.take(reader.remaining())?;
-        let decoder = Self {
-            start,
-            first_previous_hash,
-            terminal_hash,
-            offsets,
-            body,
-        };
+        let decoder = Self { start, first_previous_hash, terminal_hash, offsets, body };
         if decoder.offset(0) != 0
             || decoder.offset(RANGE_SIZE as usize) != body.len()
             || (1..=RANGE_SIZE as usize)
@@ -445,10 +424,8 @@ impl<'a> RangeDecoder<'a> {
         if index >= RANGE_SIZE as usize {
             return Err(CodecError::RangeIndex);
         }
-        let envelope = self
-            .body
-            .get(self.offset(index)..self.offset(index + 1))
-            .ok_or(CodecError::Length)?;
+        let envelope =
+            self.body.get(self.offset(index)..self.offset(index + 1)).ok_or(CodecError::Length)?;
         let mut envelope = Reader::new(envelope);
         let record_len = envelope.len()?;
         let record = T::decode(envelope.take(record_len)?)?;
@@ -477,11 +454,8 @@ fn put_u32(bytes: &mut Vec<u8>, value: u32) {
 }
 
 fn set_u32(bytes: &mut [u8], offset: usize, value: usize) -> Result<(), CodecError> {
-    bytes[offset..offset + size_of::<u32>()].copy_from_slice(
-        &u32::try_from(value)
-            .map_err(|_| CodecError::Length)?
-            .to_be_bytes(),
-    );
+    bytes[offset..offset + size_of::<u32>()]
+        .copy_from_slice(&u32::try_from(value).map_err(|_| CodecError::Length)?.to_be_bytes());
     Ok(())
 }
 
@@ -501,10 +475,7 @@ impl<'a> Reader<'a> {
 
     fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
         let end = self.offset.checked_add(len).ok_or(CodecError::Length)?;
-        let value = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or(CodecError::Truncated)?;
+        let value = self.bytes.get(self.offset..end).ok_or(CodecError::Truncated)?;
         self.offset = end;
         Ok(value)
     }
@@ -526,11 +497,7 @@ impl<'a> Reader<'a> {
     }
 
     fn finish(self) -> Result<(), CodecError> {
-        if self.remaining() == 0 {
-            Ok(())
-        } else {
-            Err(CodecError::TrailingBytes)
-        }
+        if self.remaining() == 0 { Ok(()) } else { Err(CodecError::TrailingBytes) }
     }
 }
 
@@ -566,11 +533,7 @@ mod tests {
                 let tx = CompactTransaction {
                     index: u64::MAX,
                     txid: [0; 32],
-                    sapling_spends: if pool == 0 {
-                        vec![[0; 32]; count]
-                    } else {
-                        vec![]
-                    },
+                    sapling_spends: if pool == 0 { vec![[0; 32]; count] } else { vec![] },
                     sapling_outputs: if pool == 1 {
                         vec![
                             CompactSaplingOutput {
@@ -583,16 +546,8 @@ mod tests {
                     } else {
                         vec![]
                     },
-                    orchard_actions: if pool == 2 {
-                        vec![action(0); count]
-                    } else {
-                        vec![]
-                    },
-                    ironwood_actions: if pool == 3 {
-                        vec![action(0); count]
-                    } else {
-                        vec![]
-                    },
+                    orchard_actions: if pool == 2 { vec![action(0); count] } else { vec![] },
+                    ironwood_actions: if pool == 3 { vec![action(0); count] } else { vec![] },
                 };
                 let record = CompactBlockRecord {
                     height: u32::MAX,
@@ -636,18 +591,11 @@ mod tests {
             previous_hash: [0; 32],
             time: 10,
             transactions: vec![transaction],
-            end_tree_sizes: TreeSizes {
-                sapling: 1,
-                orchard: 1,
-                ironwood: 1,
-            },
+            end_tree_sizes: TreeSizes { sapling: 1, orchard: 1, ironwood: 1 },
         };
         let encoded_first = first.encode().unwrap();
         assert_eq!(
-            EncodedBlockRecord::decode(&encoded_first)
-                .unwrap()
-                .block
-                .encode_to_vec(),
+            EncodedBlockRecord::decode(&encoded_first).unwrap().block.encode_to_vec(),
             first.to_proto().encode_to_vec()
         );
         for len in 0..encoded_first.len() {
@@ -656,10 +604,7 @@ mod tests {
         }
         let mut mismatched = encoded_first.clone();
         mismatched[1] ^= 1;
-        assert_eq!(
-            CompactBlockRecord::decode(&mismatched),
-            Err(CodecError::InvalidRecord)
-        );
+        assert_eq!(CompactBlockRecord::decode(&mismatched), Err(CodecError::InvalidRecord));
         assert!(
             encoded_first.len()
                 <= CompactBlockRecord::encoded_size_bound(&first.transactions).unwrap()
@@ -673,10 +618,7 @@ mod tests {
             CompactBlockRecord::decode(&vec![0; MAX_RECORD_BYTES + 1]),
             Err(CodecError::Length)
         );
-        assert_eq!(
-            CompactBlockRecord::decode(&[0xff; 81]),
-            Err(CodecError::InvalidRecord)
-        );
+        assert_eq!(CompactBlockRecord::decode(&[0xff; 81]), Err(CodecError::InvalidRecord));
 
         let mut records = vec![first];
         for height in 1..RANGE_SIZE {
@@ -712,10 +654,7 @@ mod tests {
 
         // Heights out of order.
         parts.swap(3, 4);
-        assert_eq!(
-            encode_range_from_bytes(&parts),
-            Err(CodecError::InvalidRange)
-        );
+        assert_eq!(encode_range_from_bytes(&parts), Err(CodecError::InvalidRange));
         records.swap(3, 4);
         assert_eq!(encode_range(&records), Err(CodecError::InvalidRange));
         records.swap(3, 4);
@@ -725,10 +664,7 @@ mod tests {
         assert_eq!(encode_range(&records), Err(CodecError::InvalidRange));
         let stored: Vec<_> = records.iter().map(|r| r.encode().unwrap()).collect();
         let parts: Vec<_> = stored.iter().map(Vec::as_slice).collect();
-        assert_eq!(
-            encode_range_from_bytes(&parts),
-            Err(CodecError::InvalidRange)
-        );
+        assert_eq!(encode_range_from_bytes(&parts), Err(CodecError::InvalidRange));
     }
 
     fn action(byte: u8) -> CompactShieldedAction {

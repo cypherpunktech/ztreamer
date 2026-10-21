@@ -21,11 +21,7 @@ fn shielded_transactions() -> Vec<CompactTransaction> {
         height: block.coinbase_height().unwrap(),
         hash: block.hash(),
         bytes,
-        txids: block
-            .transactions
-            .iter()
-            .map(|transaction| transaction.hash())
-            .collect(),
+        txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
     })
     .unwrap()
     .transactions
@@ -77,9 +73,8 @@ fn block_codec(c: &mut Criterion) {
 
 fn range_codec(c: &mut Criterion) {
     let transactions = shielded_transactions();
-    let records = (0..RANGE_SIZE)
-        .map(|height| record(height, transactions.clone()))
-        .collect::<Vec<_>>();
+    let records =
+        (0..RANGE_SIZE).map(|height| record(height, transactions.clone())).collect::<Vec<_>>();
     let encoded = encode_range(&records).unwrap();
 
     let mut group = c.benchmark_group("encode_range");
@@ -98,10 +93,7 @@ fn mixed_range_codec(c: &mut Criterion) {
     let records = fixtures::mixed_records(RANGE_SIZE);
     let encoded = encode_range(&records).unwrap();
     for index in [0, 500, 999] {
-        assert_eq!(
-            decode_range_record(&encoded, index).unwrap(),
-            records[index]
-        );
+        assert_eq!(decode_range_record(&encoded, index).unwrap(), records[index]);
     }
     let mut group = c.benchmark_group("range_codec_mixed_v1");
     group.throughput(Throughput::Bytes(encoded.len() as u64));

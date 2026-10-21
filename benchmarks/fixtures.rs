@@ -21,11 +21,9 @@ pub fn hash(height: u32) -> Digest {
 
 pub fn shielded_transactions() -> Vec<CompactTransaction> {
     let mut transactions = Vec::new();
-    for bytes in [
-        &*BLOCK_MAINNET_949496_BYTES,
-        &*BLOCK_MAINNET_1687121_BYTES,
-        &*BLOCK_TESTNET_1842421_BYTES,
-    ] {
+    for bytes in
+        [&*BLOCK_MAINNET_949496_BYTES, &*BLOCK_MAINNET_1687121_BYTES, &*BLOCK_TESTNET_1842421_BYTES]
+    {
         let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
         transactions.extend(
             parse_block(&RawIndexBlock {
@@ -116,9 +114,7 @@ pub fn populate(
     for record in records {
         builder.push(parsed(record.clone())).unwrap();
     }
-    while let Some(batch) = builder
-        .build_batch(Some(tip), seal_through, 16 * 1024 * 1024)
-        .unwrap()
+    while let Some(batch) = builder.build_batch(Some(tip), seal_through, 16 * 1024 * 1024).unwrap()
     {
         state = index.write(batch).unwrap();
     }

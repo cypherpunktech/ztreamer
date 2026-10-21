@@ -11,10 +11,7 @@ pub mod wire {
 
 /// Compact messages whose byte fields share one owned decode buffer.
 pub mod compact_bytes {
-    include!(concat!(
-        env!("OUT_DIR"),
-        "/compact_bytes/cash.z.wallet.sdk.rpc.rs"
-    ));
+    include!(concat!(env!("OUT_DIR"), "/compact_bytes/cash.z.wallet.sdk.rpc.rs"));
 }
 
 /// Generated Lightwallet protocol types and service descriptors.

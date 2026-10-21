@@ -65,20 +65,10 @@ fn raw_block(block: &Block) -> Result<RawIndexBlock, HeadError> {
     let height = block
         .coinbase_height()
         .ok_or_else(|| HeadError::Decode("coinbase height is missing".to_owned()))?;
-    let bytes = block
-        .zcash_serialize_to_vec()
-        .map_err(|error| HeadError::Decode(error.to_string()))?;
-    let txids = block
-        .transactions
-        .iter()
-        .map(|transaction| transaction.hash())
-        .collect();
-    Ok(RawIndexBlock {
-        height,
-        hash,
-        bytes,
-        txids,
-    })
+    let bytes =
+        block.zcash_serialize_to_vec().map_err(|error| HeadError::Decode(error.to_string()))?;
+    let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
+    Ok(RawIndexBlock { height, hash, bytes, txids })
 }
 
 #[tonic::async_trait]
@@ -93,10 +83,7 @@ impl CanonicalBlockSource for NodeClient {
             Ok(Some(block)) => {
                 let block = raw_block(&block)?;
                 if block.height.0 != height {
-                    return Err(HeadError::Height {
-                        expected: height,
-                        actual: block.height.0,
-                    });
+                    return Err(HeadError::Height { expected: height, actual: block.height.0 });
                 }
                 Ok(Some(block))
             }
@@ -116,13 +103,9 @@ pub async fn poll_canonical_head(
         let anchor = source
             .block(anchor_height)
             .await?
-            .ok_or(HeadError::Anchor {
-                height: anchor_height,
-            })?;
+            .ok_or(HeadError::Anchor { height: anchor_height })?;
         if anchor.hash.0 != previous_hash {
-            return Err(HeadError::Anchor {
-                height: anchor_height,
-            });
+            return Err(HeadError::Anchor { height: anchor_height });
         }
     }
 
@@ -152,10 +135,7 @@ pub async fn poll_canonical_head(
         return Err(HeadError::Changed);
     }
 
-    raw.iter()
-        .map(parse_block)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+    raw.iter().map(parse_block).collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Reconciles the canonical head and atomically replaces an ordinary reorg suffix.
@@ -175,14 +155,10 @@ pub async fn sync_head_once(
         };
     }
 
-    let old_visible_tip = current_head
-        .last()
-        .map(|block| block.height)
-        .expect("the current head is non-empty");
-    let old_visible_tip_hash = current_head
-        .last()
-        .map(|block| block.hash)
-        .expect("the current head is non-empty");
+    let old_visible_tip =
+        current_head.last().map(|block| block.height).expect("the current head is non-empty");
+    let old_visible_tip_hash =
+        current_head.last().map(|block| block.hash).expect("the current head is non-empty");
     if source.tip().await? == Some(BlockId::new(old_visible_tip, old_visible_tip_hash)) {
         return Ok((state, current_head.to_vec()));
     }
@@ -198,9 +174,7 @@ pub async fn sync_head_once(
         result => result?,
     };
 
-    let mut common = anchor_record
-        .as_ref()
-        .map(|block| BlockId::new(block.height, block.hash));
+    let mut common = anchor_record.as_ref().map(|block| BlockId::new(block.height, block.hash));
     for block in &prepared {
         match current_record(index, state, current_head, block.height)? {
             Some(old) if old.hash == block.hash => {
@@ -212,14 +186,12 @@ pub async fn sync_head_once(
     let common = common.ok_or(HeadSyncError::NoCommonAncestor)?;
     let visible_tip = prepared.last().map_or(common.height, |block| block.height);
 
-    let base_state = anchor_record
-        .as_ref()
-        .map_or_else(IndexState::default, |anchor| IndexState {
-            durable_tip: Some(BlockId::new(anchor.height, anchor.hash)),
-            sealed_through: state.sealed_through(),
-            generation: state.generation(),
-            tree_sizes: anchor.end_tree_sizes,
-        });
+    let base_state = anchor_record.as_ref().map_or_else(IndexState::default, |anchor| IndexState {
+        durable_tip: Some(BlockId::new(anchor.height, anchor.hash)),
+        sealed_through: state.sealed_through(),
+        generation: state.generation(),
+        tree_sizes: anchor.end_tree_sizes,
+    });
     let mut builder = OrderedBuilder::new(base_state, config.max_pending_bytes)?;
     for block in prepared {
         builder.push(block)?;
@@ -231,11 +203,8 @@ pub async fn sync_head_once(
 
     let old_durable_tip = state.durable_tip().ok_or(IndexError::Metadata)?;
     let ancestor_height = common.height.min(old_durable_tip.height);
-    let ancestor_record = current_record(index, state, current_head, ancestor_height)?.ok_or(
-        IndexError::Coverage {
-            height: ancestor_height,
-        },
-    )?;
+    let ancestor_record = current_record(index, state, current_head, ancestor_height)?
+        .ok_or(IndexError::Coverage { height: ancestor_height })?;
     let new_durable_through = visible_tip.checked_sub(PERSIST_DEPTH);
     let durable_tip =
         new_durable_through.map_or(ancestor_height, |height| height.max(ancestor_height));
@@ -252,14 +221,8 @@ pub async fn sync_head_once(
             visible_tip.checked_sub(SEAL_DEPTH),
         )?;
     }
-    let durable_tip = state
-        .durable_tip()
-        .expect("a reorg replacement retains its ancestor")
-        .height;
-    let volatile = canonical
-        .into_iter()
-        .filter(|block| block.height > durable_tip)
-        .collect();
+    let durable_tip = state.durable_tip().expect("a reorg replacement retains its ancestor").height;
+    let volatile = canonical.into_iter().filter(|block| block.height > durable_tip).collect();
     Ok((state, volatile))
 }
 
@@ -276,26 +239,18 @@ pub async fn recover_deep_reorg(
         .map(|block| block.height)
         .or_else(|| state.durable_tip().map(|tip| tip.height))
         .ok_or(HeadSyncError::NoCommonAncestor)?;
-    let genesis = source
-        .block(0)
-        .await?
-        .ok_or(HeadSyncError::NoCommonAncestor)?;
+    let genesis = source.block(0).await?.ok_or(HeadSyncError::NoCommonAncestor)?;
     if current_record(index, state, current_head, 0)?.is_none_or(|old| old.hash != genesis.hash.0) {
         return Err(HeadSyncError::NoCommonAncestor);
     }
 
     let mut matching = 0u32;
-    let mut different = old_visible_tip
-        .checked_add(1)
-        .ok_or(IngestError::Overflow)?;
+    let mut different = old_visible_tip.checked_add(1).ok_or(IngestError::Overflow)?;
     while matching + 1 < different {
         let height = matching + (different - matching) / 2;
         let canonical = source.block(height).await?;
         let old = current_record(index, state, current_head, height)?;
-        if canonical
-            .zip(old)
-            .is_some_and(|(canonical, old)| canonical.hash.0 == old.hash)
-        {
+        if canonical.zip(old).is_some_and(|(canonical, old)| canonical.hash.0 == old.hash) {
             matching = height;
         } else {
             different = height;
@@ -321,31 +276,19 @@ pub async fn recover_deep_reorg(
         canonical.extend(batch.records);
     }
 
-    let durable_tip = visible_tip
-        .checked_sub(PERSIST_DEPTH)
-        .map_or(matching, |height| height.max(matching));
-    let replacement = canonical
-        .iter()
-        .filter(|block| block.height <= durable_tip)
-        .cloned()
-        .collect();
+    let durable_tip =
+        visible_tip.checked_sub(PERSIST_DEPTH).map_or(matching, |height| height.max(matching));
+    let replacement =
+        canonical.iter().filter(|block| block.height <= durable_tip).cloned().collect();
     let state = index.replace_deep_suffix(
         state.generation(),
         BlockId::new(common.height, common.hash),
         replacement,
         visible_tip.checked_sub(SEAL_DEPTH),
     )?;
-    let durable_tip = state
-        .durable_tip()
-        .expect("deep recovery retains its common ancestor")
-        .height;
-    Ok((
-        state,
-        canonical
-            .into_iter()
-            .filter(|block| block.height > durable_tip)
-            .collect(),
-    ))
+    let durable_tip =
+        state.durable_tip().expect("deep recovery retains its common ancestor").height;
+    Ok((state, canonical.into_iter().filter(|block| block.height > durable_tip).collect()))
 }
 
 async fn sync_extension_once(
@@ -354,9 +297,9 @@ async fn sync_extension_once(
     mut state: IndexState,
     config: PipelineConfig,
 ) -> Result<(IndexState, Vec<CompactBlockRecord>), HeadSyncError> {
-    let start = state.durable_tip().map_or(Ok(0), |tip| {
-        tip.height.checked_add(1).ok_or(IngestError::Overflow)
-    })?;
+    let start = state
+        .durable_tip()
+        .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
     let previous_hash = state.durable_tip().map_or([0; 32], |tip| tip.hash);
     let prepared = poll_canonical_head(source, start, previous_hash).await?;
     let Some(visible_tip) = prepared.last().map(|block| block.height) else {
@@ -388,10 +331,7 @@ fn current_record(
     current_head: &[CompactBlockRecord],
     height: u32,
 ) -> Result<Option<CompactBlockRecord>, IndexError> {
-    if state
-        .durable_tip()
-        .is_some_and(|durable| height <= durable.height)
-    {
+    if state.durable_tip().is_some_and(|durable| height <= durable.height) {
         return index.read_block(state.generation(), height).map(Some);
     }
     Ok(current_head
@@ -414,10 +354,7 @@ mod tests {
     #[tonic::async_trait]
     impl CanonicalBlockSource for Source {
         async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-            Ok(self
-                .0
-                .last()
-                .map(|block| BlockId::new(block.height.0, block.hash.0)))
+            Ok(self.0.last().map(|block| BlockId::new(block.height.0, block.hash.0)))
         }
 
         async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
@@ -438,248 +375,177 @@ mod tests {
 
     #[test]
     fn polls_a_stable_canonical_suffix() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let mut source = Source((0..=3).map(raw_block).collect());
-                let blocks = poll_canonical_head(&mut source, 1, hash(0)).await.unwrap();
-                assert_eq!(
-                    blocks.iter().map(|block| block.height).collect::<Vec<_>>(),
-                    [1, 2, 3]
-                );
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let mut source = Source((0..=3).map(raw_block).collect());
+            let blocks = poll_canonical_head(&mut source, 1, hash(0)).await.unwrap();
+            assert_eq!(blocks.iter().map(|block| block.height).collect::<Vec<_>>(), [1, 2, 3]);
 
-                source.0[0].hash = block::Hash([9; 32]);
-                assert!(matches!(
-                    poll_canonical_head(&mut source, 1, hash(0)).await,
-                    Err(HeadError::Anchor { height: 0 })
-                ));
-            });
+            source.0[0].hash = block::Hash([9; 32]);
+            assert!(matches!(
+                poll_canonical_head(&mut source, 1, hash(0)).await,
+                Err(HeadError::Anchor { height: 0 })
+            ));
+        });
     }
 
     #[test]
     fn persists_depth_ten_and_returns_the_volatile_head() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=12).map(raw_block).collect());
-                let (state, volatile) =
-                    sync_head_once(&index, &mut source, &[], PipelineConfig::default())
-                        .await
-                        .unwrap();
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=12).map(raw_block).collect());
+            let (state, volatile) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
 
-                assert_eq!(state.durable_tip().unwrap().height, 2);
-                assert_eq!(
-                    volatile
-                        .iter()
-                        .map(|block| block.height)
-                        .collect::<Vec<_>>(),
-                    (3..=12).collect::<Vec<_>>()
-                );
-            });
+            assert_eq!(state.durable_tip().unwrap().height, 2);
+            assert_eq!(
+                volatile.iter().map(|block| block.height).collect::<Vec<_>>(),
+                (3..=12).collect::<Vec<_>>()
+            );
+        });
     }
 
     #[test]
     fn unchanged_tip_skips_suffix_reads() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=20).map(raw_block).collect());
-                let (state, head) =
-                    sync_head_once(&index, &mut source, &[], PipelineConfig::default())
-                        .await
-                        .unwrap();
-                let mut source = TipOnly(BlockId::new(20, hash(20)));
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=20).map(raw_block).collect());
+            let (state, head) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
+            let mut source = TipOnly(BlockId::new(20, hash(20)));
 
-                let (next_state, next_head) =
-                    sync_head_once(&index, &mut source, &head, PipelineConfig::default())
-                        .await
-                        .unwrap();
+            let (next_state, next_head) =
+                sync_head_once(&index, &mut source, &head, PipelineConfig::default())
+                    .await
+                    .unwrap();
 
-                assert_eq!(next_state, state);
-                assert_eq!(next_head, head);
-            });
+            assert_eq!(next_state, state);
+            assert_eq!(next_head, head);
+        });
     }
 
     #[test]
     fn replaces_only_the_volatile_head_without_rewriting_the_index() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=20).map(raw_block).collect());
-                let (state, head) =
-                    sync_head_once(&index, &mut source, &[], PipelineConfig::default())
-                        .await
-                        .unwrap();
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=20).map(raw_block).collect());
+            let (state, head) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
 
-                source = Source(
-                    (0..=20)
-                        .map(|height| raw_branch_block(height, 15))
-                        .collect(),
-                );
-                let (next_state, head) =
-                    sync_head_once(&index, &mut source, &head, PipelineConfig::default())
-                        .await
-                        .unwrap();
+            source = Source((0..=20).map(|height| raw_branch_block(height, 15)).collect());
+            let (next_state, head) =
+                sync_head_once(&index, &mut source, &head, PipelineConfig::default())
+                    .await
+                    .unwrap();
 
-                assert_eq!(next_state, state);
-                assert_eq!(head.first().unwrap().height, 11);
-                assert_eq!(head[4].hash, branch_hash(15));
-                assert_eq!(head.last().unwrap().hash, branch_hash(20));
-            });
+            assert_eq!(next_state, state);
+            assert_eq!(head.first().unwrap().height, 11);
+            assert_eq!(head[4].hash, branch_hash(15));
+            assert_eq!(head.last().unwrap().hash, branch_hash(20));
+        });
     }
 
     #[test]
     fn rolls_the_durable_tip_back_to_a_shorter_chain() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=20).map(raw_block).collect());
-                let (_, head) = sync_head_once(&index, &mut source, &[], PipelineConfig::default())
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=20).map(raw_block).collect());
+            let (_, head) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
+
+            source = Source((0..=5).map(raw_block).collect());
+            let (state, head) =
+                sync_head_once(&index, &mut source, &head, PipelineConfig::default())
                     .await
                     .unwrap();
 
-                source = Source((0..=5).map(raw_block).collect());
-                let (state, head) =
-                    sync_head_once(&index, &mut source, &head, PipelineConfig::default())
-                        .await
-                        .unwrap();
-
-                assert_eq!(state.durable_tip().unwrap().height, 5);
-                assert!(head.is_empty());
-                assert!(
-                    index
-                        .read_block_by_hash(state.generation(), hash(6))
-                        .unwrap()
-                        .is_none()
-                );
-                index.verify_continuity().unwrap();
-            });
+            assert_eq!(state.durable_tip().unwrap().height, 5);
+            assert!(head.is_empty());
+            assert!(index.read_block_by_hash(state.generation(), hash(6)).unwrap().is_none());
+            index.verify_continuity().unwrap();
+        });
     }
 
     #[test]
     fn atomically_replaces_a_durable_reorg() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=120).map(raw_block).collect());
-                let (state, head) =
-                    sync_head_once(&index, &mut source, &[], PipelineConfig::default())
-                        .await
-                        .unwrap();
-                assert_eq!(state.durable_tip().unwrap().height, 110);
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=120).map(raw_block).collect());
+            let (state, head) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
+            assert_eq!(state.durable_tip().unwrap().height, 110);
 
-                source = Source(
-                    (0..=121)
-                        .map(|height| raw_branch_block(height, 21))
-                        .collect(),
-                );
-                let (state, head) =
-                    sync_head_once(&index, &mut source, &head, PipelineConfig::default())
-                        .await
-                        .unwrap();
+            source = Source((0..=121).map(|height| raw_branch_block(height, 21)).collect());
+            let (state, head) =
+                sync_head_once(&index, &mut source, &head, PipelineConfig::default())
+                    .await
+                    .unwrap();
 
-                assert_eq!(state.durable_tip().unwrap().height, 111);
-                assert_eq!(
-                    index.read_block(state.generation(), 21).unwrap().hash,
-                    branch_hash(21)
-                );
-                assert_eq!(head.first().unwrap().height, 112);
-                assert_eq!(head.last().unwrap().height, 121);
-                index.verify_continuity().unwrap();
-            });
+            assert_eq!(state.durable_tip().unwrap().height, 111);
+            assert_eq!(index.read_block(state.generation(), 21).unwrap().hash, branch_hash(21));
+            assert_eq!(head.first().unwrap().height, 112);
+            assert_eq!(head.last().unwrap().height, 121);
+            index.verify_continuity().unwrap();
+        });
     }
 
     #[test]
     fn deep_reorg_is_reported_then_recovered() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=120).map(raw_block).collect());
-                let (_, head) = sync_head_once(&index, &mut source, &[], PipelineConfig::default())
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=120).map(raw_block).collect());
+            let (_, head) =
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
+
+            source = Source((0..=121).map(|height| raw_branch_block(height, 20)).collect());
+            assert!(matches!(
+                sync_head_once(&index, &mut source, &head, PipelineConfig::default()).await,
+                Err(HeadSyncError::DeepReorg { height: 20 })
+            ));
+            let (state, head) =
+                recover_deep_reorg(&index, &mut source, &head, PipelineConfig::default())
                     .await
                     .unwrap();
 
-                source = Source(
-                    (0..=121)
-                        .map(|height| raw_branch_block(height, 20))
-                        .collect(),
-                );
-                assert!(matches!(
-                    sync_head_once(&index, &mut source, &head, PipelineConfig::default()).await,
-                    Err(HeadSyncError::DeepReorg { height: 20 })
-                ));
-                let (state, head) =
-                    recover_deep_reorg(&index, &mut source, &head, PipelineConfig::default())
-                        .await
-                        .unwrap();
-
-                assert_eq!(state.durable_tip().unwrap().height, 111);
-                assert_eq!(
-                    index.read_block(state.generation(), 20).unwrap().hash,
-                    branch_hash(20)
-                );
-                assert_eq!(head.first().unwrap().height, 112);
-                assert_eq!(head.last().unwrap().height, 121);
-                index.verify_continuity().unwrap();
-            });
+            assert_eq!(state.durable_tip().unwrap().height, 111);
+            assert_eq!(index.read_block(state.generation(), 20).unwrap().hash, branch_hash(20));
+            assert_eq!(head.first().unwrap().height, 112);
+            assert_eq!(head.last().unwrap().height, 121);
+            index.verify_continuity().unwrap();
+        });
     }
 
     #[test]
     fn restart_recovers_a_persisted_noncanonical_suffix() {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
-                let mut source = Source((0..=120).map(raw_block).collect());
-                sync_head_once(&index, &mut source, &[], PipelineConfig::default())
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let mut source = Source((0..=120).map(raw_block).collect());
+            sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
+
+            let mut source =
+                Source((0..=105).map(|height| raw_branch_block(height, 100)).collect());
+            assert!(matches!(
+                sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await,
+                Err(HeadSyncError::DeepReorg { height: 110 })
+            ));
+
+            let (state, head) =
+                recover_deep_reorg(&index, &mut source, &[], PipelineConfig::default())
                     .await
                     .unwrap();
-
-                let mut source = Source(
-                    (0..=105)
-                        .map(|height| raw_branch_block(height, 100))
-                        .collect(),
-                );
-                assert!(matches!(
-                    sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await,
-                    Err(HeadSyncError::DeepReorg { height: 110 })
-                ));
-
-                let (state, head) =
-                    recover_deep_reorg(&index, &mut source, &[], PipelineConfig::default())
-                        .await
-                        .unwrap();
-                assert_eq!(state.durable_tip().unwrap().height, 99);
-                assert_eq!(
-                    index.read_block(state.generation(), 99).unwrap().hash,
-                    hash(99)
-                );
-                assert_eq!(head.first().unwrap().height, 100);
-                assert_eq!(head.first().unwrap().hash, branch_hash(100));
-                assert_eq!(head.last().unwrap().height, 105);
-                index.verify_continuity().unwrap();
-            });
+            assert_eq!(state.durable_tip().unwrap().height, 99);
+            assert_eq!(index.read_block(state.generation(), 99).unwrap().hash, hash(99));
+            assert_eq!(head.first().unwrap().height, 100);
+            assert_eq!(head.first().unwrap().hash, branch_hash(100));
+            assert_eq!(head.last().unwrap().height, 105);
+            index.verify_continuity().unwrap();
+        });
     }
 
     fn raw_block(height: u32) -> RawIndexBlock {

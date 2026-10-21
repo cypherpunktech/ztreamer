@@ -147,13 +147,7 @@ async fn main() -> Result<()> {
         .await
     };
 
-    lifecycle::supervise(
-        node,
-        application,
-        shutdown.clone(),
-        lifecycle::shutdown_signal(),
-    )
-    .await
+    lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
 }
 
 async fn run_application(
@@ -239,9 +233,7 @@ async fn run_application(
     let reconcile = async {
         match compact.sync_head(&mut startup_client, pipeline).await {
             Err(HeadSyncError::DeepReorg { .. }) => {
-                compact
-                    .recover_deep_reorg(&mut startup_client, pipeline)
-                    .await
+                compact.recover_deep_reorg(&mut startup_client, pipeline).await
             }
             result => result,
         }
@@ -251,8 +243,7 @@ async fn run_application(
         _ = shutdown.cancelled() => return Ok(()),
         result = reconcile => { result?; }
     }
-    p2p.install(compact.clone())
-        .map_err(|error| anyhow!(error))?;
+    p2p.install(compact.clone()).map_err(|error| anyhow!(error))?;
     drop(p2p);
 
     let (server_shutdown, _) = watch::channel(false);
@@ -319,9 +310,7 @@ fn grpc_server(tls_cert: Option<&Path>, tls_key: Option<&Path>) -> Result<Server
     let server = Server::builder();
     let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) else {
         if tls_cert.is_some() || tls_key.is_some() {
-            return Err(anyhow!(
-                "--tls-cert and --tls-key must be provided together"
-            ));
+            return Err(anyhow!("--tls-cert and --tls-key must be provided together"));
         }
         return Ok(server);
     };

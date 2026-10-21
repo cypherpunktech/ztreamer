@@ -69,9 +69,7 @@ impl Message for EncodedCompactBlock {
         if let Repr::Encoded(bytes) = &self.0 {
             self.0 = Repr::Decoded(proto::CompactBlock::decode(bytes.clone())?);
         }
-        let Repr::Decoded(block) = &mut self.0 else {
-            unreachable!()
-        };
+        let Repr::Decoded(block) = &mut self.0 else { unreachable!() };
         block.merge_field(tag, wire_type, buf, ctx)
     }
 
@@ -86,26 +84,16 @@ mod tests {
 
     #[test]
     fn ordinary_prost_encoding_decoding_and_merging() {
-        let block = proto::CompactBlock {
-            height: 123,
-            hash: vec![4; 32],
-            ..Default::default()
-        };
+        let block = proto::CompactBlock { height: 123, hash: vec![4; 32], ..Default::default() };
         let bytes = block.encode_to_vec();
         let mut encoded = EncodedCompactBlock::from(block.clone());
         assert_eq!(encoded.encoded_len(), bytes.len());
         assert_eq!(encoded.encode_to_vec(), bytes);
         assert_eq!(
-            EncodedCompactBlock::decode(bytes.as_slice())
-                .unwrap()
-                .into_decoded()
-                .unwrap(),
+            EncodedCompactBlock::decode(bytes.as_slice()).unwrap().into_decoded().unwrap(),
             block
         );
-        let delta = proto::CompactBlock {
-            time: 99,
-            ..Default::default()
-        };
+        let delta = proto::CompactBlock { time: 99, ..Default::default() };
         encoded.merge(delta.encode_to_vec().as_slice()).unwrap();
         assert_eq!(encoded.clone().into_decoded().unwrap().time, 99);
         encoded.clear();

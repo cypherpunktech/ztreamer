@@ -23,14 +23,10 @@ use ztreamer_service::CompactService;
 async fn streamed_balance_deduplicates_and_limits_addresses() {
     timeout(Duration::from_secs(60), async {
         let network = Network::Mainnet;
-        let genesis: Arc<block::Block> = BLOCK_MAINNET_GENESIS_BYTES
-            .as_slice()
-            .zcash_deserialize_into()
-            .unwrap();
-        let mut block_one: Arc<block::Block> = BLOCK_MAINNET_1_BYTES
-            .as_slice()
-            .zcash_deserialize_into()
-            .unwrap();
+        let genesis: Arc<block::Block> =
+            BLOCK_MAINNET_GENESIS_BYTES.as_slice().zcash_deserialize_into().unwrap();
+        let mut block_one: Arc<block::Block> =
+            BLOCK_MAINNET_1_BYTES.as_slice().zcash_deserialize_into().unwrap();
 
         // Genesis has no funds. Block 1's founders' reward is an indexed P2SH output.
         let reward = &block_one.transactions[0].outputs()[1];
@@ -64,9 +60,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
             Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", genesis.hash().0).unwrap(),
         );
         let (mut state, read, _tip, _change) =
-            zakura_state::init(Config::ephemeral(), &network, block::Height::MAX, 0)
-                .await
-                .unwrap();
+            zakura_state::init(Config::ephemeral(), &network, block::Height::MAX, 0).await.unwrap();
         for block in [genesis, block_one] {
             (&mut state)
                 .oneshot(Request::CommitCheckpointVerifiedBlock(block.into()))
@@ -112,9 +106,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         ] {
             let addresses: Vec<String> = addresses.into_iter().map(str::to_owned).collect();
             let unary = client
-                .get_taddress_balance(proto::AddressList {
-                    addresses: addresses.clone(),
-                })
+                .get_taddress_balance(proto::AddressList { addresses: addresses.clone() })
                 .await
                 .unwrap()
                 .into_inner()
@@ -123,9 +115,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
 
             let streamed = client
                 .get_taddress_balance_stream(tokio_stream::iter(
-                    addresses
-                        .into_iter()
-                        .map(|address| proto::Address { address }),
+                    addresses.into_iter().map(|address| proto::Address { address }),
                 ))
                 .await
                 .unwrap()
@@ -135,11 +125,9 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         }
 
         let invalid = client
-            .get_taddress_balance_stream(tokio_stream::iter([a, a, "invalid"].map(|address| {
-                proto::Address {
-                    address: address.to_owned(),
-                }
-            })))
+            .get_taddress_balance_stream(tokio_stream::iter(
+                [a, a, "invalid"].map(|address| proto::Address { address: address.to_owned() }),
+            ))
             .await
             .unwrap_err();
         assert_eq!(invalid.code(), tonic::Code::InvalidArgument);
@@ -158,9 +146,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         at_limit.extend([funded.clone(), addresses[9_999].clone()]);
         let balance = client
             .get_taddress_balance_stream(tokio_stream::iter(
-                at_limit
-                    .into_iter()
-                    .map(|address| proto::Address { address }),
+                at_limit.into_iter().map(|address| proto::Address { address }),
             ))
             .await
             .unwrap()
@@ -169,19 +155,14 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         assert_eq!(balance, expected_balance, "duplicates at the address limit");
 
         // Keep the input open to require rejection as soon as the limit is exceeded.
-        let over_limit = tokio_stream::iter(
-            addresses
-                .into_iter()
-                .map(|address| proto::Address { address }),
-        )
-        .chain(tokio_stream::pending());
-        let exhausted = timeout(
-            Duration::from_secs(30),
-            client.get_taddress_balance_stream(over_limit),
-        )
-        .await
-        .expect("over-limit stream must be rejected before the client closes it")
-        .unwrap_err();
+        let over_limit =
+            tokio_stream::iter(addresses.into_iter().map(|address| proto::Address { address }))
+                .chain(tokio_stream::pending());
+        let exhausted =
+            timeout(Duration::from_secs(30), client.get_taddress_balance_stream(over_limit))
+                .await
+                .expect("over-limit stream must be rejected before the client closes it")
+                .unwrap_err();
         assert_eq!(exhausted.code(), tonic::Code::ResourceExhausted);
 
         let balance = client
@@ -190,10 +171,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
             .unwrap()
             .into_inner()
             .value_zat;
-        assert_eq!(
-            balance, expected_balance,
-            "request after an address limit error"
-        );
+        assert_eq!(balance, expected_balance, "request after an address limit error");
 
         drop(client);
         shutdown.send(()).unwrap();
