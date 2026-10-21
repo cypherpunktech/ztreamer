@@ -1,17 +1,19 @@
 [package]
 name = "ztreamer-indexer"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 heed = { version = "0.22.1", default-features = false }
-hex = "0.4"
 metrics = "0.24"
 prost = "0.14.4"
 serde = { version = "1", features = ["derive"] }
 serde-big-array = "0.5"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
@@ -20,6 +22,7 @@ ztreamer-node = { path = "../node" }
 ztreamer-protocol = { path = "../protocol" }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 criterion = "0.7"
 metrics-util = { version = "0.19.1", default-features = false, features = ["debugging"] }
 tempfile = "3"

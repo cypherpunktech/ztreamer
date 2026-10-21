@@ -106,7 +106,7 @@ pub struct P2pStatus {
     pub message: String,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MessageDecoder(Option<(Message, Vec<u8>)>);
 
 impl MessageDecoder {

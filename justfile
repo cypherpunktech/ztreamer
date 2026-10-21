@@ -16,6 +16,12 @@ fmt:
 fmt-check:
     cargo +nightly fmt --all -- --check
 
+doc:
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+
+# Everything CI checks before tests: fmt, clippy, docs.
+check: fmt-check clippy doc
+
 # Criterion: `just bench`, `just bench parse_block`, `just bench -- --save-baseline base`
 bench *args:
     cargo bench --locked --bench parser --bench codec --bench serve {{ args }}

@@ -62,27 +62,27 @@ pub struct IndexState {
 }
 
 impl IndexState {
-    /// Returns the highest contiguous compact block commited to
-    /// [`Index::mutable_blocks`]
-    pub fn durable_tip(&self) -> Option<BlockId> {
+    /// Returns the highest contiguous compact block committed to the
+    /// `mutable_blocks` database.
+    pub const fn durable_tip(&self) -> Option<BlockId> {
         self.durable_tip
     }
 
-    /// Returns the highest height committed to a [`Index::sealed_ranges`].
+    /// Returns the highest height committed to the `sealed_ranges` database.
     ///
-    /// Blocks above this height live in [`Index::mutable_blocks`].
-    pub fn sealed_through(&self) -> Option<u32> {
+    /// Blocks above this height live in the `mutable_blocks` database.
+    pub const fn sealed_through(&self) -> Option<u32> {
         self.sealed_through
     }
 
     /// Identifies the exact committed revision of the durable index that an
     /// [`IndexState`] describes.
-    pub fn generation(&self) -> u64 {
+    pub const fn generation(&self) -> u64 {
         self.generation
     }
 
     /// Cumulative [`TreeSizes`] at the end of [`IndexState::durable_tip`]
-    pub fn tree_sizes(&self) -> TreeSizes {
+    pub const fn tree_sizes(&self) -> TreeSizes {
         self.tree_sizes
     }
 }
@@ -126,6 +126,12 @@ pub struct Index {
     sealed_ranges: HeightDb,
     mutable_blocks: HeightDb,
     hash_to_height: Database<Bytes, U32<BigEndian>>,
+}
+
+impl std::fmt::Debug for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Index").field("path", &self.env.path()).finish_non_exhaustive()
+    }
 }
 
 impl Index {
@@ -721,7 +727,7 @@ impl WriteStage {
             .record(elapsed.as_secs_f64());
     }
 
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
             Self::Encode => "encode",
             Self::HashIndex => "hash_index",
@@ -776,7 +782,7 @@ impl WriteTimer {
         self.seal_read_blocks += blocks;
     }
 
-    fn bytes(&mut self, stage: WriteStage, bytes: usize) {
+    const fn bytes(&mut self, stage: WriteStage, bytes: usize) {
         self.bytes[stage as usize] += bytes;
     }
 }

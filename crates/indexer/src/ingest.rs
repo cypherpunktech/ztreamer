@@ -9,7 +9,7 @@ use crate::{
     parser::ParsedCompactBlock,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum IngestError {
     #[error(transparent)]
     Codec(#[from] CodecError),
@@ -55,8 +55,25 @@ pub struct OrderedBuilder {
     max_pending_bytes: usize,
 }
 
+impl std::fmt::Debug for OrderedBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OrderedBuilder")
+            .field("next_height", &self.next_height)
+            .field("previous_hash", &self.previous_hash)
+            .field("tree_sizes", &self.tree_sizes)
+            .field("generation", &self.generation)
+            .field("pending", &self.pending.len())
+            .field("pending_bytes", &self.pending_bytes)
+            .field("ready_end", &self.ready_end)
+            .field("ready_bytes", &self.ready_bytes)
+            .field("max_pending_bytes", &self.max_pending_bytes)
+            .finish()
+    }
+}
+
 /// An ordered batch produced by [`OrderedBuilder::build_batch`] for appending
 /// to the [`crate::index::Index`].
+#[derive(Debug)]
 pub struct WriteBatch {
     /// Index generation the batch was built against.
     pub(crate) base_generation: u64,
@@ -193,16 +210,16 @@ impl OrderedBuilder {
     }
 
     /// Encoded-size estimate, including the contiguous ready prefix.
-    pub(crate) fn pending_bytes(&self) -> usize {
+    pub(crate) const fn pending_bytes(&self) -> usize {
         self.pending_bytes
     }
 
     /// First height not yet in the contiguous prefix; may equal target + 1.
-    pub(crate) fn first_missing_height(&self) -> u64 {
+    pub(crate) const fn first_missing_height(&self) -> u64 {
         self.ready_end
     }
 
-    pub(crate) fn ready_bytes(&self) -> usize {
+    pub(crate) const fn ready_bytes(&self) -> usize {
         self.ready_bytes
     }
 

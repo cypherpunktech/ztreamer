@@ -6,7 +6,7 @@ use metrics::{Counter, Gauge, Histogram};
 
 use super::{OrderedBuilder, WorkerStats};
 
-pub(super) struct PipelineMetrics {
+pub(crate) struct PipelineMetrics {
     pub target: Gauge,
     active_workers: Gauge,
     pending_bytes: Gauge,
@@ -26,7 +26,7 @@ pub(super) struct PipelineMetrics {
 }
 
 impl PipelineMetrics {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             target: metrics::gauge!("ztreamer.pipeline.target.height"),
             active_workers: metrics::gauge!("ztreamer.pipeline.workers.active"),
@@ -54,24 +54,24 @@ impl PipelineMetrics {
         }
     }
 
-    pub fn pass(&self) -> PassMetrics<'_> {
+    pub(crate) fn pass(&self) -> PassMetrics<'_> {
         self.first_missing.set(f64::NAN);
         self.target.set(f64::NAN);
         PassMetrics { metrics: self, start: Instant::now(), outcome: 2 }
     }
 
-    pub fn worker(&self) -> ActiveWorker<'_> {
+    pub(crate) fn worker(&self) -> ActiveWorker<'_> {
         self.active_workers.increment(1.0);
         ActiveWorker(self)
     }
 
-    pub fn buffer(&self, builder: &OrderedBuilder) {
+    pub(crate) fn buffer(&self, builder: &OrderedBuilder) {
         self.pending_bytes.set(builder.pending_bytes() as f64);
         self.ready_bytes.set(builder.ready_bytes() as f64);
         self.first_missing.set(builder.first_missing_height() as f64);
     }
 
-    pub fn commit(&self, elapsed: Duration, success: bool, blocks: u64) {
+    pub(crate) fn commit(&self, elapsed: Duration, success: bool, blocks: u64) {
         self.commit[usize::from(!success)].record(elapsed.as_secs_f64());
         if success {
             self.committed_blocks.increment(blocks);
@@ -79,19 +79,19 @@ impl PipelineMetrics {
     }
 }
 
-pub(super) struct PassMetrics<'a> {
+pub(crate) struct PassMetrics<'a> {
     metrics: &'a PipelineMetrics,
     start: Instant,
     outcome: usize,
 }
 
 impl PassMetrics<'_> {
-    pub fn finish(&mut self, success: bool) {
+    pub(crate) fn finish(&mut self, success: bool) {
         self.outcome = usize::from(!success);
     }
 
     /// Records the pass as stopped early by its stop flag, not as complete.
-    pub fn stopped(&mut self) {
+    pub(crate) const fn stopped(&mut self) {
         self.outcome = 3;
     }
 }
@@ -105,7 +105,7 @@ impl Drop for PassMetrics<'_> {
     }
 }
 
-pub(super) struct ActiveWorker<'a>(&'a PipelineMetrics);
+pub(crate) struct ActiveWorker<'a>(&'a PipelineMetrics);
 
 impl Drop for ActiveWorker<'_> {
     fn drop(&mut self) {
@@ -113,7 +113,7 @@ impl Drop for ActiveWorker<'_> {
     }
 }
 
-pub(super) struct SegmentMetrics<'a> {
+pub(crate) struct SegmentMetrics<'a> {
     metrics: &'a PipelineMetrics,
     start: Instant,
     pub stats: WorkerStats,
@@ -124,7 +124,7 @@ pub(super) struct SegmentMetrics<'a> {
 }
 
 impl<'a> SegmentMetrics<'a> {
-    pub fn new(metrics: &'a PipelineMetrics) -> Self {
+    pub(crate) fn new(metrics: &'a PipelineMetrics) -> Self {
         Self {
             metrics,
             start: Instant::now(),

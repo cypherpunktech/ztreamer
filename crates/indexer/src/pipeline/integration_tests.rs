@@ -135,7 +135,7 @@ fn prepared(height: u32) -> ParsedCompactBlock {
                 };
                 count as usize
             ],
-            orchard_actions: vec![action.clone(); count as usize],
+            orchard_actions: vec![action; count as usize],
             ironwood_actions: vec![action; count as usize],
         }]
     };

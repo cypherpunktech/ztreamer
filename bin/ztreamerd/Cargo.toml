@@ -1,7 +1,11 @@
 [package]
 name = "ztreamerd"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 anyhow = "1"

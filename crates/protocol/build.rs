@@ -1,3 +1,5 @@
+//! Compiles the Lightwallet protobuf definitions and the file descriptor set.
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .file_descriptor_set_path(

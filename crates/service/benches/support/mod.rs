@@ -16,19 +16,19 @@ use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer
 use ztreamer_service::CompactService;
 
 #[path = "../../../../benchmarks/fixtures.rs"]
-pub mod fixtures;
+pub(crate) mod fixtures;
 
-pub type Client = CompactTxStreamerClient<Channel>;
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type Client = CompactTxStreamerClient<Channel>;
+pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
-pub struct Fixture {
+pub(crate) struct Fixture {
     pub service: CompactService,
     // Keep the index directory alive until the service has stopped.
     _dir: tempfile::TempDir,
 }
 
 impl Fixture {
-    pub async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let index =
             Arc::new(Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
@@ -44,7 +44,7 @@ impl Fixture {
     }
 }
 
-pub struct LocalServer {
+pub(crate) struct LocalServer {
     pub endpoint: String,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<Result<(), tonic::transport::Error>>,
@@ -52,7 +52,7 @@ pub struct LocalServer {
 }
 
 impl LocalServer {
-    pub async fn start() -> Self {
+    pub(crate) async fn start() -> Self {
         let fixture = Fixture::new().await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -69,18 +69,18 @@ impl LocalServer {
         Self { endpoint, shutdown, task, _fixture: fixture }
     }
 
-    pub async fn stop(self) {
+    pub(crate) async fn stop(self) {
         let _ = self.shutdown.send(());
         tokio::time::timeout(Duration::from_secs(10), self.task).await.unwrap().unwrap().unwrap();
     }
 }
 
-pub fn range(start: u32, end: u32) -> proto::BlockRange {
+pub(crate) fn range(start: u32, end: u32) -> proto::BlockRange {
     let id = |height| Some(proto::BlockId { height: u64::from(height), hash: Vec::new() });
     proto::BlockRange { start: id(start), end: id(end), pool_types: Vec::new() }
 }
 
-pub struct Observation {
+pub(crate) struct Observation {
     pub first: Duration,
     pub complete: Duration,
     pub bytes: u64,
@@ -89,7 +89,7 @@ pub struct Observation {
 
 /// Measures request-to-first-message and request-to-EOF, including decoding and
 /// consumer delay. Validates complete, ordered delivery for synthetic or live data.
-pub async fn consume(
+pub(crate) async fn consume(
     client: &mut Client,
     range: proto::BlockRange,
     delay: Duration,

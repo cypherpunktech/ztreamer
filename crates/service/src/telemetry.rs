@@ -34,7 +34,7 @@ pub(crate) struct ServiceMetrics {
 }
 
 impl ServiceMetrics {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             active: metrics::gauge!("ztreamer.range.active"),
             blocks: metrics::counter!("ztreamer.range.emitted.blocks"),
@@ -53,18 +53,18 @@ impl ServiceMetrics {
         }
     }
 
-    pub fn snapshot(&self, snapshot: &ServingSnapshot) {
+    pub(crate) fn snapshot(&self, snapshot: &ServingSnapshot) {
         self.visible.set(snapshot.visible_tip.map_or(f64::NAN, |tip| f64::from(tip.height)));
         self.ready.set(f64::from(snapshot.ready));
         self.fresh.set(f64::from(snapshot.tip_fresh));
     }
 
-    pub fn range(self: &Arc<Self>) -> RangeGuard {
+    pub(crate) fn range(self: &Arc<Self>) -> RangeGuard {
         self.active.increment(1.0);
         RangeGuard { metrics: Arc::clone(self), start: Instant::now(), emitted: 0, outcome: 2 }
     }
 
-    pub fn published(&self, observed: Option<(BlockId, Instant)>, visible: Option<BlockId>) {
+    pub(crate) fn published(&self, observed: Option<(BlockId, Instant)>, visible: Option<BlockId>) {
         if let Some((tip, at)) = observed
             && visible == Some(tip)
         {
@@ -105,7 +105,7 @@ pub(crate) struct RangeGuard {
 }
 
 impl RangeGuard {
-    pub fn response<T: Send + 'static>(
+    pub(crate) fn response<T: Send + 'static>(
         mut self,
         result: Result<RpcStream<T>, Status>,
     ) -> Result<RpcStream<T>, Status> {

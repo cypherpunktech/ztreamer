@@ -19,7 +19,7 @@ pub(crate) struct PoolSelection {
 }
 
 impl PoolSelection {
-    pub(crate) fn is_all(self) -> bool {
+    pub(crate) const fn is_all(self) -> bool {
         !self.transparent && self.sapling && self.orchard && self.ironwood
     }
 

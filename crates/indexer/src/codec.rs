@@ -22,6 +22,7 @@ pub trait StoredBlock: Sized {
 }
 
 /// Metadata for continuity checks plus a response ready for Prost/Tonic to copy.
+#[derive(Debug)]
 pub struct EncodedBlockRecord {
     pub height: u32,
     pub hash: Digest,
@@ -30,6 +31,7 @@ pub struct EncodedBlockRecord {
 }
 
 /// A decoded protobuf view for requests that need pool/nullifier projection.
+#[derive(Debug)]
 pub struct ProtobufBlockRecord(pub proto::CompactBlock);
 
 impl StoredBlock for ProtobufBlockRecord {
@@ -135,7 +137,7 @@ pub struct TreeSizes {
     pub ironwood: u32,
 }
 
-#[derive(Debug, thiserror::Error, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, thiserror::Error, Eq, PartialEq)]
 pub enum CodecError {
     #[error("encoded value is truncated")]
     Truncated,
@@ -465,11 +467,11 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
-    fn remaining(&self) -> usize {
+    const fn remaining(&self) -> usize {
         self.bytes.len() - self.offset
     }
 
@@ -496,7 +498,7 @@ impl<'a> Reader<'a> {
         Ok(self.u32()? as usize)
     }
 
-    fn finish(self) -> Result<(), CodecError> {
+    const fn finish(self) -> Result<(), CodecError> {
         if self.remaining() == 0 { Ok(()) } else { Err(CodecError::TrailingBytes) }
     }
 }

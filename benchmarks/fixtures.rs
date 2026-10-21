@@ -13,13 +13,13 @@ use ztreamer_indexer::{
     parser::{CompactTransaction, ParsedCompactBlock, RawIndexBlock, parse_block},
 };
 
-pub fn hash(height: u32) -> Digest {
+pub(crate) fn hash(height: u32) -> Digest {
     let mut hash = [0; 32];
     hash[..4].copy_from_slice(&height.to_be_bytes());
     hash
 }
 
-pub fn shielded_transactions() -> Vec<CompactTransaction> {
+pub(crate) fn shielded_transactions() -> Vec<CompactTransaction> {
     let mut transactions = Vec::new();
     for bytes in
         [&*BLOCK_MAINNET_949496_BYTES, &*BLOCK_MAINNET_1687121_BYTES, &*BLOCK_TESTNET_1842421_BYTES]
@@ -39,7 +39,7 @@ pub fn shielded_transactions() -> Vec<CompactTransaction> {
     transactions
 }
 
-pub fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBlockRecord {
+pub(crate) fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBlockRecord {
     CompactBlockRecord {
         height,
         hash: hash(height),
@@ -50,7 +50,7 @@ pub fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBloc
     }
 }
 
-pub fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
+pub(crate) fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
     ParsedCompactBlock {
         height: record.height,
         hash: record.hash,
@@ -76,7 +76,7 @@ pub fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
 }
 
 // Deliberately mixed sizes, not a claim about mainnet's statistical distribution.
-pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
+pub(crate) fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
     let shielded = shielded_transactions();
     let mut sizes = TreeSizes::default();
     (0..count)
@@ -103,7 +103,7 @@ pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
         .collect()
 }
 
-pub fn populate(
+pub(crate) fn populate(
     index: &Index,
     records: &[CompactBlockRecord],
     seal_through: Option<u32>,

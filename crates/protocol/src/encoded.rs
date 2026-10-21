@@ -20,7 +20,7 @@ enum Repr {
 impl EncodedCompactBlock {
     /// Wraps a trusted, complete protobuf payload, without a length prefix.
     /// Callers must obtain it from an encoder or a validated index record.
-    pub fn from_encoded(bytes: Bytes) -> Self {
+    pub const fn from_encoded(bytes: Bytes) -> Self {
         Self(Repr::Encoded(bytes))
     }
 

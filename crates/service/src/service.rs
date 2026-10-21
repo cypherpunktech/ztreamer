@@ -67,7 +67,7 @@ impl From<IndexState> for ServingSnapshot {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("volatile head does not connect to the durable index")]
 pub struct SnapshotError;
 
@@ -96,7 +96,7 @@ impl Default for HeadFollowerConfig {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum HeadFollowerError {
     #[error("head follower durations are invalid")]
     Config,
@@ -155,6 +155,15 @@ pub struct CompactService {
     metrics: Arc<ServiceMetrics>,
 }
 
+impl std::fmt::Debug for CompactService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactService")
+            .field("chain_name", &self.chain_name)
+            .field("ping_enabled", &self.ping_enabled)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CompactService {
     pub fn new(
         index: Arc<Index>,
@@ -189,7 +198,7 @@ impl CompactService {
         service
     }
 
-    pub fn with_ping_enabled(mut self, enabled: bool) -> Self {
+    pub const fn with_ping_enabled(mut self, enabled: bool) -> Self {
         self.ping_enabled = enabled;
         self
     }

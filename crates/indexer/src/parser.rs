@@ -33,7 +33,7 @@ pub struct RawIndexBlock {
     pub txids: Vec<transaction::Hash>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CompactSaplingOutput {
     pub cmu: Digest,
     pub ephemeral_key: EphemeralKey,
@@ -41,7 +41,7 @@ pub struct CompactSaplingOutput {
     pub ciphertext: Ciphertext,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CompactShieldedAction {
     pub nullifier: Digest,
     pub commitment: Digest,
@@ -61,7 +61,7 @@ pub struct CompactTransaction {
 }
 
 impl CompactTransaction {
-    fn has_payload(&self) -> bool {
+    const fn has_payload(&self) -> bool {
         !self.sapling_spends.is_empty()
             || !self.sapling_outputs.is_empty()
             || !self.orchard_actions.is_empty()
@@ -83,7 +83,7 @@ pub struct ParsedCompactBlock {
     pub ironwood_additions: u32,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum CompactParseError {
     #[error("block {height} has a truncated header")]
     TruncatedHeader { height: u32 },
@@ -106,7 +106,7 @@ pub enum CompactParseError {
     CommitmentCount { height: u32 },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum TransactionParseError {
     #[error("transaction is larger than {MAX_TRANSACTION_BYTES} bytes")]
     TooLarge,
@@ -329,7 +329,7 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
@@ -549,7 +549,7 @@ impl<'a> Reader<'a> {
         Ok(actions)
     }
 
-    fn finish(&self) -> Result<(), TransactionParseError> {
+    const fn finish(&self) -> Result<(), TransactionParseError> {
         if self.offset == self.bytes.len() {
             Ok(())
         } else {

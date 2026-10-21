@@ -1,5 +1,7 @@
 //! `ztreamerd` process lifecycle: embedded Zakura, historical indexing, head following, and servers.
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use std::{
     net::SocketAddr,
     num::{NonZeroU32, NonZeroUsize},

@@ -180,7 +180,7 @@ impl SegmentSender<'_> {
     }
 
     /// Ends the segment. The result is an error if the worker did not send all its heights.
-    pub(crate) fn finish(self) -> Result<(), PipelineError> {
+    pub(crate) const fn finish(self) -> Result<(), PipelineError> {
         if self.next_height <= self.end_height {
             return Err(PipelineError::SourceGap {
                 expected: self.next_height as u32,

@@ -300,7 +300,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
     /// Lets `stop` end the pass early, for example at shutdown. When `stop` is set, each worker
     /// completes its segment and starts no new segment. The writer writes the blocks that it
     /// has, and the pass returns a state with a lower tip.
-    pub(crate) fn with_stop(mut self, stop: &'a AtomicBool) -> Self {
+    pub(crate) const fn with_stop(mut self, stop: &'a AtomicBool) -> Self {
         self.stop = Some(stop);
         self
     }

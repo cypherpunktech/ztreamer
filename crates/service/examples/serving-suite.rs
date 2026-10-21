@@ -483,7 +483,7 @@ struct Sample {
     o: Observation,
 }
 
-fn count(rpc: &Rpc) -> u32 {
+const fn count(rpc: &Rpc) -> u32 {
     if let Rpc::Range(n) = rpc { *n } else { 1 }
 }
 fn request_height(args: &Args, rpc: &Rpc, sample: u64, start: u32, end: u32) -> u32 {
@@ -493,7 +493,7 @@ fn request_height(args: &Args, rpc: &Rpc, sample: u64, start: u32, end: u32) -> 
         height(args.seed, sample, start, end, count(rpc))
     }
 }
-fn request_end(rpc: &Rpc, start: u32, end: u32) -> u32 {
+const fn request_end(rpc: &Rpc, start: u32, end: u32) -> u32 {
     if matches!(rpc, Rpc::AddressHistory(..) | Rpc::Utxos(..)) {
         end
     } else {
