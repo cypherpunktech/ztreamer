@@ -1,0 +1,3 @@
+[advisories]
+# Advisories to ignore. Give each entry a reason and a link to the advisory.
+ignore = []

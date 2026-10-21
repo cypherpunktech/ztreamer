@@ -27,3 +27,9 @@ zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.
 zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1", default-features = false }
 zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
+
+[profile.ci-rust]
+inherits = "dev"
+strip = true
+debug = false
+incremental = false
