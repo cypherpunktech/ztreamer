@@ -11,7 +11,10 @@ clippy:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
 fmt:
-    cargo fmt --all
+    cargo +nightly fmt --all
+
+fmt-check:
+    cargo +nightly fmt --all -- --check
 
 # Criterion: `just bench`, `just bench parse_block`, `just bench -- --save-baseline base`
 bench *args:
