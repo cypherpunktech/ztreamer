@@ -5,6 +5,7 @@
 use std::{
     net::SocketAddr,
     num::{NonZeroU32, NonZeroUsize},
+    ops::ControlFlow,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -22,7 +23,10 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
 use ztreamer_indexer::{
-    head::HeadSyncError, index::Index, pipeline::PipelineConfig, source::ZakuraSource,
+    head::HeadSyncError,
+    index::{Index, IndexState},
+    pipeline::PipelineConfig,
+    source::ZakuraSource,
 };
 use ztreamer_node as node;
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
@@ -174,33 +178,73 @@ async fn main() -> Result<()> {
 
 async fn run_application(
     cli: Cli,
-    mut grpc_server: Server,
+    grpc_server: Server,
     index: Arc<Index>,
     chain_name: String,
     p2p: Arc<P2pCompactService>,
     client: node::NodeClient,
     shutdown: CancellationToken,
 ) -> Result<()> {
+    if wait_for_node(&client, &shutdown).await?.is_break() {
+        return Ok(());
+    }
+
+    let pipeline = PipelineConfig::from(&cli);
+    let ControlFlow::Continue(state) =
+        sync_historical(&client, &index, pipeline, cli.index_only, &shutdown).await?
+    else {
+        return Ok(());
+    };
+    if cli.index_only || shutdown.is_cancelled() {
+        return Ok(());
+    }
+
+    let compact = CompactService::with_node(index, state, chain_name, client.clone())
+        .with_ping_enabled(cli.ping_very_insecure);
+    if reconcile_head(&compact, client.clone(), pipeline, &shutdown).await?.is_break() {
+        return Ok(());
+    }
+    p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
+    drop(p2p);
+
+    serve(compact, client, pipeline, grpc_server, &cli, &shutdown).await
+}
+
+/// Waits until Zakura is near the chain tip and has a finalized block. Breaks on shutdown.
+async fn wait_for_node(
+    client: &node::NodeClient,
+    shutdown: &CancellationToken,
+) -> Result<ControlFlow<()>> {
     info!("waiting for Zakura to sync near the chain tip");
     tokio::select! {
         result = client.wait_until_close_to_tip() => {
             result.map_err(|error| eyre!("wait for Zakura sync: {error}"))?;
         }
-        _ = shutdown.cancelled() => return Ok(()),
+        _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
     }
     info!(tip = ?client.tip(), "Zakura is near the chain tip");
 
     while client.database().tip().is_none() {
         info!("waiting for Zakura's first finalized block");
         tokio::select! {
-            _ = shutdown.cancelled() => return Ok(()),
+            _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
             _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
         }
     }
+    Ok(ControlFlow::Continue(()))
+}
 
-    let pipeline = PipelineConfig::from(&cli);
+/// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
+/// with `index_only` because the index was the whole job.
+async fn sync_historical(
+    client: &node::NodeClient,
+    index: &Arc<Index>,
+    pipeline: PipelineConfig,
+    index_only: bool,
+    shutdown: &CancellationToken,
+) -> Result<ControlFlow<(), IndexState>> {
     let source = ZakuraSource::new(client.database());
-    let sync_index = Arc::clone(&index);
+    let sync_index = Arc::clone(index);
     info!("syncing historical compact index");
     let historical_started = Instant::now();
     let stop = Arc::new(AtomicBool::new(false));
@@ -219,12 +263,12 @@ async fn run_application(
                 elapsed_seconds = historical_started.elapsed().as_secs_f64(),
                 "historical compact index stopped before shutdown"
             );
-            if cli.index_only {
+            if index_only {
                 return Err(eyre!(
                     "historical compact index stopped by shutdown before it completed"
                 ));
             }
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         }
     };
     info!(
@@ -232,30 +276,41 @@ async fn run_application(
         elapsed_seconds = historical_started.elapsed().as_secs_f64(),
         "historical compact index complete"
     );
+    Ok(ControlFlow::Continue(state))
+}
 
-    if cli.index_only || shutdown.is_cancelled() {
-        return Ok(());
-    }
-
-    let compact = CompactService::with_node(index, state, chain_name, client.clone())
-        .with_ping_enabled(cli.ping_very_insecure);
-    let mut startup_client = client.clone();
+/// Brings the compact index onto Zakura's canonical head, recovering a deep reorg if needed.
+/// Breaks on shutdown.
+async fn reconcile_head(
+    compact: &CompactService,
+    mut client: node::NodeClient,
+    pipeline: PipelineConfig,
+    shutdown: &CancellationToken,
+) -> Result<ControlFlow<()>> {
     let reconcile = async {
-        match compact.sync_head(&mut startup_client, pipeline).await {
+        match compact.sync_head(&mut client, pipeline).await {
             Err(HeadSyncError::DeepReorg { .. }) => {
-                compact.recover_deep_reorg(&mut startup_client, pipeline).await
+                compact.recover_deep_reorg(&mut client, pipeline).await
             }
             result => result,
         }
         .wrap_err("reconcile compact index with Zakura's canonical head")
     };
     tokio::select! {
-        _ = shutdown.cancelled() => return Ok(()),
-        result = reconcile => { result?; }
+        _ = shutdown.cancelled() => Ok(ControlFlow::Break(())),
+        result = reconcile => result.map(|_| ControlFlow::Continue(())),
     }
-    p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
-    drop(p2p);
+}
 
+/// Runs the head follower and gRPC server until shutdown or until either task stops.
+async fn serve(
+    compact: CompactService,
+    client: node::NodeClient,
+    pipeline: PipelineConfig,
+    mut grpc_server: Server,
+    cli: &Cli,
+    shutdown: &CancellationToken,
+) -> Result<()> {
     let (server_shutdown, _) = watch::channel(false);
     let mut follower = tokio::spawn({
         let compact = compact.clone();
@@ -269,15 +324,13 @@ async fn run_application(
     });
     let mut grpc = tokio::spawn({
         let receiver = server_shutdown.subscribe();
+        let address = cli.grpc_listen;
+        let tls = cli.tls_cert.is_some();
         async move {
-            info!(
-                address = %cli.grpc_listen,
-                tls = cli.tls_cert.is_some(),
-                "serving CompactTxStreamer gRPC"
-            );
+            info!(%address, tls, "serving CompactTxStreamer gRPC");
             grpc_server
                 .add_service(CompactTxStreamerServer::new(compact))
-                .serve_with_shutdown(cli.grpc_listen, shutdown_requested(receiver))
+                .serve_with_shutdown(address, shutdown_requested(receiver))
                 .await
                 .wrap_err("gRPC server failed")
         }
