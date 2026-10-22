@@ -26,7 +26,11 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+      # Restores the Bench cache that master saves. Pull requests do not save
+      # their own: only that PR could use it, and it can evict master's caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
       - name: Measure base and candidate
         id: measure

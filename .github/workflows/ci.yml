@@ -105,6 +105,8 @@ jobs:
         if: steps.changes.outputs.run == 'true'
       - uses: Swatinem/rust-cache@v2
         if: steps.changes.outputs.run == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
         if: steps.changes.outputs.run == 'true'
       - name: Benchmark smoke test
