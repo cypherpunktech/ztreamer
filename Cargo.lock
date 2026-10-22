@@ -7986,7 +7986,8 @@ dependencies = [
 name = "ztreamer-node"
 version = "0.1.0"
 dependencies = [
- "color-eyre",
+ "thiserror 2.0.21",
+ "tokio",
  "tower 0.5.3",
  "zakura",
  "zakura-chain",
