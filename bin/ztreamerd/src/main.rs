@@ -92,6 +92,26 @@ struct Cli {
     index_only: bool,
 }
 
+impl From<&Cli> for PipelineConfig {
+    /// Starts from the pipeline defaults and applies the limits given on the command line.
+    fn from(cli: &Cli) -> Self {
+        let defaults = Self::default();
+        Self {
+            workers: cli.workers.map_or(defaults.workers, NonZeroUsize::get),
+            source_segment_blocks: cli
+                .source_segment_blocks
+                .map_or(defaults.source_segment_blocks, NonZeroU32::get),
+            max_pending_bytes: cli
+                .max_pending_bytes
+                .map_or(defaults.max_pending_bytes, NonZeroUsize::get),
+            max_batch_bytes: cli
+                .max_batch_bytes
+                .map_or(defaults.max_batch_bytes, NonZeroUsize::get),
+            ..defaults
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -178,19 +198,7 @@ async fn run_application(
         }
     }
 
-    let mut pipeline = PipelineConfig::default();
-    if let Some(workers) = cli.workers {
-        pipeline.workers = workers.get();
-    }
-    if let Some(source_segment_blocks) = cli.source_segment_blocks {
-        pipeline.source_segment_blocks = source_segment_blocks.get();
-    }
-    if let Some(max_pending_bytes) = cli.max_pending_bytes {
-        pipeline.max_pending_bytes = max_pending_bytes.get();
-    }
-    if let Some(max_batch_bytes) = cli.max_batch_bytes {
-        pipeline.max_batch_bytes = max_batch_bytes.get();
-    }
+    let pipeline = PipelineConfig::from(&cli);
     let source = ZakuraSource::new(client.database());
     let sync_index = Arc::clone(&index);
     info!("syncing historical compact index");
@@ -320,4 +328,22 @@ async fn shutdown_requested(mut receiver: watch::Receiver<bool>) {
 
 fn task_result(result: Result<Result<()>, tokio::task::JoinError>, name: &str) -> Result<()> {
     result.wrap_err_with(|| format!("{name} task panicked"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_config_keeps_defaults_for_unset_flags() {
+        let cli =
+            Cli::parse_from(["ztreamerd", "--fetch-workers", "3", "--max-batch-bytes", "4096"]);
+        let defaults = PipelineConfig::default();
+        let pipeline = PipelineConfig::from(&cli);
+        assert_eq!(pipeline.workers, 3);
+        assert_eq!(pipeline.max_batch_bytes, 4096);
+        assert_eq!(pipeline.source_segment_blocks, defaults.source_segment_blocks);
+        assert_eq!(pipeline.max_pending_bytes, defaults.max_pending_bytes);
+        assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
+    }
 }
