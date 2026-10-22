@@ -23,7 +23,7 @@ ztreamer-protocol = { path = "../protocol" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
-criterion = "0.7"
+criterion = "0.8"
 metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 tempfile = "3"
 zakura-test.workspace = true
