@@ -4,7 +4,24 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # The zakura crates come from one Git repository at one tag. Cargo can only
+      # resolve them together, so they update in one PR. This group comes first:
+      # a dependency joins the first group that matches it.
+      zakura:
+        patterns:
+          - "zakura*"
+      # Major updates stay in separate PRs for review.
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
