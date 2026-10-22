@@ -8,8 +8,10 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels that PR's previous run. Each master push gets its own
+# group, so pushes run in parallel and none is cancelled while it waits.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
