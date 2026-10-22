@@ -286,20 +286,8 @@ async fn run_application(
     let _ = server_shutdown.send(true);
 
     // Drain both tasks before inspecting either result, including on failure.
-    let (grpc_result, follower_result) = tokio::join!(
-        async {
-            match grpc_result {
-                Some(result) => result,
-                None => grpc.await,
-            }
-        },
-        async {
-            match follower_result {
-                Some(result) => result,
-                None => follower.await,
-            }
-        },
-    );
+    let (grpc_result, follower_result) =
+        lifecycle::drain_both((grpc, grpc_result), (follower, follower_result)).await;
     task_result(grpc_result, "gRPC")?;
     task_result(follower_result, "head follower")?;
     if task_exited {

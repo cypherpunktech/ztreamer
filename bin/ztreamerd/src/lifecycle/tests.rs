@@ -162,6 +162,28 @@ async fn signal_failure_still_drains_both_futures() {
 }
 
 #[tokio::test]
+async fn drain_both_reuses_taken_results_and_awaits_the_rest() {
+    let polled = Cell::new(false);
+    let (a, b) = timeout(
+        Duration::from_secs(5),
+        drain_both(
+            (
+                async {
+                    polled.set(true);
+                    0
+                },
+                Some(1),
+            ),
+            (async { 2 }, None),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!((a, b), (1, 2));
+    assert!(!polled.get());
+}
+
+#[tokio::test]
 async fn startup_failure_returns_original_error() {
     let mut config = zakurad::config::ZakuradConfig::default();
     config.zcashd_compat.enabled = false;
