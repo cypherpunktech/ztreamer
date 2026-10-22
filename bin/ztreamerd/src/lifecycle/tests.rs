@@ -1,6 +1,6 @@
 use std::{cell::Cell, future, rc::Rc, time::Duration};
 
-use anyhow::anyhow;
+use eyre::eyre;
 use tokio::{sync::oneshot, time::timeout};
 
 use super::*;
@@ -39,7 +39,7 @@ async fn application_failure_still_drains_node() {
         Duration::from_secs(5),
         supervise(
             node,
-            async { Err(anyhow!("application failed")) },
+            async { Err(eyre!("application failed")) },
             shutdown.clone(),
             future::pending(),
         ),
@@ -64,7 +64,7 @@ async fn node_failure_cancels_application_waiting_for_readiness() {
     let error = timeout(
         Duration::from_secs(5),
         supervise(
-            async { Err(anyhow!("node failed")) },
+            async { Err(eyre!("node failed")) },
             application,
             shutdown.clone(),
             future::pending(),
@@ -110,7 +110,7 @@ async fn signal_drains_both_futures_concurrently_even_on_error() {
         shutdown.cancelled().await;
         node_cleanup_tx.send(()).unwrap();
         app_cleanup_rx.await.unwrap();
-        Err(anyhow!("node cleanup failed"))
+        Err(eyre!("node cleanup failed"))
     };
     let application = async {
         app_started_tx.send(()).unwrap();
@@ -151,7 +151,7 @@ async fn signal_failure_still_drains_both_futures() {
                 Ok(())
             },
             shutdown.clone(),
-            async { Err(anyhow!("signal failed")) },
+            async { Err(eyre!("signal failed")) },
         ),
     )
     .await
@@ -171,14 +171,14 @@ async fn startup_failure_returns_original_error() {
     let node = async {
         Box::pin(zakurad::node::run_with_services_ready(config, vec![], shutdown.clone(), ready_tx))
             .await
-            .map_err(|error| anyhow!("{error}"))
+            .map_err(|error| eyre!("{error}"))
     };
     let application = async {
         tokio::select! {
             _ = shutdown.cancelled() => Ok(()),
             result = ready_rx => {
-                result.map_err(|_| anyhow!("readiness closed"))?;
-                Err(anyhow!("invalid node unexpectedly started"))
+                result.map_err(|_| eyre!("readiness closed"))?;
+                Err(eyre!("invalid node unexpectedly started"))
             }
         }
     };
@@ -204,7 +204,7 @@ async fn cancellation_before_startup_closes_readiness() {
             ready_tx,
         ))
         .await
-        .map_err(|error| anyhow!("{error}"))
+        .map_err(|error| eyre!("{error}"))
     };
     let application = async {
         shutdown.cancelled().await;
@@ -315,7 +315,7 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
             ready_tx,
         ))
         .await
-        .map_err(|error| anyhow!("{error}"))
+        .map_err(|error| eyre!("{error}"))
     };
     let application = async {
         let client = NodeClient::from_services(ready_rx.await?);

@@ -13,8 +13,8 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{Context, Result, anyhow};
 use clap::Parser;
+use eyre::{Result, WrapErr, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
@@ -105,9 +105,9 @@ async fn main() -> Result<()> {
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
 
     let mut config =
-        ZakuradConfig::load(cli.zakura_config.clone()).context("load Zakura configuration")?;
+        ZakuradConfig::load(cli.zakura_config.clone()).wrap_err("load Zakura configuration")?;
     config.metrics.endpoint_addr = Some(cli.metrics_listen);
-    let _metrics = MetricsEndpoint::new(&config.metrics).context("start Prometheus endpoint")?;
+    let _metrics = MetricsEndpoint::new(&config.metrics).wrap_err("start Prometheus endpoint")?;
     let network = config.network.network.clone();
     let index = Arc::new(Index::open(
         &cli.index_dir,
@@ -129,13 +129,13 @@ async fn main() -> Result<()> {
             ready_tx,
         ))
         .await
-        .map_err(|error| anyhow!("Zakura failed: {error}"))
+        .map_err(|error| eyre!("Zakura failed: {error}"))
     };
     let application = async {
         let services = tokio::select! {
             biased;
             _ = shutdown.cancelled() => return Ok(()),
-            result = ready_rx => result.context("Zakura stopped before readiness")?,
+            result = ready_rx => result.wrap_err("Zakura stopped before readiness")?,
         };
         run_application(
             cli,
@@ -164,7 +164,7 @@ async fn run_application(
     info!("waiting for Zakura to sync near the chain tip");
     tokio::select! {
         result = client.wait_until_close_to_tip() => {
-            result.map_err(|error| anyhow!("wait for Zakura sync: {error}"))?;
+            result.map_err(|error| eyre!("wait for Zakura sync: {error}"))?;
         }
         _ = shutdown.cancelled() => return Ok(()),
     }
@@ -201,18 +201,18 @@ async fn run_application(
         move || source.sync(&sync_index, pipeline, &stop)
     });
     let state = tokio::select! {
-        result = &mut historical => result.context("historical index task panicked")??,
+        result = &mut historical => result.wrap_err("historical index task panicked")??,
         _ = shutdown.cancelled() => {
             info!("stopping the historical index pass before shutdown");
             stop.store(true, Ordering::Relaxed);
-            let state = historical.await.context("historical index task panicked")??;
+            let state = historical.await.wrap_err("historical index task panicked")??;
             info!(
                 height = state.durable_tip().map(|tip| tip.height),
                 elapsed_seconds = historical_started.elapsed().as_secs_f64(),
                 "historical compact index stopped before shutdown"
             );
             if cli.index_only {
-                return Err(anyhow!(
+                return Err(eyre!(
                     "historical compact index stopped by shutdown before it completed"
                 ));
             }
@@ -239,13 +239,13 @@ async fn run_application(
             }
             result => result,
         }
-        .context("reconcile compact index with Zakura's canonical head")
+        .wrap_err("reconcile compact index with Zakura's canonical head")
     };
     tokio::select! {
         _ = shutdown.cancelled() => return Ok(()),
         result = reconcile => { result?; }
     }
-    p2p.install(compact.clone()).map_err(|error| anyhow!(error))?;
+    p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     drop(p2p);
 
     let (server_shutdown, _) = watch::channel(false);
@@ -256,7 +256,7 @@ async fn run_application(
             compact
                 .follow_head(client, pipeline, HeadFollowerConfig::default(), receiver)
                 .await
-                .context("head follower failed")
+                .wrap_err("head follower failed")
         }
     });
     let mut grpc = tokio::spawn({
@@ -271,7 +271,7 @@ async fn run_application(
                 .add_service(CompactTxStreamerServer::new(compact))
                 .serve_with_shutdown(cli.grpc_listen, shutdown_requested(receiver))
                 .await
-                .context("gRPC server failed")
+                .wrap_err("gRPC server failed")
         }
     });
 
@@ -303,7 +303,7 @@ async fn run_application(
     task_result(grpc_result, "gRPC")?;
     task_result(follower_result, "head follower")?;
     if task_exited {
-        return Err(anyhow!("daemon task stopped unexpectedly"));
+        return Err(eyre!("daemon task stopped unexpectedly"));
     }
     Ok(())
 }
@@ -312,18 +312,18 @@ fn grpc_server(tls_cert: Option<&Path>, tls_key: Option<&Path>) -> Result<Server
     let server = Server::builder();
     let (Some(cert_path), Some(key_path)) = (tls_cert, tls_key) else {
         if tls_cert.is_some() || tls_key.is_some() {
-            return Err(anyhow!("--tls-cert and --tls-key must be provided together"));
+            return Err(eyre!("--tls-cert and --tls-key must be provided together"));
         }
         return Ok(server);
     };
 
     let cert = std::fs::read(cert_path)
-        .with_context(|| format!("read TLS certificate {}", cert_path.display()))?;
+        .wrap_err_with(|| format!("read TLS certificate {}", cert_path.display()))?;
     let key = std::fs::read(key_path)
-        .with_context(|| format!("read TLS private key {}", key_path.display()))?;
+        .wrap_err_with(|| format!("read TLS private key {}", key_path.display()))?;
     server
         .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
-        .context("configure gRPC TLS")
+        .wrap_err("configure gRPC TLS")
 }
 
 async fn shutdown_requested(mut receiver: watch::Receiver<bool>) {
@@ -331,5 +331,5 @@ async fn shutdown_requested(mut receiver: watch::Receiver<bool>) {
 }
 
 fn task_result(result: Result<Result<()>, tokio::task::JoinError>, name: &str) -> Result<()> {
-    result.with_context(|| format!("{name} task panicked"))?
+    result.wrap_err_with(|| format!("{name} task panicked"))?
 }

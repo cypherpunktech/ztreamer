@@ -2,15 +2,15 @@
 
 use std::future::Future;
 
-use anyhow::{Context, Result, anyhow};
+use eyre::{Result, WrapErr, eyre};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) async fn shutdown_signal() -> Result<()> {
-    let mut terminate = signal(SignalKind::terminate()).context("SIGTERM handler failed")?;
+    let mut terminate = signal(SignalKind::terminate()).wrap_err("SIGTERM handler failed")?;
 
     tokio::select! {
-        result = tokio::signal::ctrl_c() => result.context("Ctrl-C handler failed"),
+        result = tokio::signal::ctrl_c() => result.wrap_err("Ctrl-C handler failed"),
         _ = terminate.recv() => Ok(()),
     }
 }
@@ -60,7 +60,7 @@ pub(crate) async fn supervise(
     node_result?;
     application_result?;
     if node_exited_first {
-        return Err(anyhow!("Zakura stopped unexpectedly"));
+        return Err(eyre!("Zakura stopped unexpectedly"));
     }
     Ok(())
 }

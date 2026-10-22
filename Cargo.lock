@@ -8036,8 +8036,8 @@ dependencies = [
 name = "ztreamerd"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
+ "eyre",
  "tempfile",
  "tokio",
  "tokio-util",
