@@ -75,7 +75,8 @@ jobs:
       - name: Select benchmark smoke check
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # A PR checkout is a merge commit whose first parent is the current base.
+          BASE_REV: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
         run: |
           python3 <<'PY'
           import os
@@ -84,7 +85,7 @@ jobs:
           # Only known documentation/site paths can skip the smoke check.
           # Unknown paths and unavailable history must still exercise benchmarks.
           documentation = {b"README.md", b"banner.png", b"benchmarks/README.md", b"wrangler.jsonc"}
-          base = os.environ["BASE_SHA"]
+          base = os.environ["BASE_REV"]
           try:
               if not base or set(base) == {"0"}:
                   raise ValueError("no previous revision")

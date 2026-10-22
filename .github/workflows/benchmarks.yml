@@ -40,8 +40,12 @@ jobs:
             fi
             cargo bench --locked "${targets[@]}" -- --noplot "$@"
           }
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if ! git cat-file -e "${{ github.event.pull_request.base.sha }}:crates/indexer/benches/parser.rs"; then
+          # The checkout is the PR merged onto the current base branch, and its first
+          # parent is that base commit. pull_request.base.sha can be older: GitHub does
+          # not update it for label or reopen events.
+          base=$(git rev-parse HEAD^1)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if ! git cat-file -e "$base:crates/indexer/benches/parser.rs"; then
             benches
             printf '%s\n' '## Benchmark comparison unavailable' '' \
               'The base revision has no parser benchmark. Candidate measurements are in the artifact.' \
@@ -51,7 +55,7 @@ jobs:
           rm -rf target/criterion
           head=$(git rev-parse HEAD)
           trap 'git checkout --quiet "$head"' EXIT
-          git checkout --quiet "${{ github.event.pull_request.base.sha }}"
+          git checkout --quiet "$base"
           benches --save-baseline base
           git checkout --quiet "$head"
           trap - EXIT
@@ -62,7 +66,7 @@ jobs:
         if: steps.measure.outputs.compared == 'true'
         continue-on-error: true
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.measure.outputs.base }}
         run: |
           set -euo pipefail
           python3 <<'PY' | tee bench-comment.md >> "$GITHUB_STEP_SUMMARY"
