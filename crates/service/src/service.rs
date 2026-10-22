@@ -24,7 +24,7 @@ use ztreamer_node::NodeClient;
 
 use crate::telemetry::{ObservedSource, ServiceMetrics};
 
-use crate::serve::{
+use crate::project::{
     PoolSelection, add_transparent_txs, compact_mempool_txs, excluded_txids, project_block,
 };
 use ztreamer_indexer::{

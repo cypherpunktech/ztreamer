@@ -6,7 +6,7 @@
 
 pub mod grpc;
 pub mod p2p;
-mod serve;
+mod project;
 mod service;
 
 pub use service::{
