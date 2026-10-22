@@ -1154,7 +1154,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -5539,7 +5539,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7682,7 +7682,7 @@ dependencies = [
 [[package]]
 name = "zakura-test"
 version = "2.2.0"
-source = "git+https://github.com/zakura-core/zakura.git?tag=v1.5.1#af944f5194ef2e9921bc96af017629450375013c"
+source = "git+https://github.com/zakura-core/zakura.git?tag=v1.6.0#ebda15e23ed0189787e21b4625c6e4f62d10932f"
 dependencies = [
  "color-eyre",
  "futures",
