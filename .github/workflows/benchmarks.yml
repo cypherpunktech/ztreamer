@@ -183,7 +183,7 @@ jobs:
             bench-pr.txt
             bench-comment.md
           retention-days: 30
-      - uses: marocchino/sticky-pull-request-comment@v2
+      - uses: marocchino/sticky-pull-request-comment@v3
         continue-on-error: true
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('bench-comment.md') != ''
         with:
