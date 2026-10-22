@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 color-eyre = { version = "0.6", default-features = false }
-tower = { version = "0.4.13", features = ["buffer", "util"] }
+tower = { version = "0.5.3", features = ["buffer", "util"] }
 zakura-chain.workspace = true
 zakura-node-services.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
