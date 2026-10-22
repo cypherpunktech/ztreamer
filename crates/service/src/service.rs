@@ -14,19 +14,16 @@ use tower::ServiceExt;
 use zakura_chain::{
     block,
     parameters::{ConsensusBranchId, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
-    transaction::{self, Transaction},
-    transparent,
+    transaction, transparent,
 };
 use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
 use ztreamer_node::NodeClient;
 
 use crate::telemetry::{ObservedSource, ServiceMetrics};
 
-use crate::project::{
-    PoolSelection, add_transparent_txs, compact_mempool_txs, excluded_txids, project_block,
-};
+use crate::project::{PoolSelection, add_transparent_txs, project_block};
 use ztreamer_indexer::{
     Digest,
     codec::{CompactBlockRecord, EncodedBlockRecord, ProtobufBlockRecord, StoredBlock},
@@ -35,6 +32,8 @@ use ztreamer_indexer::{
     pipeline::PipelineConfig,
 };
 use ztreamer_protocol::{EncodedCompactBlock, proto};
+
+mod mempool;
 
 pub(crate) type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 const MAX_RANGE_STREAMS: usize = 16;
@@ -843,114 +842,6 @@ impl CompactService {
         Ok(self.subtree_stream(roots, self.snapshot()))
     }
 
-    pub(crate) async fn send_transaction(
-        &self,
-        request: proto::RawTransaction,
-    ) -> Result<proto::SendResponse, Status> {
-        let transaction = Transaction::zcash_deserialize(request.data.as_slice())
-            .map_err(|error| Status::invalid_argument(format!("invalid transaction: {error}")))?;
-        let node = self.node()?.clone();
-        let runtime = tokio::runtime::Handle::current();
-        // zakura's submit_transaction future is not Send
-        let txid = tokio::task::spawn_blocking(move || {
-            runtime
-                .block_on(node.submit_transaction(transaction))
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
-        .map_err(|error| Status::invalid_argument(format!("Zakura rejected transaction: {error}")))?
-        .mined_id();
-        Ok(proto::SendResponse { error_code: 0, error_message: txid.to_string() })
-    }
-
-    pub(crate) async fn mempool_stream(&self) -> Result<RpcStream<proto::RawTransaction>, Status> {
-        let node = self.node()?.clone();
-        let mut tip_changes = node.subscribe_chain_tip();
-        let _ = tip_changes.last_tip_change();
-        let mut transactions = Self::mempool_transactions(node.clone()).await?;
-        let (sender, receiver) = mpsc::channel(1);
-        tokio::spawn(async move {
-            let mut seen = HashSet::new();
-            loop {
-                for transaction in transactions.drain(..) {
-                    if !seen.insert(transaction.id()) {
-                        continue;
-                    }
-                    let transaction = match transaction.transaction().zcash_serialize_to_vec() {
-                        Ok(data) => proto::RawTransaction { data, height: 0 },
-                        Err(error) => {
-                            let _ = sender.send(Err(Status::internal(error.to_string()))).await;
-                            return;
-                        }
-                    };
-                    tokio::select! {
-                        biased;
-                        change = tip_changes.wait_for_tip_change() => {
-                            if let Err(error) = change {
-                                let _ = sender.send(Err(Status::unavailable(format!(
-                                    "Zakura chain-tip listener failed: {error}"
-                                )))).await;
-                            }
-                            return;
-                        }
-                        result = sender.send(Ok(transaction)) => {
-                            if result.is_err() {
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                transactions = tokio::select! {
-                    biased;
-                    change = tip_changes.wait_for_tip_change() => {
-                        if let Err(error) = change {
-                            let _ = sender.send(Err(Status::unavailable(format!(
-                                "Zakura chain-tip listener failed: {error}"
-                            )))).await;
-                        }
-                        return;
-                    }
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                        match Self::mempool_transactions(node.clone()).await {
-                            Ok(transactions) => transactions,
-                            Err(error) => {
-                                let _ = sender.send(Err(error)).await;
-                                return;
-                            }
-                        }
-                    }
-                };
-            }
-        });
-        Ok(Box::pin(ReceiverStream::new(receiver)))
-    }
-
-    pub(crate) async fn mempool_tx(
-        &self,
-        request: proto::GetMempoolTxRequest,
-    ) -> Result<RpcStream<proto::CompactTx>, Status> {
-        PoolSelection::from_mempool_request(&request.pool_types)?;
-        let node = self.node()?.clone();
-        let transactions = Self::mempool_transactions(node).await?;
-        let compact = tokio::task::spawn_blocking(move || mempool_compact(transactions, &request))
-            .await
-            .map_err(|error| Status::internal(format!("mempool conversion failed: {error}")))??;
-        Ok(Box::pin(tokio_stream::iter(compact.into_iter().map(Ok))))
-    }
-
-    async fn mempool_transactions(node: NodeClient) -> Result<Vec<transaction::UnminedTx>, Status> {
-        let runtime = tokio::runtime::Handle::current();
-        // Zakura's mempool service future is not Send.
-        tokio::task::spawn_blocking(move || {
-            runtime.block_on(node.mempool_transactions()).map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
-        .map_err(|error| Status::unavailable(format!("Zakura mempool query failed: {error}")))
-    }
-
     pub(crate) async fn taddress_transactions(
         &self,
         request: proto::TransparentAddressBlockFilter,
@@ -1116,29 +1007,6 @@ impl CompactService {
     }
 }
 
-fn mempool_compact(
-    transactions: Vec<transaction::UnminedTx>,
-    request: &proto::GetMempoolTxRequest,
-) -> Result<Vec<proto::CompactTx>, Status> {
-    let pools = PoolSelection::from_mempool_request(&request.pool_types)?;
-    let excluded = excluded_txids(
-        transactions.iter().map(|tx| tx.id().mined_id().0),
-        &request.exclude_txid_suffixes,
-    );
-    let transactions = transactions
-        .into_iter()
-        .filter(|tx| !excluded.contains(&tx.id().mined_id().0))
-        .map(|transaction| {
-            transaction
-                .transaction()
-                .zcash_serialize_to_vec()
-                .map(|bytes| (bytes, transaction.id().mined_id()))
-                .map_err(|error| Status::internal(error.to_string()))
-        })
-        .collect::<Result<Vec<_>, Status>>()?;
-    compact_mempool_txs(&transactions, pools, &[])
-}
-
 fn range_heights(request: &proto::BlockRange) -> Result<(u32, u32), Status> {
     let endpoint = |name, endpoint: &Option<proto::BlockId>| {
         let endpoint = endpoint
@@ -1193,7 +1061,6 @@ mod tests {
     use zakura_state::Config;
     use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamer;
 
-    use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
     use ztreamer_indexer::{
         codec::CompactBlockRecord,
         head::HeadError,
@@ -1701,68 +1568,6 @@ mod tests {
                 assert_eq!(heights, (100..=202).rev().collect::<Vec<_>>());
             },
         );
-    }
-
-    #[test]
-    fn mempool_requests_select_their_pools_and_exclusions() {
-        let sapling = shielded_mempool_transaction(&BLOCK_MAINNET_949496_BYTES, |transaction| {
-            transaction.sapling_outputs().next().is_some()
-        });
-        let orchard = shielded_mempool_transaction(&BLOCK_TESTNET_1842421_BYTES, |transaction| {
-            transaction.orchard_actions().next().is_some()
-        });
-        let sapling_txid = sapling.id().mined_id().0.to_vec();
-        let orchard_txid = orchard.id().mined_id().0.to_vec();
-        let mempool = vec![sapling, orchard];
-        let txids = |compact: Vec<proto::CompactTx>| {
-            compact.into_iter().map(|transaction| transaction.txid).collect::<Vec<_>>()
-        };
-
-        let compact =
-            mempool_compact(mempool.clone(), &proto::GetMempoolTxRequest::default()).unwrap();
-        assert_eq!(txids(compact.clone()), [sapling_txid.clone(), orchard_txid.clone()]);
-        assert!(!compact[0].outputs.is_empty());
-        assert!(!compact[1].actions.is_empty());
-
-        let orchard_only = proto::GetMempoolTxRequest {
-            pool_types: vec![proto::PoolType::Orchard as i32],
-            ..Default::default()
-        };
-        assert_eq!(
-            txids(mempool_compact(mempool.clone(), &orchard_only).unwrap()),
-            vec![orchard_txid.clone()]
-        );
-
-        let excluded = proto::GetMempoolTxRequest {
-            exclude_txid_suffixes: vec![orchard_txid[30..].to_vec()],
-            ..Default::default()
-        };
-        assert_eq!(txids(mempool_compact(mempool.clone(), &excluded).unwrap()), [sapling_txid]);
-
-        let transparent = proto::GetMempoolTxRequest {
-            pool_types: vec![proto::PoolType::Transparent as i32],
-            ..Default::default()
-        };
-        let compact = mempool_compact(mempool, &transparent).unwrap();
-        assert!(!compact.is_empty());
-        assert!(compact.iter().all(|tx| tx.spends.is_empty()
-            && tx.outputs.is_empty()
-            && tx.actions.is_empty()
-            && tx.ironwood_actions.is_empty()));
-    }
-
-    fn shielded_mempool_transaction(
-        block: &[u8],
-        shielded: impl Fn(&transaction::Transaction) -> bool,
-    ) -> transaction::UnminedTx {
-        block::Block::zcash_deserialize(block)
-            .unwrap()
-            .transactions
-            .iter()
-            .find(|candidate| shielded(candidate))
-            .cloned()
-            .expect("the block vector holds a shielded transaction")
-            .into()
     }
 
     fn range(start: u32, end: u32) -> proto::BlockRange {
