@@ -45,14 +45,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
       - run: cargo doc --workspace --no-deps --locked --profile ci-rust
 
   test:
     name: Nextest
     runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
