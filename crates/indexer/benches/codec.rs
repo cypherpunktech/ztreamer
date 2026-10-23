@@ -1,8 +1,7 @@
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
 
-#[path = "../../../benchmarks/fixtures.rs"]
-mod fixtures;
+use ztreamer_indexer::test_utils as fixtures;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};

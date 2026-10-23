@@ -70,4 +70,5 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 
 - Tests panic. Never return `Result` from a test. `unwrap()` directly.
 - Unit tests in `mod tests` at the bottom of the file. Integration tests in
-  `tests/`. Benchmarks in `benches/`, shared fixtures in `benchmarks/`.
+  `tests/`. Benchmarks in `benches/`. Shared fixtures in `ztreamer_indexer::test_utils`,
+  behind the `test-utils` feature.

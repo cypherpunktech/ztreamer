@@ -1,11 +1,9 @@
-//! Deterministic synthetic compact blocks shared by the benchmark targets.
-#![allow(dead_code)]
+//! Deterministic synthetic compact blocks shared by tests and benchmarks.
+//!
+//! Compiled for this crate's own tests and for other crates that enable the `test-utils`
+//! feature in their `[dev-dependencies]`.
 
-use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
-use zakura_test::vectors::{
-    BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687121_BYTES, BLOCK_TESTNET_1842421_BYTES,
-};
-use ztreamer_indexer::{
+use crate::{
     Digest,
     codec::{CompactBlockRecord, TreeSizes},
     index::{Index, IndexState},
@@ -13,14 +11,20 @@ use ztreamer_indexer::{
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
+use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
+use zakura_test::vectors::{
+    BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687121_BYTES, BLOCK_TESTNET_1842421_BYTES,
+};
 
-pub(crate) fn hash(height: u32) -> Digest {
+/// A deterministic block hash: the big-endian height in the first four bytes, zeros after.
+pub fn hash(height: u32) -> Digest {
     let mut hash = [0; 32];
     hash[..4].copy_from_slice(&height.to_be_bytes());
     hash
 }
 
-pub(crate) fn shielded_transactions() -> Vec<CompactTransaction> {
+/// The shielded transactions from three real mainnet and testnet block vectors.
+pub fn shielded_transactions() -> Vec<CompactTransaction> {
     let mut transactions = Vec::new();
     for bytes in
         [&*BLOCK_MAINNET_949496_BYTES, &*BLOCK_MAINNET_1687121_BYTES, &*BLOCK_TESTNET_1842421_BYTES]
@@ -40,7 +44,8 @@ pub(crate) fn shielded_transactions() -> Vec<CompactTransaction> {
     transactions
 }
 
-pub(crate) fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBlockRecord {
+/// A record at `height` that chains onto [`hash`] of the previous height.
+pub fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBlockRecord {
     CompactBlockRecord {
         height,
         hash: hash(height),
@@ -51,7 +56,8 @@ pub(crate) fn record(height: u32, transactions: Vec<CompactTransaction>) -> Comp
     }
 }
 
-pub(crate) fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
+/// Converts a record into the parser output that produces it, with matching tree additions.
+pub fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
     ParsedCompactBlock {
         height: record.height,
         hash: record.hash,
@@ -76,8 +82,10 @@ pub(crate) fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
     }
 }
 
-// Deliberately mixed sizes, not a claim about mainnet's statistical distribution.
-pub(crate) fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
+/// `count` records with a mix of empty, small and heavy blocks and running tree sizes.
+///
+/// Deliberately mixed sizes, not a claim about mainnet's statistical distribution.
+pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
     let shielded = shielded_transactions();
     let mut sizes = TreeSizes::default();
     (0..count)
@@ -104,7 +112,8 @@ pub(crate) fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
         .collect()
 }
 
-pub(crate) fn populate(
+/// Writes `records` into `index` in batches and returns the resulting state.
+pub fn populate(
     index: &Index,
     records: &[CompactBlockRecord],
     seal_through: Option<u32>,

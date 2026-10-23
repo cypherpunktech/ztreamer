@@ -12,6 +12,8 @@ pub mod parser;
 pub mod pipeline;
 mod protobuf;
 pub mod source;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 pub mod types;
 
 pub type Digest = [u8; 32];
