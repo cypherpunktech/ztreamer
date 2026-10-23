@@ -190,7 +190,8 @@ pub(crate) fn excluded_txids(
     if suffixes.is_empty() {
         return excluded;
     }
-    // Display order turns suffix matches into contiguous prefix matches in sorted order.
+    // A suffix in protocol order is a prefix in display order. After the sort, the txids
+    // that match a prefix are adjacent.
     let mut displayed: Vec<_> = txids.map(|txid| txid.bytes_in_display_order()).collect();
     displayed.sort_unstable();
     for suffix in suffixes.iter().filter(|suffix| suffix.len() <= 32) {
