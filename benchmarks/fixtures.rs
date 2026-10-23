@@ -10,7 +10,8 @@ use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     index::{Index, IndexState},
     ingest::OrderedBuilder,
-    parser::{CompactTransaction, ParsedCompactBlock, RawIndexBlock, parse_block},
+    parser::parse_block,
+    types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 
 pub(crate) fn hash(height: u32) -> Digest {

@@ -10,7 +10,7 @@ use crate::{
     Digest,
     codec::{CompactBlockRecord, TreeSizes},
     ingest::OrderedBuilder,
-    parser::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
+    types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
 
 struct Fixture {
@@ -532,7 +532,7 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
     use crate::{
         head::{CanonicalBlockSource, HeadError, sync_head_once},
         index::BlockId,
-        parser::RawIndexBlock,
+        types::RawIndexBlock,
     };
     use zakura_chain::transaction;
 

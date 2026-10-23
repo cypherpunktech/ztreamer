@@ -12,8 +12,9 @@ use crate::{
     codec::CompactBlockRecord,
     index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
     ingest::{IngestError, OrderedBuilder},
-    parser::{CompactParseError, ParsedCompactBlock, RawIndexBlock, parse_block},
+    parser::{CompactParseError, parse_block},
     pipeline::PipelineConfig,
+    types::{ParsedCompactBlock, RawIndexBlock},
 };
 
 #[derive(Debug, thiserror::Error)]

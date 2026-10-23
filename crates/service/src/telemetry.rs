@@ -13,7 +13,7 @@ use tonic::Status;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
-    parser::RawIndexBlock,
+    types::RawIndexBlock,
 };
 
 use crate::service::{RpcStream, ServingSnapshot};

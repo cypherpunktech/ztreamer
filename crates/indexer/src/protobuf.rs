@@ -4,7 +4,7 @@ use ztreamer_protocol::{compact_bytes, proto};
 
 use crate::{
     codec::{CodecError, CompactBlockRecord, TreeSizes},
-    parser::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction},
+    types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction},
 };
 
 impl CompactBlockRecord {

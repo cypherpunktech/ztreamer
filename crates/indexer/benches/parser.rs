@@ -11,7 +11,7 @@ use zakura_test::vectors::{
     BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687106_BYTES, BLOCK_MAINNET_1687121_BYTES,
     BLOCK_TESTNET_1842421_BYTES,
 };
-use ztreamer_indexer::parser::{RawIndexBlock, parse_block};
+use ztreamer_indexer::{parser::parse_block, types::RawIndexBlock};
 
 fn corpus() -> Vec<(&'static str, RawIndexBlock)> {
     let mut corpus: Vec<_> = [

@@ -6,7 +6,7 @@ use crate::{
     Digest,
     codec::{CodecError, CompactBlockRecord, MAX_RECORD_BYTES, TreeSizes},
     index::{IndexState, RANGE_SIZE},
-    parser::ParsedCompactBlock,
+    types::ParsedCompactBlock,
 };
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -314,7 +314,7 @@ impl OrderedBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{CompactSaplingOutput, CompactTransaction};
+    use crate::types::{CompactSaplingOutput, CompactTransaction};
 
     #[test]
     fn reassembles_out_of_order_blocks_and_assigns_tree_sizes() {

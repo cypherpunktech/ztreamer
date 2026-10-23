@@ -11,7 +11,8 @@ use ztreamer_indexer::{
     Digest,
     codec::{CompactBlockRecord, TreeSizes, decode_range_record, encode_range},
     index::RANGE_SIZE,
-    parser::{CompactTransaction, RawIndexBlock, parse_block},
+    parser::parse_block,
+    types::{CompactTransaction, RawIndexBlock},
 };
 
 fn shielded_transactions() -> Vec<CompactTransaction> {

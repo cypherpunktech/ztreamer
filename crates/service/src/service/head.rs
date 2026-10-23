@@ -152,7 +152,7 @@ mod tests {
     use std::sync::Arc;
     use zakura_chain::{block, parameters::Network};
     use zakura_state::Config;
-    use ztreamer_indexer::{head::HeadError, index::Index, parser::RawIndexBlock};
+    use ztreamer_indexer::{head::HeadError, index::Index, types::RawIndexBlock};
 
     use crate::service::test_utils::raw_block;
 

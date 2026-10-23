@@ -1,10 +1,14 @@
 //! Selective parser for the wallet-scanning fields in Zcash transaction versions 1–6.
 
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
-use zakura_chain::{block, transaction};
+use zakura_chain::transaction;
 
-use crate::{Ciphertext, Digest, EphemeralKey};
+use crate::{
+    Digest,
+    types::{
+        CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock,
+        RawIndexBlock,
+    },
+};
 
 const MAX_TRANSACTION_BYTES: usize = 2_000_000;
 const MAX_VECTOR_ITEMS: usize = u16::MAX as usize;
@@ -25,41 +29,6 @@ const ORCHARD_ACTION_BYTES: usize = 820;
 const BCTV14_JOINSPLIT_BYTES: usize = 1_802;
 const GROTH16_JOINSPLIT_BYTES: usize = 1_698;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RawIndexBlock {
-    pub height: block::Height,
-    pub hash: block::Hash,
-    pub bytes: Vec<u8>,
-    pub txids: Vec<transaction::Hash>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CompactSaplingOutput {
-    pub cmu: Digest,
-    pub ephemeral_key: EphemeralKey,
-    #[serde(with = "BigArray")]
-    pub ciphertext: Ciphertext,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CompactShieldedAction {
-    pub nullifier: Digest,
-    pub commitment: Digest,
-    pub ephemeral_key: EphemeralKey,
-    #[serde(with = "BigArray")]
-    pub ciphertext: Ciphertext,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CompactTransaction {
-    pub index: u64,
-    pub txid: Digest,
-    pub sapling_spends: Vec<Digest>,
-    pub sapling_outputs: Vec<CompactSaplingOutput>,
-    pub orchard_actions: Vec<CompactShieldedAction>,
-    pub ironwood_actions: Vec<CompactShieldedAction>,
-}
-
 impl CompactTransaction {
     const fn has_payload(&self) -> bool {
         !self.sapling_spends.is_empty()
@@ -67,20 +36,6 @@ impl CompactTransaction {
             || !self.orchard_actions.is_empty()
             || !self.ironwood_actions.is_empty()
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Parser output that later gets converted into a
-/// [`crate::codec::CompactBlockRecord`]
-pub struct ParsedCompactBlock {
-    pub height: u32,
-    pub hash: Digest,
-    pub previous_hash: Digest,
-    pub time: u32,
-    pub transactions: Vec<CompactTransaction>,
-    pub sapling_additions: u32,
-    pub orchard_additions: u32,
-    pub ironwood_additions: u32,
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]

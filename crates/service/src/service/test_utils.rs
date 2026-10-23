@@ -6,7 +6,7 @@ use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     index::{Index, IndexState},
     ingest::OrderedBuilder,
-    parser::{ParsedCompactBlock, RawIndexBlock},
+    types::{ParsedCompactBlock, RawIndexBlock},
 };
 use ztreamer_protocol::proto;
 

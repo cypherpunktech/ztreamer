@@ -12,6 +12,7 @@ pub mod parser;
 pub mod pipeline;
 mod protobuf;
 pub mod source;
+pub mod types;
 
 pub type Digest = [u8; 32];
 pub type EphemeralKey = [u8; 32];
