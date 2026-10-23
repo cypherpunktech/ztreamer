@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["bin/ztreamerd", "crates/indexer", "crates/node", "crates/protocol", "crates/service"]
+members = [
+    "bin/serving-suite",
+    "bin/ztreamerd",
+    "crates/indexer",
+    "crates/node",
+    "crates/protocol",
+    "crates/service",
+]
 
 [workspace.package]
 edition = "2024"

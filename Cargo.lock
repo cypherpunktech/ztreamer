@@ -5140,6 +5140,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "serving-suite"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "prost",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tonic",
+ "ztreamer-protocol",
+ "ztreamer-service",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

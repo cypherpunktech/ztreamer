@@ -5,7 +5,7 @@ set -Eeuo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ ${1:-} == --help ]]; then
     cargo run --locked --manifest-path "$repo/Cargo.toml" --release \
-        -p ztreamer-service --example serving-suite -- --help
+        -p serving-suite -- --help
     exit
 fi
 run_root=${RUN_ROOT:-"$repo/benchmark-runs/serving"}
@@ -14,13 +14,13 @@ run=$(mktemp -d "$run_root/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
 python3 -c 'import tomllib'
 echo "Building serving benchmark; artifacts: $run"
 cargo build --locked --manifest-path "$repo/Cargo.toml" --release \
-    -p ztreamer-service --example serving-suite > "$run/build.log" 2>&1 || {
+    -p serving-suite > "$run/build.log" 2>&1 || {
     cat "$run/build.log" >&2
     exit 1
 }
 python3 "$repo/scripts/benchmark-metadata.py" "$repo" "$run/client-provenance"
 command=(cargo run --locked --manifest-path "$repo/Cargo.toml" --release \
-    -p ztreamer-service --example serving-suite -- --output "$run/data" "$@")
+    -p serving-suite -- --output "$run/data" "$@")
 printf '%q ' "${command[@]}" > "$run/command.txt"
 printf '\n' >> "$run/command.txt"
 set +e

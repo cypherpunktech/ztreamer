@@ -1,4 +1,7 @@
 //! Reproducible RPC measurements against a running server. See benchmarks/README.md.
+
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use clap::{Parser, ValueEnum};
 use prost::Message;
 use serde_json::{Value, json};
