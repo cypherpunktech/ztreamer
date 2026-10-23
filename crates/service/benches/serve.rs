@@ -7,7 +7,11 @@ use ztreamer_service::test_utils as support;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tokio_stream::StreamExt as _;
-use zakura_chain::{block, parameters::Network, serialization::ZcashDeserialize as _};
+use zakura_chain::{
+    block,
+    parameters::{GENESIS_PREVIOUS_BLOCK_HASH, Network},
+    serialization::ZcashDeserialize as _,
+};
 use zakura_state::Config;
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
 use ztreamer_indexer::{
@@ -43,7 +47,10 @@ fn index_through(index: &Index, tip: u32) -> IndexState {
             .push(ParsedCompactBlock {
                 height,
                 hash: hash(height),
-                previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
+                previous_hash: height
+                    .checked_sub(1)
+                    .map(hash)
+                    .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH),
                 time: height,
                 transactions: transactions.clone(),
                 sapling_additions: 0,
@@ -66,7 +73,9 @@ fn block_id(height: u32) -> Option<proto::BlockId> {
 fn get_block_range(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let index = Arc::new(Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+    let index = Arc::new(
+        Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+    );
     let state = index_through(&index, TIP);
     let (_state_service, read_service, _tip, _change) = runtime.block_on(async {
         zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)

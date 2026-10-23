@@ -219,6 +219,8 @@ impl<'env> IndexWriter<'env> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zakura_chain::block;
+
     use crate::{
         index::Index,
         test_utils::{populate, record},
@@ -226,7 +228,8 @@ mod tests {
 
     /// An index that holds the mutable blocks 0..=10.
     fn index_with_blocks(dir: &tempfile::TempDir) -> (Index, IndexState) {
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let records: Vec<_> = (0..=10).map(|height| record(height, Vec::new())).collect();
         let state = populate(&index, &records, None);
         (index, state)

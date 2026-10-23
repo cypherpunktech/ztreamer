@@ -4,7 +4,6 @@
 //! feature in their `[dev-dependencies]`.
 
 use crate::{
-    Digest,
     codec::{CompactBlockRecord, TreeSizes},
     index::{Index, IndexState},
     ingest::OrderedBuilder,
@@ -13,6 +12,7 @@ use crate::{
 };
 use zakura_chain::{
     block::{self, Block},
+    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
     serialization::ZcashDeserialize as _,
     transaction,
 };
@@ -21,10 +21,10 @@ use zakura_test::vectors::{
 };
 
 /// A deterministic block hash: the big-endian height in the first four bytes, zeros after.
-pub fn hash(height: u32) -> Digest {
+pub fn hash(height: u32) -> block::Hash {
     let mut hash = [0; 32];
     hash[..4].copy_from_slice(&height.to_be_bytes());
-    hash
+    block::Hash(hash)
 }
 
 /// The shielded transactions from three real mainnet and testnet block vectors.
@@ -53,7 +53,7 @@ pub fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBloc
     CompactBlockRecord {
         height,
         hash: hash(height),
-        previous_hash: height.checked_sub(1).map(hash).unwrap_or_default(),
+        previous_hash: height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH),
         time: height,
         transactions,
         end_tree_sizes: TreeSizes::default(),
@@ -103,8 +103,8 @@ pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
                 (0..copies).flat_map(|_| shielded.iter().cloned()).collect();
             for (index, tx) in transactions.iter_mut().enumerate() {
                 tx.index = index as u64;
-                tx.txid[..4].copy_from_slice(&height.to_be_bytes());
-                tx.txid[4..12].copy_from_slice(&(index as u64).to_be_bytes());
+                tx.txid.0[..4].copy_from_slice(&height.to_be_bytes());
+                tx.txid.0[4..12].copy_from_slice(&(index as u64).to_be_bytes());
                 sizes.sapling += tx.sapling_outputs.len() as u32;
                 sizes.orchard += tx.orchard_actions.len() as u32;
                 sizes.ironwood += tx.ironwood_actions.len() as u32;
@@ -141,7 +141,7 @@ pub fn prepared(height: u32) -> ParsedCompactBlock {
     ParsedCompactBlock {
         height,
         hash: hash(height),
-        previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
+        previous_hash: height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH),
         time: height,
         transactions: Vec::new(),
         sapling_additions: 0,
@@ -154,13 +154,14 @@ pub fn prepared(height: u32) -> ParsedCompactBlock {
 /// previous height, plus one empty transaction.
 pub fn raw_block(height: u32) -> RawIndexBlock {
     let mut bytes = vec![0; 140];
-    bytes[4..36].copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or([0; 32]));
+    bytes[4..36]
+        .copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH).0);
     bytes[100..104].copy_from_slice(&height.to_le_bytes());
     bytes.extend_from_slice(&[0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     RawIndexBlock {
         height: block::Height(height),
-        hash: block::Hash(hash(height)),
+        hash: hash(height),
         bytes,
-        txids: vec![transaction::Hash(hash(height))],
+        txids: vec![transaction::Hash(hash(height).0)],
     }
 }

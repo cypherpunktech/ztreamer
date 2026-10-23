@@ -30,7 +30,7 @@ pub struct CompactShieldedAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactTransaction {
     pub index: u64,
-    pub txid: Digest,
+    pub txid: transaction::Hash,
     pub sapling_spends: Vec<Digest>,
     pub sapling_outputs: Vec<CompactSaplingOutput>,
     pub orchard_actions: Vec<CompactShieldedAction>,
@@ -42,8 +42,8 @@ pub struct CompactTransaction {
 /// [`crate::codec::CompactBlockRecord`]
 pub struct ParsedCompactBlock {
     pub height: u32,
-    pub hash: Digest,
-    pub previous_hash: Digest,
+    pub hash: block::Hash,
+    pub previous_hash: block::Hash,
     pub time: u32,
     pub transactions: Vec<CompactTransaction>,
     pub sapling_additions: u32,

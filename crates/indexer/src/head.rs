@@ -2,13 +2,13 @@
 
 use zakura_chain::{
     block::{self, Block},
+    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
     serialization::ZcashSerialize,
 };
 use zakura_state::MAX_BLOCK_REORG_HEIGHT;
 use ztreamer_node::NodeClient;
 
 use crate::{
-    Digest,
     codec::CompactBlockRecord,
     index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
     ingest::{IngestError, OrderedBuilder},
@@ -75,7 +75,7 @@ fn raw_block(block: &Block) -> Result<RawIndexBlock, HeadError> {
 #[tonic::async_trait]
 impl CanonicalBlockSource for NodeClient {
     async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-        Ok(NodeClient::tip(self).map(|(height, hash)| BlockId::new(height.0, hash.0)))
+        Ok(NodeClient::tip(self).map(|(height, hash)| BlockId::new(height.0, hash)))
     }
 
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
@@ -98,14 +98,14 @@ impl CanonicalBlockSource for NodeClient {
 pub async fn poll_canonical_head(
     source: &mut impl CanonicalBlockSource,
     start: u32,
-    previous_hash: Digest,
+    previous_hash: block::Hash,
 ) -> Result<Vec<ParsedCompactBlock>, HeadError> {
     if let Some(anchor_height) = start.checked_sub(1) {
         let anchor = source
             .block(anchor_height)
             .await?
             .ok_or(HeadError::Anchor { height: anchor_height })?;
-        if anchor.hash.0 != previous_hash {
+        if anchor.hash != previous_hash {
             return Err(HeadError::Anchor { height: anchor_height });
         }
     }
@@ -117,15 +117,16 @@ pub async fn poll_canonical_head(
         if raw.len() == MAX_BLOCK_REORG_HEIGHT as usize {
             return Err(HeadError::Window);
         }
-        let parent: Digest = block
+        let parent: block::Hash = block
             .bytes
             .get(4..36)
             .and_then(|bytes| bytes.try_into().ok())
+            .map(block::Hash)
             .ok_or_else(|| HeadError::Decode("block header is truncated".to_owned()))?;
         if parent != expected_parent {
             return Err(HeadError::Parent { height });
         }
-        expected_parent = block.hash.0;
+        expected_parent = block.hash;
         raw.push(block);
         height = height.checked_add(1).ok_or(HeadError::Window)?;
     }
@@ -169,7 +170,8 @@ pub async fn sync_head_once(
         .transpose()?
         .flatten();
     let start = anchor_height.map_or(0, |height| height + 1);
-    let previous_hash = anchor_record.as_ref().map_or([0; 32], |block| block.hash);
+    let previous_hash =
+        anchor_record.as_ref().map_or(GENESIS_PREVIOUS_BLOCK_HASH, |block| block.hash);
     let prepared = match poll_canonical_head(source, start, previous_hash).await {
         Err(HeadError::Anchor { height }) => return Err(HeadSyncError::DeepReorg { height }),
         result => result?,
@@ -241,7 +243,7 @@ pub async fn recover_deep_reorg(
         .or_else(|| state.durable_tip().map(|tip| tip.height))
         .ok_or(HeadSyncError::NoCommonAncestor)?;
     let genesis = source.block(0).await?.ok_or(HeadSyncError::NoCommonAncestor)?;
-    if current_record(index, state, current_head, 0)?.is_none_or(|old| old.hash != genesis.hash.0) {
+    if current_record(index, state, current_head, 0)?.is_none_or(|old| old.hash != genesis.hash) {
         return Err(HeadSyncError::NoCommonAncestor);
     }
 
@@ -251,7 +253,7 @@ pub async fn recover_deep_reorg(
         let height = matching + (different - matching) / 2;
         let canonical = source.block(height).await?;
         let old = current_record(index, state, current_head, height)?;
-        if canonical.zip(old).is_some_and(|(canonical, old)| canonical.hash.0 == old.hash) {
+        if canonical.zip(old).is_some_and(|(canonical, old)| canonical.hash == old.hash) {
             matching = height;
         } else {
             different = height;
@@ -301,7 +303,7 @@ async fn sync_extension_once(
     let start = state
         .durable_tip()
         .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
-    let previous_hash = state.durable_tip().map_or([0; 32], |tip| tip.hash);
+    let previous_hash = state.durable_tip().map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
     let prepared = poll_canonical_head(source, start, previous_hash).await?;
     let Some(visible_tip) = prepared.last().map(|block| block.height) else {
         return Ok((state, Vec::new()));
@@ -356,7 +358,7 @@ mod tests {
     #[tonic::async_trait]
     impl CanonicalBlockSource for Source {
         async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-            Ok(self.0.last().map(|block| BlockId::new(block.height.0, block.hash.0)))
+            Ok(self.0.last().map(|block| BlockId::new(block.height.0, block.hash)))
         }
 
         async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
@@ -394,7 +396,8 @@ mod tests {
     fn persists_depth_ten_and_returns_the_volatile_head() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=12).map(raw_block).collect());
             let (state, volatile) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -411,7 +414,8 @@ mod tests {
     fn unchanged_tip_skips_suffix_reads() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=20).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -431,7 +435,8 @@ mod tests {
     fn replaces_only_the_volatile_head_without_rewriting_the_index() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=20).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -453,7 +458,8 @@ mod tests {
     fn rolls_the_durable_tip_back_to_a_shorter_chain() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=20).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -475,7 +481,8 @@ mod tests {
     fn atomically_replaces_a_durable_reorg() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=120).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -499,7 +506,8 @@ mod tests {
     fn deep_reorg_is_reported_then_recovered() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=120).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -526,7 +534,8 @@ mod tests {
     fn restart_recovers_a_persisted_noncanonical_suffix() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [9; 32]).unwrap();
+            let index =
+                Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
             let mut source = Source((0..=120).map(raw_block).collect());
             sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
 
@@ -553,20 +562,18 @@ mod tests {
     fn raw_branch_block(height: u32, fork: u32) -> RawIndexBlock {
         let mut block = raw_block(height);
         if height >= fork {
-            block.hash = block::Hash(branch_hash(height));
-            block.txids[0] = transaction::Hash(branch_hash(height));
-            block.bytes[4..36].copy_from_slice(&if height == fork {
-                hash(height - 1)
-            } else {
-                branch_hash(height - 1)
-            });
+            block.hash = branch_hash(height);
+            block.txids[0] = transaction::Hash(branch_hash(height).0);
+            block.bytes[4..36].copy_from_slice(
+                &if height == fork { hash(height - 1) } else { branch_hash(height - 1) }.0,
+            );
         }
         block
     }
 
-    fn branch_hash(height: u32) -> Digest {
+    fn branch_hash(height: u32) -> block::Hash {
         let mut hash = hash(height);
-        hash[31] = 1;
+        hash.0[31] = 1;
         hash
     }
 }

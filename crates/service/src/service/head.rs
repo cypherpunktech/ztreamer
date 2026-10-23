@@ -171,7 +171,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(
                     Config::ephemeral(),

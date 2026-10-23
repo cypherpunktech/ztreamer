@@ -9,12 +9,10 @@ use heed::{
     byteorder::BigEndian,
     types::{Bytes, U32},
 };
+use zakura_chain::block;
 
 use super::{IndexError, IndexState, RANGE_SIZE, metadata::Metadata};
-use crate::{
-    Digest,
-    codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock},
-};
+use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock};
 
 type HeightDb = Database<U32<BigEndian>, Bytes>;
 type HeightIter<'txn> = RoIter<'txn, U32<BigEndian>, Bytes>;
@@ -236,8 +234,12 @@ impl MutableBlocks {
 pub(crate) struct HashIndex(Database<Bytes, U32<BigEndian>>);
 
 impl HashIndex {
-    pub(crate) fn get(&self, txn: &RoTxn<'_>, hash: &Digest) -> Result<Option<u32>, IndexError> {
-        Ok(self.0.get(txn, hash.as_slice())?)
+    pub(crate) fn get(
+        &self,
+        txn: &RoTxn<'_>,
+        hash: &block::Hash,
+    ) -> Result<Option<u32>, IndexError> {
+        Ok(self.0.get(txn, hash.0.as_slice())?)
     }
 
     pub(crate) fn len(&self, txn: &RoTxn<'_>) -> Result<u64, IndexError> {
@@ -251,14 +253,18 @@ impl HashIndex {
     pub(crate) fn put(
         &self,
         txn: &mut RwTxn<'_>,
-        hash: &Digest,
+        hash: &block::Hash,
         height: u32,
     ) -> Result<(), IndexError> {
-        Ok(self.0.put(txn, hash.as_slice(), &height)?)
+        Ok(self.0.put(txn, hash.0.as_slice(), &height)?)
     }
 
-    pub(crate) fn delete(&self, txn: &mut RwTxn<'_>, hash: &Digest) -> Result<bool, IndexError> {
-        Ok(self.0.delete(txn, hash.as_slice())?)
+    pub(crate) fn delete(
+        &self,
+        txn: &mut RwTxn<'_>,
+        hash: &block::Hash,
+    ) -> Result<bool, IndexError> {
+        Ok(self.0.delete(txn, hash.0.as_slice())?)
     }
 
     /// Checks that the hash of `record` maps to its height.
@@ -291,7 +297,8 @@ mod tests {
     #[test]
     fn sealed_range_reads_records_by_absolute_height() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let records: Vec<_> = (1_000..2_000).map(|height| record(height, Vec::new())).collect();
         let mut txn = index.env.write_txn().unwrap();
         let sealed_ranges = index.tables.sealed_ranges;

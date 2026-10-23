@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 
+use zakura_chain::block;
+
 use crate::{
-    Digest,
     codec::{CodecError, CompactBlockRecord, MAX_RECORD_BYTES, TreeSizes},
     index::{IndexState, RANGE_SIZE},
     types::ParsedCompactBlock,
@@ -35,7 +36,7 @@ pub struct OrderedBuilder {
     /// Lowest height that will be included in the next batch.
     next_height: u32,
     /// Expected parent hash for `next_height`.
-    previous_hash: Option<Digest>,
+    previous_hash: Option<block::Hash>,
     /// Cumulative [`TreeSizes`] immediately before `next_height`.
     tree_sizes: TreeSizes,
     /// The next [`WriteBatch::base_generation`].
@@ -159,8 +160,8 @@ pub(crate) struct EncodedBatch {
 /// One encoded block record, with the identity that the writer needs.
 pub(crate) struct EncodedBlock {
     pub(crate) height: u32,
-    pub(crate) hash: Digest,
-    pub(crate) previous_hash: Digest,
+    pub(crate) hash: block::Hash,
+    pub(crate) previous_hash: block::Hash,
     /// The [`CompactBlockRecord::encode`] output.
     pub(crate) bytes: Vec<u8>,
 }
@@ -314,6 +315,8 @@ impl OrderedBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zakura_chain::transaction;
+
     use crate::test_utils::prepared;
     use crate::types::{CompactSaplingOutput, CompactTransaction};
 
@@ -322,7 +325,7 @@ mod tests {
         let mut first = prepared(0);
         first.transactions.push(CompactTransaction {
             index: 1,
-            txid: [7; 32],
+            txid: transaction::Hash([7; 32]),
             sapling_spends: Vec::new(),
             sapling_outputs: vec![CompactSaplingOutput {
                 cmu: [1; 32],
@@ -392,7 +395,7 @@ mod tests {
             let mut block = prepared(height);
             block.transactions.push(CompactTransaction {
                 index: 1,
-                txid: [height as u8; 32],
+                txid: transaction::Hash([height as u8; 32]),
                 sapling_spends: vec![[2; 32]],
                 sapling_outputs: Vec::new(),
                 orchard_actions: Vec::new(),
