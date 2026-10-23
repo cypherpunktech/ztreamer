@@ -134,12 +134,12 @@ fn mempool_compact(
 ) -> Result<Vec<proto::CompactTx>, Status> {
     let pools = PoolSelection::from_mempool_request(&request.pool_types)?;
     let excluded = excluded_txids(
-        transactions.iter().map(|tx| tx.id().mined_id().0),
+        transactions.iter().map(|tx| tx.id().mined_id()),
         &request.exclude_txid_suffixes,
     );
     let transactions = transactions
         .into_iter()
-        .filter(|tx| !excluded.contains(&tx.id().mined_id().0))
+        .filter(|tx| !excluded.contains(&tx.id().mined_id()))
         .map(|transaction| {
             transaction
                 .transaction()

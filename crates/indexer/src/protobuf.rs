@@ -1,5 +1,6 @@
 //! Lossless conversion between index records and the existing compact-block schema.
 
+use zakura_chain::{block, transaction};
 use ztreamer_protocol::{compact_bytes, proto};
 
 use crate::{
@@ -11,8 +12,8 @@ impl CompactBlockRecord {
     pub fn to_proto(&self) -> proto::CompactBlock {
         proto::CompactBlock {
             height: self.height.into(),
-            hash: self.hash.to_vec(),
-            prev_hash: self.previous_hash.to_vec(),
+            hash: self.hash.0.to_vec(),
+            prev_hash: self.previous_hash.0.to_vec(),
             time: self.time,
             header: Vec::new(),
             vtx: self.transactions.iter().map(transaction).collect(),
@@ -28,8 +29,8 @@ impl CompactBlockRecord {
         let trees = block.chain_metadata.ok_or(CodecError::InvalidRecord)?;
         Ok(Self {
             height: block.height.try_into().map_err(|_| CodecError::InvalidRecord)?,
-            hash: array(block.hash)?,
-            previous_hash: array(block.prev_hash)?,
+            hash: block::Hash(array(block.hash)?),
+            previous_hash: block::Hash(array(block.prev_hash)?),
             time: block.time,
             transactions: block
                 .vtx
@@ -37,7 +38,7 @@ impl CompactBlockRecord {
                 .map(|tx| {
                     Ok(CompactTransaction {
                         index: tx.index,
-                        txid: array(tx.txid)?,
+                        txid: transaction::Hash(array(tx.txid)?),
                         sapling_spends: tx
                             .spends
                             .into_iter()
@@ -79,7 +80,7 @@ impl CompactBlockRecord {
 pub(crate) fn transaction(tx: &CompactTransaction) -> proto::CompactTx {
     proto::CompactTx {
         index: tx.index,
-        txid: tx.txid.to_vec(),
+        txid: tx.txid.0.to_vec(),
         spends: tx
             .sapling_spends
             .iter()

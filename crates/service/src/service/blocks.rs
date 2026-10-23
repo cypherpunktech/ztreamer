@@ -8,7 +8,6 @@ use tower::ServiceExt;
 use zakura_chain::block;
 use zakura_state::{ReadRequest, ReadResponse};
 use ztreamer_indexer::{
-    Digest,
     codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock},
     index::IndexError,
 };
@@ -152,7 +151,7 @@ impl CompactService {
         // inside read_range_latest_as before yielding to the transport.
         let mut records = Vec::<T>::new().into_iter();
         // (hash, previous_hash) of the last record sent; every chunk must chain onto it.
-        let mut last: Option<(Digest, Digest)> = None;
+        let mut last: Option<(block::Hash, block::Hash)> = None;
         Ok(Box::pin(tokio_stream::iter(std::iter::from_fn(move || {
             loop {
                 let _ = &permit;
@@ -260,7 +259,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let state = index_through(&index, 1_005);
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(
@@ -416,7 +416,7 @@ mod tests {
                 );
 
                 service.snapshot.send_modify(|snapshot| {
-                    snapshot.visible_tip = Some(BlockId::new(3_464_754, [0; 32]));
+                    snapshot.visible_tip = Some(BlockId::new(3_464_754, block::Hash([0; 32])));
                 });
                 let info = service.lightd_info();
                 assert_eq!(info.sapling_activation_height, 419_200);
@@ -434,7 +434,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let state = index_through(&index, 200);
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(
@@ -491,7 +492,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let state = index_through(&index, 200);
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(
@@ -538,7 +540,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let state = index_through(&index, 200);
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(
@@ -561,7 +564,7 @@ mod tests {
                 // A competing chain replaces everything above 30; the next chunk cannot link onto 63.
                 let fork_hash = |height: u32| {
                     let mut digest = hash(height);
-                    digest[31] = 0xff;
+                    digest.0[31] = 0xff;
                     digest
                 };
                 let fork: Vec<CompactBlockRecord> = (31..=205)
@@ -609,7 +612,8 @@ mod tests {
             async {
                 let dir = tempfile::tempdir().unwrap();
                 let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap(),
+                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                        .unwrap(),
                 );
                 let state = index_through(&index, 200);
                 let (_state_service, read_service, _tip, _change) = zakura_state::init(

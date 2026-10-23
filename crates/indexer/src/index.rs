@@ -7,15 +7,13 @@ use heed::{
     byteorder::BigEndian,
     types::{Bytes, U32},
 };
+use zakura_chain::block;
 
 use crate::codec::{
     CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes, decode_range_record,
     encode_range_from_bytes,
 };
-use crate::{
-    Digest,
-    ingest::{EncodedBatch, WriteBatch},
-};
+use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod state;
 mod telemetry;
@@ -35,11 +33,11 @@ type HeightDb = Database<U32<BigEndian>, Bytes>;
 /// References a block by hash and height.
 pub struct BlockId {
     pub height: u32,
-    pub hash: Digest,
+    pub hash: block::Hash,
 }
 
 impl BlockId {
-    pub const fn new(height: u32, hash: Digest) -> Self {
+    pub const fn new(height: u32, hash: block::Hash) -> Self {
         Self { height, hash }
     }
 }
@@ -139,7 +137,7 @@ impl Index {
         path: impl AsRef<Path>,
         map_size: usize,
         network: &str,
-        genesis_hash: Digest,
+        genesis_hash: block::Hash,
     ) -> Result<Self, IndexError> {
         fs::create_dir_all(path.as_ref())?;
         // SAFETY: callers must not open this path with incompatible LMDB options in this process.
@@ -192,7 +190,7 @@ impl Index {
     pub fn read_block_by_hash(
         &self,
         generation: u64,
-        hash: Digest,
+        hash: block::Hash,
     ) -> Result<Option<CompactBlockRecord>, IndexError> {
         self.read_block_by_hash_as(generation, hash)
     }
@@ -201,12 +199,12 @@ impl Index {
     pub fn read_block_by_hash_as<T: StoredBlock>(
         &self,
         generation: u64,
-        hash: Digest,
+        hash: block::Hash,
     ) -> Result<Option<T>, IndexError> {
         let txn = self.env.read_txn()?;
         let state = self.read_generation(&txn, generation)?;
         self.hash_to_height
-            .get(&txn, hash.as_slice())?
+            .get(&txn, hash.0.as_slice())?
             .map(|height| self.read_record(&txn, state, height))
             .transpose()
     }
@@ -416,7 +414,7 @@ impl Index {
         txn: &RoTxn<'_>,
         record: &CompactBlockRecord,
     ) -> Result<(), IndexError> {
-        if self.hash_to_height.get(txn, record.hash.as_slice())? != Some(record.height) {
+        if self.hash_to_height.get(txn, record.hash.0.as_slice())? != Some(record.height) {
             return Err(IndexError::HashIndex { height: record.height });
         }
         Ok(())
@@ -451,7 +449,7 @@ impl Index {
 
         let mut timer = WriteTimer::start();
         for block in &blocks {
-            self.hash_to_height.put(&mut txn, block.hash.as_slice(), &block.height)?;
+            self.hash_to_height.put(&mut txn, block.hash.0.as_slice(), &block.height)?;
         }
         timer.lap(WriteStage::HashIndex);
         let last = blocks.last().expect("the batch is non-empty");
@@ -549,13 +547,13 @@ impl Index {
             let bytes =
                 self.mutable_blocks.get(&txn, &height)?.ok_or(IndexError::Continuity { height })?;
             let old = CompactBlockRecord::decode(bytes)?;
-            self.hash_to_height.delete(&mut txn, old.hash.as_slice())?;
+            self.hash_to_height.delete(&mut txn, old.hash.0.as_slice())?;
             self.mutable_blocks.delete(&mut txn, &height)?;
         }
         for record in &records {
             let encoded = record.encode()?;
             self.mutable_blocks.put(&mut txn, &record.height, encoded.as_slice())?;
-            self.hash_to_height.put(&mut txn, record.hash.as_slice(), &record.height)?;
+            self.hash_to_height.put(&mut txn, record.hash.0.as_slice(), &record.height)?;
         }
 
         let tip =
@@ -606,7 +604,7 @@ impl Index {
         }
 
         for record in &old_records {
-            self.hash_to_height.delete(&mut txn, record.hash.as_slice())?;
+            self.hash_to_height.delete(&mut txn, record.hash.0.as_slice())?;
             self.mutable_blocks.delete(&mut txn, &record.height)?;
         }
         if let Some(old_sealed) = state.sealed_through
@@ -624,7 +622,7 @@ impl Index {
         for record in &canonical {
             let encoded = record.encode()?;
             self.mutable_blocks.put(&mut txn, &record.height, encoded.as_slice())?;
-            self.hash_to_height.put(&mut txn, record.hash.as_slice(), &record.height)?;
+            self.hash_to_height.put(&mut txn, record.hash.0.as_slice(), &record.height)?;
         }
         let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
         state.durable_tip = Some(BlockId::new(tip.height, tip.hash));
@@ -709,17 +707,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
 
-        drop(Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap());
-        drop(Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap());
-        assert!(Index::open(&path, 10 * 1024 * 1024, "Testnet", [1; 32]).is_err());
-        assert!(Index::open(&path, 10 * 1024 * 1024, "Mainnet", [2; 32]).is_err());
+        drop(Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap());
+        drop(Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap());
+        assert!(Index::open(&path, 10 * 1024 * 1024, "Testnet", block::Hash([1; 32])).is_err());
+        assert!(Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([2; 32])).is_err());
     }
 
     #[test]
     fn atomically_writes_restarts_and_packs_sealed_ranges() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let stale = batch(&index, 0..=0, 1_100);
         let state = index.write(batch(&index, 0..=1_000, 1_100)).unwrap();
 
@@ -731,21 +729,23 @@ mod tests {
         assert!(index.mutable_blocks.get(&txn, &1_000).unwrap().is_some());
         let range = index.sealed_ranges.get(&txn, &0).unwrap().unwrap();
         assert_eq!(decode_range_record(range, 537).unwrap().height, 537);
-        assert_eq!(index.hash_to_height.get(&txn, hash(537).as_slice()).unwrap(), Some(537));
+        assert_eq!(index.hash_to_height.get(&txn, hash(537).0.as_slice()).unwrap(), Some(537));
         drop(txn);
 
         assert!(matches!(index.write(stale), Err(IndexError::StaleBatch { batch_generation: 0 })));
         assert_eq!(index.state().unwrap(), state);
 
         drop(index);
-        let reopened = Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let reopened =
+            Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         assert_eq!(reopened.state().unwrap(), state);
     }
 
     #[test]
     fn seals_a_range_that_is_complete_in_mutable_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         // The tip is 1,060: blocks to 1,050 are durable, but only blocks to 960 can be sealed.
         // Range 0..=999 stays complete in `mutable_blocks`.
         let state = index.write(batch(&index, 0..=1_050, 1_060)).unwrap();
@@ -790,7 +790,8 @@ mod tests {
     #[test]
     fn write_timings_record_only_stages_that_ran() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         // This write seals no range.
         let stages = write_stages(&index, batch(&index, 0..=10, 20));
         assert!(stages.iter().all(|stage| !stage.starts_with("seal_")));
@@ -799,7 +800,8 @@ mod tests {
 
         // This write seals a range from its batch only. It reads and writes no mutable rows.
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let stages = write_stages(&index, batch(&index, 0..=999, 1_100));
         assert!(stages.contains(&"seal_encode".to_owned()));
         assert!(stages.contains(&"seal_put".to_owned()));
@@ -810,13 +812,14 @@ mod tests {
     #[test]
     fn seal_fails_for_a_damaged_mutable_row() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         index.write(batch(&index, 0..=10, 20)).unwrap();
 
         // Change the hash in the payload. The hash in the envelope stays correct.
         let mut txn = index.env.write_txn().unwrap();
         let mut row = index.mutable_blocks.get(&txn, &5).unwrap().unwrap().to_vec();
-        let payload_hash = row.windows(32).rposition(|w| w == hash(5)).unwrap();
+        let payload_hash = row.windows(32).rposition(|w| w == hash(5).0).unwrap();
         row[payload_hash] ^= 1;
         index.mutable_blocks.put(&mut txn, &5, &row).unwrap();
         txn.commit().unwrap();
@@ -833,7 +836,8 @@ mod tests {
         use prost::Message;
 
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         index.write(batch(&index, 0..=10, 20)).unwrap();
 
         // Add a transaction without shielded data to a row. The row still decodes, but
@@ -845,7 +849,7 @@ mod tests {
             .vtx
             .push(ztreamer_protocol::proto::CompactTx { txid: vec![7; 32], ..Default::default() });
         let payload = block.encode_to_vec();
-        let envelope = 1 + size_of::<u32>() + 2 * size_of::<Digest>();
+        let envelope = 1 + size_of::<u32>() + 2 * size_of::<block::Hash>();
         let mut damaged = row[..envelope].to_vec();
         damaged.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         damaged.extend_from_slice(&payload);
@@ -864,7 +868,7 @@ mod tests {
     fn restart_rejects_a_gap_in_mutable_coverage() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         index.write(batch(&index, 0..=10, 20)).unwrap();
         let mut txn = index.env.write_txn().unwrap();
         index.mutable_blocks.delete(&mut txn, &5).unwrap();
@@ -872,7 +876,7 @@ mod tests {
         drop(index);
 
         assert!(matches!(
-            Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]),
+            Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])),
             Err(IndexError::Continuity { .. })
         ));
     }
@@ -880,7 +884,8 @@ mod tests {
     #[test]
     fn persistence_and_sealing_use_exact_depth_boundaries() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let mut builder = OrderedBuilder::new(IndexState::default(), 10 * 1024 * 1024).unwrap();
         builder.push(prepared(0)).unwrap();
 
@@ -924,7 +929,8 @@ mod tests {
     #[test]
     fn aborted_range_pack_keeps_every_mutable_row() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let state = index.write(batch(&index, 0..=999, 1_009)).unwrap();
         assert_eq!(state.durable_tip().unwrap().height, 999);
 
@@ -956,7 +962,8 @@ mod tests {
     #[test]
     fn reads_sealed_and_mutable_ranges_in_both_directions() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let state = index.write(batch(&index, 0..=1_005, 1_100)).unwrap();
 
         assert_eq!(index.read_block(state.generation(), 537).unwrap().height, 537);
@@ -1000,7 +1007,8 @@ mod tests {
     #[test]
     fn atomically_replaces_a_mutable_suffix() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let old = index.write(batch(&index, 0..=50, 60)).unwrap();
         let ancestor = BlockId::new(30, hash(30));
         let mut previous_hash = ancestor.hash;
@@ -1054,7 +1062,8 @@ mod tests {
     #[test]
     fn deep_reorg_rebuilds_the_affected_sealed_range() {
         let dir = tempfile::tempdir().unwrap();
-        let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let old = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
         assert_eq!(old.sealed_through(), Some(999));
 
@@ -1099,9 +1108,9 @@ mod tests {
             .unwrap()
     }
 
-    fn branch_hash(height: u32) -> Digest {
+    fn branch_hash(height: u32) -> block::Hash {
         let mut hash = hash(height);
-        hash[31] = 1;
+        hash.0[31] = 1;
         hash
     }
 }

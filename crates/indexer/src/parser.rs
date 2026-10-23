@@ -1,6 +1,6 @@
 //! Selective parser for the wallet-scanning fields in Zcash transaction versions 1–6.
 
-use zakura_chain::transaction;
+use zakura_chain::{block, transaction};
 
 use crate::{
     Digest,
@@ -101,6 +101,7 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
         .bytes
         .get(4..36)
         .and_then(|bytes| bytes.try_into().ok())
+        .map(block::Hash)
         .ok_or(CompactParseError::TruncatedHeader { height })?;
     let time = u32::from_le_bytes(
         block
@@ -142,7 +143,7 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
 
     Ok(ParsedCompactBlock {
         height,
-        hash: block.hash.0,
+        hash: block.hash,
         previous_hash,
         time,
         transactions,
@@ -160,8 +161,8 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
 
 pub(crate) fn parse_stored_block<'a>(
     height: u32,
-    hash: Digest,
-    previous_hash: Digest,
+    hash: block::Hash,
+    previous_hash: block::Hash,
     time: u32,
     transactions: impl IntoIterator<Item = (&'a [u8], transaction::Hash)>,
 ) -> Result<ParsedCompactBlock, CompactParseError> {
@@ -228,7 +229,7 @@ fn parse_transaction_from(
     let overwintered = header >> 31 != 0;
     let mut compact = CompactTransaction {
         index,
-        txid: txid.0,
+        txid,
         sapling_spends: Vec::new(),
         sapling_outputs: Vec::new(),
         orchard_actions: Vec::new(),
@@ -554,8 +555,8 @@ mod tests {
                 .collect::<Vec<_>>();
             let stored = parse_stored_block(
                 height.0,
-                block.hash().0,
-                block.header.previous_block_hash.0,
+                block.hash(),
+                block.header.previous_block_hash,
                 u32::try_from(block.header.time.timestamp()).unwrap(),
                 transaction_bytes
                     .iter()
@@ -645,7 +646,7 @@ mod tests {
 
         CompactTransaction {
             index,
-            txid: transaction.hash().0,
+            txid: transaction.hash(),
             sapling_spends,
             sapling_outputs,
             orchard_actions: transaction.orchard_actions().map(action).collect(),

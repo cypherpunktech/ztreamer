@@ -37,8 +37,9 @@ impl Fixture {
     /// Builds the index and service.
     pub async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Arc::new(Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+        let index = Arc::new(
+            Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+        );
         let records = fixtures::mixed_records(2_210);
         let state = fixtures::populate(&index, &records[..2_200], Some(1_999));
         let (_state, read, _tip, _change) =

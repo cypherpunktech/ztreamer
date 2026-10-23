@@ -298,7 +298,6 @@ mod tests {
     use zakura_network::zakura::framed_channel;
     use zakura_state::Config;
     use ztreamer_indexer::{
-        Digest,
         codec::{CompactBlockRecord, TreeSizes},
         index::{Index, IndexState},
     };
@@ -306,8 +305,10 @@ mod tests {
     #[tokio::test]
     async fn forwards_streaming_compact_ranges() {
         let directory = tempfile::tempdir().unwrap();
-        let index =
-            Arc::new(Index::open(directory.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+        let index = Arc::new(
+            Index::open(directory.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
+                .unwrap(),
+        );
         let (_state, read_state, _tip, _change) =
             zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
                 .await
@@ -316,7 +317,10 @@ mod tests {
         compact
             .publish_head(
                 IndexState::default(),
-                vec![record(0, [1; 32], [0; 32]), record(1, [2; 32], [1; 32])],
+                vec![
+                    record(0, block::Hash([1; 32]), block::Hash([0; 32])),
+                    record(1, block::Hash([2; 32]), block::Hash([1; 32])),
+                ],
             )
             .unwrap();
         let service = Arc::new(P2pCompactService::pending());
@@ -349,7 +353,7 @@ mod tests {
         assert!(end.payload.is_empty());
     }
 
-    fn record(height: u32, hash: Digest, previous_hash: Digest) -> CompactBlockRecord {
+    fn record(height: u32, hash: block::Hash, previous_hash: block::Hash) -> CompactBlockRecord {
         CompactBlockRecord {
             height,
             hash,

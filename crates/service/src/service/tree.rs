@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 use tower::ServiceExt;
-use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
+use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use zakura_state::{ReadRequest, ReadResponse};
 use ztreamer_protocol::proto;
 
@@ -21,7 +21,7 @@ impl CompactService {
     ) -> Result<proto::TreeState, Status> {
         let record = self.record(request).await?;
         let source = self.zakura.clone();
-        let hash = block::Hash(record.hash);
+        let hash = record.hash;
         let (sapling, orchard, ironwood) = tokio::try_join!(
             source.clone().oneshot(ReadRequest::SaplingTree(hash.into())),
             source.clone().oneshot(ReadRequest::OrchardTree(hash.into())),
@@ -81,7 +81,7 @@ impl CompactService {
                 if sender
                     .blocking_send(Ok(proto::SubtreeRoot {
                         root_hash,
-                        completing_block_hash: block.hash.to_vec(),
+                        completing_block_hash: block.hash.0.to_vec(),
                         completing_block_height: u64::from(height),
                     }))
                     .is_err()
@@ -98,7 +98,7 @@ impl CompactService {
         ensure_tip_ready(&snapshot)?;
         let tip =
             snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        self.tree_state(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.to_vec() })
+        self.tree_state(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.0.to_vec() })
             .await
     }
 
@@ -157,7 +157,7 @@ impl CompactService {
 mod tests {
     use super::*;
     use tokio_stream::StreamExt;
-    use zakura_chain::parameters::Network;
+    use zakura_chain::{block, parameters::Network};
     use zakura_state::Config;
     use ztreamer_indexer::index::Index;
 
@@ -167,8 +167,9 @@ mod tests {
     fn subtree_stream_resolves_volatile_completion_blocks() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Arc::new(Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+            let index = Arc::new(
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+            );
             let state = index_through(&index, 1_005);
             let (_state_service, read_service, _tip, _change) =
                 zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
@@ -181,7 +182,7 @@ mod tests {
             let root = stream.next().await.unwrap().unwrap();
 
             assert_eq!(root.root_hash, vec![7; 32]);
-            assert_eq!(root.completing_block_hash, hash(1_007));
+            assert_eq!(root.completing_block_hash, hash(1_007).0);
             assert_eq!(root.completing_block_height, 1_007);
         });
     }

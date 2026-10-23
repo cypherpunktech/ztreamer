@@ -12,6 +12,7 @@ use crate::{
     test_utils::hash,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
+use zakura_chain::{parameters::GENESIS_PREVIOUS_BLOCK_HASH, transaction};
 
 struct Fixture {
     count: u32,
@@ -45,11 +46,11 @@ impl Fixture {
 
 impl HistoricalSource for Fixture {
     fn tip(&self) -> Option<(Height, block::Hash)> {
-        self.count.checked_sub(1).map(|height| (Height(height), block::Hash(hash(height))))
+        self.count.checked_sub(1).map(|height| (Height(height), hash(height)))
     }
 
     fn block_hash(&self, height: u32) -> Option<block::Hash> {
-        (height < self.count).then(|| block::Hash(hash(height)))
+        (height < self.count).then(|| hash(height))
     }
 
     fn prune_height(&self) -> u32 {
@@ -99,7 +100,7 @@ impl HistoricalSource for Fixture {
                 ready.notify_one();
             }
         }
-        if expected_end_hash.is_some_and(|expected| expected.0 != hash(end)) {
+        if expected_end_hash.is_some_and(|expected| expected != hash(end)) {
             return Err(PipelineError::SourceChanged);
         }
         Ok(())
@@ -109,7 +110,7 @@ impl HistoricalSource for Fixture {
 fn prepared(height: u32) -> ParsedCompactBlock {
     let count = height % 3; // Empty, light, and heavier blocks; all three pools.
     let action = CompactShieldedAction {
-        nullifier: hash(height),
+        nullifier: hash(height).0,
         commitment: [3; 32],
         ephemeral_key: [4; 32],
         ciphertext: [5; 52],
@@ -119,8 +120,8 @@ fn prepared(height: u32) -> ParsedCompactBlock {
     } else {
         vec![CompactTransaction {
             index: 1,
-            txid: hash(height),
-            sapling_spends: vec![hash(height)],
+            txid: transaction::Hash(hash(height).0),
+            sapling_spends: vec![hash(height).0],
             sapling_outputs: vec![
                 CompactSaplingOutput {
                     cmu: [2; 32],
@@ -136,7 +137,7 @@ fn prepared(height: u32) -> ParsedCompactBlock {
     ParsedCompactBlock {
         height,
         hash: hash(height),
-        previous_hash: height.checked_sub(1).map(hash).unwrap_or_default(),
+        previous_hash: height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH),
         time: height,
         transactions,
         sapling_additions: count,
@@ -546,14 +547,16 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
                 return Ok(None);
             }
             let mut bytes = vec![0; 140];
-            bytes[4..36].copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or_default());
+            bytes[4..36].copy_from_slice(
+                &height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH).0,
+            );
             bytes[100..104].copy_from_slice(&height.to_le_bytes());
             bytes.extend_from_slice(&[0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
             Ok(Some(RawIndexBlock {
                 height: Height(height),
-                hash: block::Hash(hash(height)),
+                hash: hash(height),
                 bytes,
-                txids: vec![transaction::Hash(hash(height))],
+                txids: vec![transaction::Hash(hash(height).0)],
             }))
         }
     }
