@@ -134,57 +134,15 @@ impl<'env> IndexWriter<'env> {
         Ok(())
     }
 
-    /// Seals each complete range up to `seal_through` for an append. A range takes its existing
-    /// mutable rows first, then rows from `blocks`.
-    pub(crate) fn seal_batch_ranges(
+    /// Seals each range that ends at or below both `seal_through` and the tip. Call it after
+    /// [`IndexWriter::set_tip`]. A range takes its mutable rows first, then rows from `blocks`;
+    /// a reorg passes no `blocks`, so its ranges must be complete in the mutable rows.
+    pub(crate) fn seal_ranges(
         &mut self,
         seal_through: Option<u32>,
         blocks: &mut BatchRows,
     ) -> Result<(), IndexError> {
-        let mut start = self
-            .state
-            .sealed_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))?;
-
-        while let Some(seal_cutoff) = seal_through {
-            let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;
-            if end > seal_cutoff || self.state.durable_tip.is_none_or(|tip| end > tip.height) {
-                break;
-            }
-            // The head follower writes blocks to `mutable_blocks` before it seals them. Because of
-            // this, the range can be complete in `mutable_blocks`, and the batch can start after it.
-            let first_new = blocks.peek().map_or(end + 1, |block| block.height);
-            let mutable_end = first_new.min(end + 1);
-            let mut range =
-                self.tables.mutable_blocks.read_checked(&self.txn, start..mutable_end, start)?;
-            self.with_timer(|timer| timer.seal_read(range.len()));
-            while range.len() < RANGE_SIZE as usize {
-                let block = blocks.next().ok_or(IndexError::IncompleteRange { start })?;
-                range.push(block.bytes);
-            }
-            let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
-            let packed = encode_range_from_bytes(&parts)?;
-            drop(parts);
-            drop(range);
-            self.with_timer(|timer| timer.lap(WriteStage::SealEncode));
-            self.tables.sealed_ranges.put(&mut self.txn, start, packed.as_slice())?;
-            self.tables.mutable_blocks.delete_range(&mut self.txn, start..mutable_end)?;
-            self.with_timer(|timer| {
-                timer.lap(WriteStage::SealPut);
-                timer.bytes(WriteStage::SealPut, packed.len());
-            });
-            self.state.sealed_through = Some(end);
-            start = end.checked_add(1).ok_or(IndexError::Overflow)?;
-        }
-        Ok(())
-    }
-
-    /// Seals each range up to `seal_cutoff` that is complete in the mutable rows.
-    pub(crate) fn seal_mutable_ranges(
-        &mut self,
-        seal_cutoff: Option<u32>,
-    ) -> Result<(), IndexError> {
-        let Some(seal_cutoff) = seal_cutoff else {
+        let Some(seal_through) = seal_through else {
             return Ok(());
         };
         let mut start = self
@@ -194,21 +152,44 @@ impl<'env> IndexWriter<'env> {
 
         loop {
             let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;
-            // exit early if the range is not ready to be sealed yet
-            if end > seal_cutoff
-                || self.state.durable_tip.is_none_or(|durable_tip| end > durable_tip.height)
-            {
-                break;
+            if end > seal_through || self.state.durable_tip.is_none_or(|tip| end > tip.height) {
+                return Ok(());
             }
-            let range =
-                self.tables.mutable_blocks.read_checked(&self.txn, start..end + 1, start)?;
-            let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
-            let encoded = encode_range_from_bytes(&parts)?;
-            self.tables.sealed_ranges.put(&mut self.txn, start, encoded.as_slice())?;
-            self.tables.mutable_blocks.delete_range(&mut self.txn, start..=end)?;
-            self.state.sealed_through = Some(end);
+            self.seal_range(start, end, blocks)?;
             start = end.checked_add(1).ok_or(IndexError::Overflow)?;
         }
+    }
+
+    /// Packs the range `start..=end` and deletes the mutable rows it took.
+    fn seal_range(
+        &mut self,
+        start: u32,
+        end: u32,
+        blocks: &mut BatchRows,
+    ) -> Result<(), IndexError> {
+        // The head follower writes blocks to `mutable_blocks` before it seals them. Because of
+        // this, the range can be complete in `mutable_blocks`, and the batch can start after it.
+        let first_new = blocks.peek().map_or(end + 1, |block| block.height);
+        let mutable_end = first_new.min(end + 1);
+        let mut range =
+            self.tables.mutable_blocks.read_checked(&self.txn, start..mutable_end, start)?;
+        self.with_timer(|timer| timer.seal_read(range.len()));
+        while range.len() < RANGE_SIZE as usize {
+            let block = blocks.next().ok_or(IndexError::IncompleteRange { start })?;
+            range.push(block.bytes);
+        }
+        let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
+        let packed = encode_range_from_bytes(&parts)?;
+        drop(parts);
+        drop(range);
+        self.with_timer(|timer| timer.lap(WriteStage::SealEncode));
+        self.tables.sealed_ranges.put(&mut self.txn, start, packed.as_slice())?;
+        self.tables.mutable_blocks.delete_range(&mut self.txn, start..mutable_end)?;
+        self.with_timer(|timer| {
+            timer.lap(WriteStage::SealPut);
+            timer.bytes(WriteStage::SealPut, packed.len());
+        });
+        self.state.sealed_through = Some(end);
         Ok(())
     }
 

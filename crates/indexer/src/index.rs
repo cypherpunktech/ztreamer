@@ -477,7 +477,7 @@ impl Index {
         let last = blocks.last().expect("the batch is non-empty");
         writer.set_tip(BlockId::new(last.height, last.hash), end_tree_sizes);
         let mut blocks = blocks.into_iter().peekable();
-        writer.seal_batch_ranges(seal_through, &mut blocks)?;
+        writer.seal_ranges(seal_through, &mut blocks)?;
         writer.put_mutable_blocks(blocks)?;
         writer.commit()
     }
@@ -524,7 +524,7 @@ impl Index {
                 (BlockId::new(record.height, record.hash), record.end_tree_sizes)
             });
         writer.set_tip(tip, tree_sizes);
-        writer.seal_mutable_ranges(seal_through)?;
+        writer.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
         writer.commit()
     }
 
@@ -564,7 +564,7 @@ impl Index {
         canonical.iter().try_for_each(|record| writer.put_block(record))?;
         let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
         writer.set_tip(BlockId::new(tip.height, tip.hash), tip.end_tree_sizes);
-        writer.seal_mutable_ranges(seal_through)?;
+        writer.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
         writer.commit()
     }
 }
@@ -679,6 +679,16 @@ mod tests {
         assert!(stages.contains(&"seal_put".to_owned()));
         assert!(!stages.contains(&"seal_read".to_owned()));
         assert!(!stages.contains(&"mutable_put".to_owned()));
+
+        // This write seals a range from mutable rows and batch rows, then writes the rest of the
+        // batch as mutable rows.
+        let dir = tempfile::tempdir().unwrap();
+        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        index.write(batch(&index, 0..=500, 600)).unwrap();
+        let stages = write_stages(&index, batch(&index, 501..=1_050, 1_110));
+        for stage in ["seal_read", "seal_encode", "seal_put", "mutable_put"] {
+            assert!(stages.contains(&stage.to_owned()), "{stage} is missing from {stages:?}");
+        }
     }
 
     #[test]
@@ -908,6 +918,28 @@ mod tests {
         assert_eq!(pinned_hashes, [hash(29), hash(30), hash(31), hash(32)]);
         assert!(index.read_block_by_hash(state.generation(), hash(31)).unwrap().is_none());
         assert_eq!(index.read_block(state.generation(), 31).unwrap().hash, branch_hash(31));
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn mutable_reorg_seals_a_range_that_it_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let old = index.write(batch(&index, 0..=1_050, 1_060)).unwrap();
+        assert_eq!(old.sealed_through(), None);
+
+        let ancestor = BlockId::new(1_040, hash(1_040));
+        let replacement = branch(ancestor, 1_041..=1_045);
+        let state = index
+            .replace_mutable_suffix(old.generation(), ancestor, replacement, Some(999))
+            .unwrap();
+
+        assert_eq!(state.sealed_through(), Some(999));
+        assert_eq!(state.durable_tip(), Some(BlockId::new(1_045, branch_hash(1_045))));
+        let txn = index.env.read_txn().unwrap();
+        assert_eq!(index.tables.mutable_blocks.len(&txn).unwrap(), 46);
+        drop(txn);
+        assert_eq!(index.read_block(state.generation(), 537).unwrap().hash, hash(537));
         index.verify_continuity().unwrap();
     }
 
