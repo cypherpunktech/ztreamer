@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-mod support;
+use ztreamer_service::test_utils as support;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::{sync::Arc, time::Duration};

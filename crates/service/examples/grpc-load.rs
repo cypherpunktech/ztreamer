@@ -9,9 +9,8 @@ use std::{
 };
 use tokio::{sync::Barrier, task::JoinSet};
 
-#[path = "../benches/support/mod.rs"]
-mod support;
 use support::{Client, Error, LocalServer, consume, range};
+use ztreamer_service::test_utils as support;
 
 #[derive(Parser)]
 struct Args {

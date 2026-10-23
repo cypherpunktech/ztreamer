@@ -3,7 +3,7 @@
 
 use std::{hint::black_box, sync::Arc};
 
-mod support;
+use ztreamer_service::test_utils as support;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tokio_stream::StreamExt as _;
@@ -11,22 +11,16 @@ use zakura_chain::{block, parameters::Network, serialization::ZcashDeserialize a
 use zakura_state::Config;
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
 use ztreamer_indexer::{
-    Digest,
     index::{Index, IndexState},
     ingest::OrderedBuilder,
     parser::parse_block,
+    test_utils::hash,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 use ztreamer_protocol::proto;
 use ztreamer_service::CompactService;
 
 const TIP: u32 = 2_005;
-
-fn hash(height: u32) -> Digest {
-    let mut hash = [0; 32];
-    hash[..4].copy_from_slice(&height.to_be_bytes());
-    hash
-}
 
 fn shielded_transactions() -> Vec<CompactTransaction> {
     let bytes = BLOCK_MAINNET_1687121_BYTES.to_vec();

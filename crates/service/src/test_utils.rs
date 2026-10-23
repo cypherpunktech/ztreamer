@@ -1,5 +1,9 @@
-#![allow(dead_code)]
+//! A synthetic indexed [`CompactService`](crate::CompactService) and a local gRPC server, shared
+//! by tests, benchmarks and examples.
+//!
+//! Compiled for this crate's own tests and for targets that enable the `test-utils` feature.
 
+use crate::CompactService;
 use prost::Message as _;
 use std::{
     sync::Arc,
@@ -13,21 +17,25 @@ use zakura_state::Config;
 use ztreamer_indexer::index::Index;
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
-use ztreamer_service::CompactService;
 
-pub(crate) use ztreamer_indexer::test_utils as fixtures;
+pub use ztreamer_indexer::test_utils as fixtures;
 
-pub(crate) type Client = CompactTxStreamerClient<Channel>;
-pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
+/// A gRPC client for the CompactTxStreamer service.
+pub type Client = CompactTxStreamerClient<Channel>;
+/// The error type returned by [`consume`].
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-pub(crate) struct Fixture {
+/// A [`CompactService`] over a temporary index with 2,200 durable blocks and 10 volatile ones.
+#[derive(Debug)]
+pub struct Fixture {
     pub service: CompactService,
     // Keep the index directory alive until the service has stopped.
     _dir: tempfile::TempDir,
 }
 
 impl Fixture {
-    pub(crate) async fn new() -> Self {
+    /// Builds the index and service.
+    pub async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let index =
             Arc::new(Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
@@ -43,7 +51,9 @@ impl Fixture {
     }
 }
 
-pub(crate) struct LocalServer {
+/// A [`Fixture`] served over gRPC on a local TCP port.
+#[derive(Debug)]
+pub struct LocalServer {
     pub endpoint: String,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<Result<(), tonic::transport::Error>>,
@@ -51,7 +61,8 @@ pub(crate) struct LocalServer {
 }
 
 impl LocalServer {
-    pub(crate) async fn start() -> Self {
+    /// Builds a [`Fixture`] and serves it on `127.0.0.1` at a free port.
+    pub async fn start() -> Self {
         let fixture = Fixture::new().await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -68,18 +79,22 @@ impl LocalServer {
         Self { endpoint, shutdown, task, _fixture: fixture }
     }
 
-    pub(crate) async fn stop(self) {
+    /// Shuts the server down and waits for it to stop.
+    pub async fn stop(self) {
         let _ = self.shutdown.send(());
         tokio::time::timeout(Duration::from_secs(10), self.task).await.unwrap().unwrap().unwrap();
     }
 }
 
-pub(crate) fn range(start: u32, end: u32) -> proto::BlockRange {
+/// A block range from `start` to `end`, by height, with the default pools.
+pub fn range(start: u32, end: u32) -> proto::BlockRange {
     let id = |height| Some(proto::BlockId { height: u64::from(height), hash: Vec::new() });
     proto::BlockRange { start: id(start), end: id(end), pool_types: Vec::new() }
 }
 
-pub(crate) struct Observation {
+/// Timings and sizes from one [`consume`] call.
+#[derive(Clone, Copy, Debug)]
+pub struct Observation {
     pub first: Duration,
     pub complete: Duration,
     pub bytes: u64,
@@ -88,7 +103,7 @@ pub(crate) struct Observation {
 
 /// Measures request-to-first-message and request-to-EOF, including decoding and
 /// consumer delay. Validates complete, ordered delivery for synthetic or live data.
-pub(crate) async fn consume(
+pub async fn consume(
     client: &mut Client,
     range: proto::BlockRange,
     delay: Duration,

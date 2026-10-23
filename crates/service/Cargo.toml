@@ -7,10 +7,15 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Shared test, benchmark and example support in `ztreamer_service::test_utils`.
+test-utils = ["dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer/test-utils"]
+
 [dependencies]
 hex = "0.4"
 metrics = "0.24"
 prost = "0.14.4"
+tempfile = { version = "3", optional = true }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-stream = "0.1"
@@ -35,6 +40,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
+# Enables `test_utils` for this crate's tests, benches and examples.
+ztreamer-service = { path = ".", features = ["test-utils"] }
 
 [[bench]]
 name = "serve"

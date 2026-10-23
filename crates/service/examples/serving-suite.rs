@@ -847,8 +847,7 @@ async fn main() -> Result<(), Error> {
 }
 
 #[cfg(test)]
-#[path = "../benches/support/mod.rs"]
-mod support;
+use ztreamer_service::test_utils as support;
 
 #[cfg(test)]
 mod tests {
