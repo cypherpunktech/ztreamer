@@ -1,7 +1,6 @@
 //! Versioned codecs for individual compact blocks and random-access 1,000-block ranges.
 
 use prost::{Message, bytes::Bytes};
-use serde::{Deserialize, Serialize};
 use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 
 use crate::{Digest, index::RANGE_SIZE, types::CompactTransaction};
@@ -118,7 +117,7 @@ impl StoredBlock for CompactBlockRecord {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 /// The final index record, which gets stored in LMDB.
 pub struct CompactBlockRecord {
     pub height: u32,
@@ -129,7 +128,7 @@ pub struct CompactBlockRecord {
     pub end_tree_sizes: TreeSizes,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// Cumulative tree sizes per pool, by number of note commitments.
 pub struct TreeSizes {
     pub sapling: u32,

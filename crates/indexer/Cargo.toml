@@ -15,8 +15,6 @@ test-utils = ["dep:zakura-test"]
 heed = { version = "0.22.1", default-features = false }
 metrics = "0.24"
 prost = "0.14.4"
-serde = { version = "1", features = ["derive"] }
-serde-big-array = "0.5"
 thiserror = "2"
 tonic = "0.14.6"
 tracing = "0.1"
