@@ -55,10 +55,16 @@ impl StoredBlock for ProtobufBlockRecord {
         self.0.height as u32
     }
     fn hash(&self) -> block::Hash {
-        block::Hash(self.0.hash.as_slice().try_into().expect("validated hash"))
+        block::Hash(self.0.hash.as_slice().try_into().expect("decode checked the hash length"))
     }
     fn previous_hash(&self) -> block::Hash {
-        block::Hash(self.0.prev_hash.as_slice().try_into().expect("validated previous hash"))
+        block::Hash(
+            self.0
+                .prev_hash
+                .as_slice()
+                .try_into()
+                .expect("decode checked the previous hash length"),
+        )
     }
 }
 

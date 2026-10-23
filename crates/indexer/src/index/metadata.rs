@@ -106,11 +106,13 @@ fn decode_state(bytes: &[u8]) -> Result<IndexState, IndexError> {
         return Err(IndexError::Metadata);
     }
     let u32_at = |start| {
-        u32::from_be_bytes(bytes[start..start + 4].try_into().expect("state length was checked"))
+        u32::from_be_bytes(
+            bytes[start..start + 4].try_into().expect("decode_state checked the state length"),
+        )
     };
     let tip = BlockId::new(
         u32_at(1),
-        block::Hash(bytes[5..37].try_into().expect("state length was checked")),
+        block::Hash(bytes[5..37].try_into().expect("decode_state checked the state length")),
     );
     let sealed_through = (bytes[37] == 1).then(|| u32_at(38));
     if sealed_through
@@ -121,7 +123,9 @@ fn decode_state(bytes: &[u8]) -> Result<IndexState, IndexError> {
     Ok(IndexState {
         durable_tip: Some(tip),
         sealed_through,
-        generation: u64::from_be_bytes(bytes[42..50].try_into().expect("state length was checked")),
+        generation: u64::from_be_bytes(
+            bytes[42..50].try_into().expect("decode_state checked the state length"),
+        ),
         tree_sizes: TreeSizes { sapling: u32_at(50), orchard: u32_at(54), ironwood: u32_at(58) },
     })
 }
