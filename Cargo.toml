@@ -27,6 +27,10 @@ zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.
 zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1", default-features = false }
 zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
+# zakura's own pin of this crate. Keep it equal to the `sapling-crypto` line in zakura's
+# Cargo.toml at the tag above: a second version makes `sapling_crypto::Node` in the state
+# responses a different type from ours, and the workspace stops compiling.
+sapling-crypto = { package = "zakura-sapling-crypto", version = "=2.1.0" }
 
 [profile.ci-rust]
 inherits = "dev"

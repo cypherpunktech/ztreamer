@@ -9,17 +9,19 @@ use std::{
 use tokio::sync::{Semaphore, watch};
 use tokio_stream::Stream;
 use tonic::Status;
-use tower::ServiceExt;
 use zakura_chain::{
     block,
     parameters::{ConsensusBranchId, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction,
 };
-use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
+use zakura_state::ReadStateService;
 use ztreamer_node::NodeClient;
 
-use crate::telemetry::ServiceMetrics;
+use crate::{
+    backend::{InProcessBackend, StateBackend},
+    telemetry::ServiceMetrics,
+};
 
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, StoredBlock},
@@ -125,8 +127,7 @@ pub struct CompactService {
     index: Arc<Index>,
     snapshot: watch::Sender<ServingSnapshot>,
     chain_name: Arc<str>,
-    zakura: ReadStateService,
-    node: Option<NodeClient>,
+    backend: Arc<dyn StateBackend>,
     range_streams: Arc<Semaphore>,
     ping_enabled: bool,
     metrics: Arc<ServiceMetrics>,
@@ -142,11 +143,33 @@ impl std::fmt::Debug for CompactService {
 }
 
 impl CompactService {
+    /// Serves chain reads from the embedded node's state. Mempool requests fail with
+    /// `UNAVAILABLE`.
     pub fn new(
         index: Arc<Index>,
         state: IndexState,
         chain_name: impl Into<Arc<str>>,
         zakura: ReadStateService,
+    ) -> Self {
+        Self::with_backend(index, state, chain_name, InProcessBackend::new(zakura))
+    }
+
+    /// Serves everything through the embedded node's handles.
+    pub fn with_node(
+        index: Arc<Index>,
+        state: IndexState,
+        chain_name: impl Into<Arc<str>>,
+        node: NodeClient,
+    ) -> Self {
+        Self::with_backend(index, state, chain_name, InProcessBackend::with_node(node))
+    }
+
+    /// Serves chain state and node requests through any [`StateBackend`].
+    pub fn with_backend(
+        index: Arc<Index>,
+        state: IndexState,
+        chain_name: impl Into<Arc<str>>,
+        backend: impl StateBackend,
     ) -> Self {
         let chain_name = chain_name.into();
         let (snapshot, _) = watch::channel(state.into());
@@ -156,23 +179,11 @@ impl CompactService {
             index,
             snapshot,
             chain_name,
-            zakura,
-            node: None,
+            backend: Arc::new(backend),
             range_streams: Arc::new(Semaphore::new(MAX_RANGE_STREAMS)),
             ping_enabled: false,
             metrics,
         }
-    }
-
-    pub fn with_node(
-        index: Arc<Index>,
-        state: IndexState,
-        chain_name: impl Into<Arc<str>>,
-        node: NodeClient,
-    ) -> Self {
-        let mut service = Self::new(index, state, chain_name, node.read_state());
-        service.node = Some(node);
-        service
     }
 
     pub const fn with_ping_enabled(mut self, enabled: bool) -> Self {
@@ -288,7 +299,7 @@ impl CompactService {
     pub(crate) fn lightd_info(&self) -> proto::LightdInfo {
         let tip = self.snapshot().visible_tip;
         let tip_height = tip.map_or(0, |tip| tip.height);
-        let network = self.zakura.db().network();
+        let network = self.backend.network();
         let next_upgrade =
             network.activation_list().into_iter().find(|(height, _)| height.0 > tip_height);
         proto::LightdInfo {
@@ -336,7 +347,8 @@ impl CompactService {
         }
 
         // todo(@distractedm1nd): this sucks and should be replaced with a direct mempool query
-        Self::mempool_transactions(self.node()?.clone())
+        self.backend
+            .mempool_transactions()
             .await?
             .into_iter()
             .find(|transaction| transaction.id().mined_id() == hash)
@@ -355,29 +367,19 @@ impl CompactService {
         &self,
         hash: transaction::Hash,
     ) -> Result<Option<proto::RawTransaction>, Status> {
-        let response = self
-            .zakura
-            .clone()
-            .oneshot(ReadRequest::Transaction(hash))
-            .await
-            .map_err(source_status)?;
-        match response {
-            ReadResponse::Transaction(Some(transaction)) => Ok(Some(proto::RawTransaction {
-                data: transaction
-                    .tx
-                    .zcash_serialize_to_vec()
-                    .map_err(|error| Status::internal(error.to_string()))?,
-                height: u64::from(transaction.height.0),
-            })),
-            ReadResponse::Transaction(None) => Ok(None),
-            _ => Err(Status::internal("unexpected transaction response")),
-        }
-    }
-
-    fn node(&self) -> Result<&NodeClient, Status> {
-        self.node
-            .as_ref()
-            .ok_or_else(|| Status::unavailable("embedded Zakura node handle is unavailable"))
+        self.backend
+            .transaction(hash)
+            .await?
+            .map(|mined| {
+                Ok(proto::RawTransaction {
+                    data: mined
+                        .transaction
+                        .zcash_serialize_to_vec()
+                        .map_err(|error| Status::internal(error.to_string()))?,
+                    height: u64::from(mined.height.0),
+                })
+            })
+            .transpose()
     }
 }
 
@@ -392,10 +394,6 @@ fn ensure_tip_ready(snapshot: &ServingSnapshot) -> Result<(), Status> {
     } else {
         Err(Status::unavailable("canonical head source is stale"))
     }
-}
-
-fn source_status(error: zakura_state::BoxError) -> Status {
-    Status::unavailable(format!("Zakura read failed: {error}"))
 }
 
 fn reorganized(height: u32) -> Status {

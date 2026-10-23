@@ -5,12 +5,10 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
-use tower::ServiceExt;
 use zakura_chain::{block, transparent};
-use zakura_state::{ReadRequest, ReadResponse};
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream, source_status};
+use super::{CompactService, RpcStream};
 
 const MAX_UTXO_ADDRESSES: usize = 1_000;
 impl CompactService {
@@ -39,23 +37,15 @@ impl CompactService {
         if start > end {
             std::mem::swap(&mut start, &mut end);
         }
-        let response = self
-            .zakura
-            .clone()
-            .oneshot(ReadRequest::TransactionIdsByAddresses {
-                addresses: HashSet::from([address]),
-                height_range: block::Height(start)..=block::Height(end),
-            })
-            .await
-            .map_err(source_status)?;
-        let ReadResponse::AddressesTransactionIds(transactions) = response else {
-            return Err(Status::internal("unexpected address transaction response"));
-        };
+        let transactions = self
+            .backend
+            .address_transaction_ids(address, block::Height(start)..=block::Height(end))
+            .await?;
 
         let service = self.clone();
         let (sender, receiver) = mpsc::channel(1);
         tokio::spawn(async move {
-            for hash in transactions.into_values() {
+            for hash in transactions {
                 match service.mined_transaction(hash).await {
                     Ok(Some(transaction)) => {
                         if sender.send(Ok(transaction)).await.is_err() {
@@ -91,15 +81,7 @@ impl CompactService {
         &self,
         addresses: HashSet<transparent::Address>,
     ) -> Result<proto::Balance, Status> {
-        let response = self
-            .zakura
-            .clone()
-            .oneshot(ReadRequest::AddressBalance(addresses))
-            .await
-            .map_err(source_status)?;
-        let ReadResponse::AddressBalance { balance, .. } = response else {
-            return Err(Status::internal("unexpected address balance response"));
-        };
+        let balance = self.backend.address_balance(addresses).await?;
         Ok(proto::Balance {
             value_zat: i64::try_from(u64::from(balance))
                 .map_err(|_| Status::out_of_range("transparent balance exceeds i64"))?,
@@ -117,32 +99,24 @@ impl CompactService {
             )));
         }
         let addresses = self.parse_addresses(request.addresses)?;
-        let response = self
-            .zakura
-            .clone()
-            .oneshot(ReadRequest::UtxosByAddresses(addresses))
-            .await
-            .map_err(source_status)?;
-        let ReadResponse::AddressUtxos(utxos) = response else {
-            return Err(Status::internal("unexpected address UTXO response"));
-        };
+        let utxos = self.backend.address_utxos(addresses).await?;
         let limit = usize::try_from(request.max_entries).unwrap_or(usize::MAX);
         utxos
-            .utxos()
-            .filter(|(_, _, location, _)| u64::from(location.height().0) >= request.start_height)
+            .into_iter()
+            .filter(|utxo| u64::from(utxo.height.0) >= request.start_height)
             .take(if limit == 0 { usize::MAX } else { limit })
-            .map(|(address, txid, location, output)| {
+            .map(|utxo| {
                 Ok(proto::GetAddressUtxosReply {
-                    address: address.to_string(),
-                    txid: txid.0.to_vec(),
-                    index: i32::try_from(location.output_index().index()).map_err(|_| {
+                    address: utxo.address.to_string(),
+                    txid: utxo.outpoint.hash.0.to_vec(),
+                    index: i32::try_from(utxo.outpoint.index).map_err(|_| {
                         Status::out_of_range("transparent output index exceeds i32")
                     })?,
-                    script: output.lock_script.as_raw_bytes().to_vec(),
-                    value_zat: i64::try_from(u64::from(output.value)).map_err(|_| {
+                    script: utxo.output.lock_script.as_raw_bytes().to_vec(),
+                    value_zat: i64::try_from(u64::from(utxo.output.value)).map_err(|_| {
                         Status::out_of_range("transparent output value exceeds i64")
                     })?,
-                    height: u64::from(location.height().0),
+                    height: u64::from(utxo.height.0),
                 })
             })
             .collect()
@@ -163,12 +137,10 @@ impl CompactService {
     }
 
     async fn zakura_tip(&self) -> Result<u32, Status> {
-        let response =
-            self.zakura.clone().oneshot(ReadRequest::Tip).await.map_err(source_status)?;
-        match response {
-            ReadResponse::Tip(Some((height, _))) => Ok(height.0),
-            ReadResponse::Tip(None) => Err(Status::unavailable("Zakura chain is empty")),
-            _ => Err(Status::internal("unexpected tip response")),
-        }
+        self.backend
+            .tip_height()
+            .await?
+            .map(|height| height.0)
+            .ok_or_else(|| Status::unavailable("Zakura chain is empty"))
     }
 }

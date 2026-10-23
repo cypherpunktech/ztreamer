@@ -5,14 +5,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
-use tower::ServiceExt;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
-use zakura_state::{ReadRequest, ReadResponse};
 use ztreamer_protocol::proto;
 
-use super::{
-    CompactService, RpcStream, ServingSnapshot, ensure_tip_ready, index_status, source_status,
-};
+use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready, index_status};
 
 impl CompactService {
     pub(crate) async fn tree_state(
@@ -20,42 +16,26 @@ impl CompactService {
         request: proto::BlockId,
     ) -> Result<proto::TreeState, Status> {
         let record = self.record(request).await?;
-        let source = self.zakura.clone();
         let hash = record.hash;
-        let (sapling, orchard, ironwood) = tokio::try_join!(
-            source.clone().oneshot(ReadRequest::SaplingTree(hash.into())),
-            source.clone().oneshot(ReadRequest::OrchardTree(hash.into())),
-            source.oneshot(ReadRequest::IronwoodTree(hash.into())),
-        )
-        .map_err(source_status)?;
-
-        let sapling_tree = match sapling {
-            ReadResponse::SaplingTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Sapling tree response")),
-        };
-        let orchard_tree = match orchard {
-            ReadResponse::OrchardTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Orchard tree response")),
-        };
-        let ironwood_tree = match ironwood {
-            ReadResponse::IronwoodTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Ironwood tree response")),
-        };
+        let trees = self.backend.tree_state(hash).await?;
 
         Ok(proto::TreeState {
             network: self.chain_name.to_string(),
             height: u64::from(record.height),
             hash: hash.to_string(),
             time: record.time,
-            sapling_tree,
-            orchard_tree,
-            ironwood_tree,
+            sapling_tree: trees
+                .sapling
+                .map(|tree| hex::encode(tree.to_rpc_bytes()))
+                .unwrap_or_default(),
+            orchard_tree: trees
+                .orchard
+                .map(|tree| hex::encode(tree.to_rpc_bytes()))
+                .unwrap_or_default(),
+            ironwood_tree: trees
+                .ironwood
+                .map(|tree| hex::encode(tree.to_rpc_bytes()))
+                .unwrap_or_default(),
         })
     }
 
@@ -120,34 +100,27 @@ impl CompactService {
                     .map_err(|_| Status::invalid_argument("subtree entry limit exceeds u16"))?,
             )),
         };
-        let source = self.zakura.clone();
-        let response = match proto::ShieldedProtocol::try_from(request.shielded_protocol) {
-            Ok(proto::ShieldedProtocol::Sapling) => {
-                source.oneshot(ReadRequest::SaplingSubtrees { start_index, limit }).await
-            }
-            Ok(proto::ShieldedProtocol::Orchard) => {
-                source.oneshot(ReadRequest::OrchardSubtrees { start_index, limit }).await
-            }
-            Ok(proto::ShieldedProtocol::Ironwood) => {
-                source.oneshot(ReadRequest::IronwoodSubtrees { start_index, limit }).await
-            }
-            Err(_) => return Err(Status::invalid_argument("invalid shielded protocol")),
-        }
-        .map_err(source_status)?;
-        let roots = match response {
-            ReadResponse::SaplingSubtrees(subtrees) => subtrees
+        let backend = &self.backend;
+        let roots = match proto::ShieldedProtocol::try_from(request.shielded_protocol) {
+            Ok(proto::ShieldedProtocol::Sapling) => backend
+                .sapling_subtrees(start_index, limit)
+                .await?
                 .into_values()
                 .map(|subtree| (subtree.root.to_bytes().to_vec(), subtree.end_height.0))
                 .collect(),
-            ReadResponse::OrchardSubtrees(subtrees) => subtrees
+            Ok(proto::ShieldedProtocol::Orchard) => backend
+                .orchard_subtrees(start_index, limit)
+                .await?
                 .into_values()
                 .map(|subtree| (subtree.root.to_repr().to_vec(), subtree.end_height.0))
                 .collect(),
-            ReadResponse::IronwoodSubtrees(subtrees) => subtrees
+            Ok(proto::ShieldedProtocol::Ironwood) => backend
+                .ironwood_subtrees(start_index, limit)
+                .await?
                 .into_values()
                 .map(|subtree| (subtree.root.to_repr().to_vec(), subtree.end_height.0))
                 .collect(),
-            _ => return Err(Status::internal("unexpected subtree response")),
+            Err(_) => return Err(Status::invalid_argument("invalid shielded protocol")),
         };
         Ok(self.subtree_stream(roots, self.snapshot()))
     }

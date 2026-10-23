@@ -4,16 +4,14 @@ use std::{sync::Arc, time::Instant};
 
 use tokio_stream::StreamExt;
 use tonic::Status;
-use tower::ServiceExt;
 use zakura_chain::block;
-use zakura_state::{ReadRequest, ReadResponse};
 use ztreamer_indexer::{
     codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock},
     index::IndexError,
 };
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
-use super::{CompactService, RpcStream, ensure_ready, index_status, reorganized, source_status};
+use super::{CompactService, RpcStream, ensure_ready, index_status, reorganized};
 use crate::project::{PoolSelection, add_transparent_txs, project_block};
 
 impl CompactService {
@@ -87,11 +85,11 @@ impl CompactService {
         if !pools.transparent {
             return Ok(blocks);
         }
-        let source = self.zakura.clone();
+        let backend = Arc::clone(&self.backend);
         // Transparent data is deliberately fetched on demand, outside the compact index.
         // Obviously this is extremely slow. Transparent scanning is not a recommended use case.
         Ok(Box::pin(blocks.then(move |block| {
-            let source = source.clone();
+            let backend = Arc::clone(&backend);
             async move {
                 let mut block = block?;
                 let hash = block::Hash(
@@ -101,13 +99,8 @@ impl CompactService {
                         .try_into()
                         .map_err(|_| Status::internal("invalid compact block hash"))?,
                 );
-                let response =
-                    source.oneshot(ReadRequest::Block(hash.into())).await.map_err(source_status)?;
-                let full = match response {
-                    ReadResponse::Block(Some(block)) => block,
-                    ReadResponse::Block(None) => return Err(reorganized(block.height as u32)),
-                    _ => return Err(Status::internal("unexpected block response")),
-                };
+                let full =
+                    backend.block(hash).await?.ok_or_else(|| reorganized(block.height as u32))?;
                 add_transparent_txs(&mut block, &full.transactions);
                 Ok(block)
             }

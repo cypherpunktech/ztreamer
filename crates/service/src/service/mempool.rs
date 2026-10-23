@@ -1,7 +1,7 @@
 //! Mempool requests: submitting transactions, streaming the mempool, and compact mempool
 //! transactions.
 
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -10,7 +10,6 @@ use zakura_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction},
 };
-use ztreamer_node::NodeClient;
 use ztreamer_protocol::proto;
 
 use super::{CompactService, RpcStream};
@@ -23,26 +22,14 @@ impl CompactService {
     ) -> Result<proto::SendResponse, Status> {
         let transaction = Transaction::zcash_deserialize(request.data.as_slice())
             .map_err(|error| Status::invalid_argument(format!("invalid transaction: {error}")))?;
-        let node = self.node()?.clone();
-        let runtime = tokio::runtime::Handle::current();
-        // zakura's submit_transaction future is not Send
-        let txid = tokio::task::spawn_blocking(move || {
-            runtime
-                .block_on(node.submit_transaction(transaction))
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
-        .map_err(|error| Status::invalid_argument(format!("Zakura rejected transaction: {error}")))?
-        .mined_id();
+        let txid = self.backend.submit_transaction(transaction).await?;
         Ok(proto::SendResponse { error_code: 0, error_message: txid.to_string() })
     }
 
     pub(crate) async fn mempool_stream(&self) -> Result<RpcStream<proto::RawTransaction>, Status> {
-        let node = self.node()?.clone();
-        let mut tip_changes = node.subscribe_chain_tip();
-        let _ = tip_changes.last_tip_change();
-        let mut transactions = Self::mempool_transactions(node.clone()).await?;
+        let backend = Arc::clone(&self.backend);
+        let mut tip_changes = backend.tip_listener()?;
+        let mut transactions = backend.mempool_transactions().await?;
         let (sender, receiver) = mpsc::channel(1);
         tokio::spawn(async move {
             let mut seen = HashSet::new();
@@ -60,11 +47,9 @@ impl CompactService {
                     };
                     tokio::select! {
                         biased;
-                        change = tip_changes.wait_for_tip_change() => {
+                        change = tip_changes.tip_changed() => {
                             if let Err(error) = change {
-                                let _ = sender.send(Err(Status::unavailable(format!(
-                                    "Zakura chain-tip listener failed: {error}"
-                                )))).await;
+                                let _ = sender.send(Err(Status::from(error))).await;
                             }
                             return;
                         }
@@ -78,19 +63,17 @@ impl CompactService {
 
                 transactions = tokio::select! {
                     biased;
-                    change = tip_changes.wait_for_tip_change() => {
+                    change = tip_changes.tip_changed() => {
                         if let Err(error) = change {
-                            let _ = sender.send(Err(Status::unavailable(format!(
-                                "Zakura chain-tip listener failed: {error}"
-                            )))).await;
+                            let _ = sender.send(Err(Status::from(error))).await;
                         }
                         return;
                     }
                     _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                        match Self::mempool_transactions(node.clone()).await {
+                        match backend.mempool_transactions().await {
                             Ok(transactions) => transactions,
                             Err(error) => {
-                                let _ = sender.send(Err(error)).await;
+                                let _ = sender.send(Err(Status::from(error))).await;
                                 return;
                             }
                         }
@@ -106,25 +89,11 @@ impl CompactService {
         request: proto::GetMempoolTxRequest,
     ) -> Result<RpcStream<proto::CompactTx>, Status> {
         PoolSelection::from_mempool_request(&request.pool_types)?;
-        let node = self.node()?.clone();
-        let transactions = Self::mempool_transactions(node).await?;
+        let transactions = self.backend.mempool_transactions().await?;
         let compact = tokio::task::spawn_blocking(move || mempool_compact(transactions, &request))
             .await
             .map_err(|error| Status::internal(format!("mempool conversion failed: {error}")))??;
         Ok(Box::pin(tokio_stream::iter(compact.into_iter().map(Ok))))
-    }
-
-    pub(crate) async fn mempool_transactions(
-        node: NodeClient,
-    ) -> Result<Vec<transaction::UnminedTx>, Status> {
-        let runtime = tokio::runtime::Handle::current();
-        // Zakura's mempool service future is not Send.
-        tokio::task::spawn_blocking(move || {
-            runtime.block_on(node.mempool_transactions()).map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| Status::unavailable(format!("Zakura task failed: {error}")))?
-        .map_err(|error| Status::unavailable(format!("Zakura mempool query failed: {error}")))
     }
 }
 

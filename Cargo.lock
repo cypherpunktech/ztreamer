@@ -8025,6 +8025,7 @@ dependencies = [
  "zakura",
  "zakura-chain",
  "zakura-network",
+ "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
  "ztreamer-indexer",
