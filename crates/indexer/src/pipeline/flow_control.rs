@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{codec::CompactBlockRecord, ingest::IngestError, parser::ParsedCompactBlock};
+use crate::{codec::CompactBlockRecord, ingest::IngestError, types::ParsedCompactBlock};
 
 use super::PipelineError;
 

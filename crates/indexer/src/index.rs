@@ -872,7 +872,7 @@ mod tests {
     use crate::{
         codec::{ProtobufBlockRecord, decode_range_record},
         ingest::OrderedBuilder,
-        parser::ParsedCompactBlock,
+        types::ParsedCompactBlock,
     };
 
     #[test]

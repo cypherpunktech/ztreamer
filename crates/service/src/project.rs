@@ -6,7 +6,8 @@ use tonic::Status;
 use zakura_chain::{serialization::ZcashDeserialize as _, transaction};
 use ztreamer_indexer::{
     Digest,
-    parser::{CompactShieldedAction, CompactTransaction, parse_transaction},
+    parser::parse_transaction,
+    types::{CompactShieldedAction, CompactTransaction},
 };
 use ztreamer_protocol::proto;
 
@@ -289,10 +290,8 @@ mod tests {
     use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes},
-        parser::{
-            CompactSaplingOutput, CompactShieldedAction, CompactTransaction, RawIndexBlock,
-            parse_block,
-        },
+        parser::parse_block,
+        types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, RawIndexBlock},
     };
 
     #[test]

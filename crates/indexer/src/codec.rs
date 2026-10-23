@@ -4,7 +4,7 @@ use prost::{Message, bytes::Bytes};
 use serde::{Deserialize, Serialize};
 use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 
-use crate::{Digest, index::RANGE_SIZE, parser::CompactTransaction};
+use crate::{Digest, index::RANGE_SIZE, types::CompactTransaction};
 
 const BLOCK_FORMAT_VERSION: u8 = 1;
 const RANGE_FORMAT_VERSION: u8 = 1;
@@ -506,7 +506,7 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{CompactSaplingOutput, CompactShieldedAction};
+    use crate::types::{CompactSaplingOutput, CompactShieldedAction};
 
     #[test]
     fn rejects_transactions_without_shielded_data() {

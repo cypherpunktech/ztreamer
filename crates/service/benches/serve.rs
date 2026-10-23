@@ -14,7 +14,8 @@ use ztreamer_indexer::{
     Digest,
     index::{Index, IndexState},
     ingest::OrderedBuilder,
-    parser::{CompactTransaction, ParsedCompactBlock, RawIndexBlock, parse_block},
+    parser::parse_block,
+    types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 use ztreamer_protocol::proto;
 use ztreamer_service::CompactService;

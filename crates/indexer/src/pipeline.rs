@@ -508,7 +508,7 @@ mod tests {
     use std::sync::mpsc::{TrySendError, sync_channel};
 
     use super::*;
-    use crate::parser::ParsedCompactBlock;
+    use crate::types::ParsedCompactBlock;
     use crate::{Digest, codec::CompactBlockRecord};
 
     #[test]
