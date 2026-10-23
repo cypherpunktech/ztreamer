@@ -7968,8 +7968,6 @@ dependencies = [
  "metrics",
  "metrics-util 0.20.4",
  "prost",
- "serde",
- "serde-big-array",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

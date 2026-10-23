@@ -1,7 +1,5 @@
 //! Compact block and transaction types produced by the parser and stored by the index.
 
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
 use zakura_chain::{block, transaction};
 
 use crate::{Ciphertext, Digest, EphemeralKey};
@@ -14,24 +12,22 @@ pub struct RawIndexBlock {
     pub txids: Vec<transaction::Hash>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompactSaplingOutput {
     pub cmu: Digest,
     pub ephemeral_key: EphemeralKey,
-    #[serde(with = "BigArray")]
     pub ciphertext: Ciphertext,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompactShieldedAction {
     pub nullifier: Digest,
     pub commitment: Digest,
     pub ephemeral_key: EphemeralKey,
-    #[serde(with = "BigArray")]
     pub ciphertext: Ciphertext,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactTransaction {
     pub index: u64,
     pub txid: Digest,
