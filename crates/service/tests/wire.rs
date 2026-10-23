@@ -4,8 +4,7 @@ use prost::Message;
 use tokio_stream::StreamExt;
 use ztreamer_protocol::proto;
 
-#[path = "../benches/support/mod.rs"]
-mod support;
+use ztreamer_service::test_utils as support;
 
 #[tokio::test]
 #[allow(deprecated)] // Verify compatibility with the legacy nullifier RPCs too.

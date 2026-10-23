@@ -8,6 +8,8 @@ pub mod grpc;
 pub mod p2p;
 mod project;
 mod service;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 pub use service::{
     CompactService, HeadFollowerConfig, HeadFollowerError, Readiness, ServingSnapshot,
