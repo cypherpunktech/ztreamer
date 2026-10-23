@@ -565,4 +565,4 @@ mod tests {
 }
 
 #[cfg(test)]
-mod integration_tests;
+mod coordinator_tests;
