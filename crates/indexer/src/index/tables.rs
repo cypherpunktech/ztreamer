@@ -1,7 +1,7 @@
 //! The index's four LMDB tables, and the block lookup that spans them.
 //!
 //! Each table has a newtype that knows its key and value types. The newtypes do not enforce the
-//! rules between the tables. The write methods of [`Index`](super::Index) do that. The docs of
+//! rules between the tables. [`IndexWriter`](super::writer::IndexWriter) does that. The docs of
 //! the `index` module give the full table layout, the rules, and an example.
 
 use heed::{

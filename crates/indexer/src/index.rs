@@ -89,12 +89,9 @@
 
 use std::{fs, io, path::Path, time::Instant};
 
-use heed::{Env, EnvOpenOptions, RoTxn, RwTxn};
+use heed::{Env, EnvOpenOptions, RoTxn};
 
-use crate::codec::{
-    CodecError, CompactBlockRecord, StoredBlock, TreeSizes, decode_range_record,
-    encode_range_from_bytes,
-};
+use crate::codec::{CodecError, CompactBlockRecord, StoredBlock, TreeSizes, decode_range_record};
 use crate::{
     Digest,
     ingest::{EncodedBatch, WriteBatch},
@@ -103,8 +100,10 @@ use crate::{
 mod metadata;
 mod tables;
 mod telemetry;
+mod writer;
 use tables::{Tables, range_start};
-use telemetry::{WriteStage, WriteTimer, record_state_metrics};
+use telemetry::{WriteStage, record_state_metrics};
+use writer::IndexWriter;
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const RANGE_SIZE: u32 = 1_000;
@@ -459,77 +458,28 @@ impl Index {
 
     /// Atomically writes a batch with encoded records and packs newly sealed ranges.
     pub(crate) fn write_encoded(&self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
-        let mut txn = self.env.write_txn()?;
-        let mut state = self.tables.metadata.get_state(&txn)?;
         let EncodedBatch { base_generation, seal_through, blocks, end_tree_sizes } = batch;
+        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
+        let state = writer.state();
         let first = blocks.first().expect("builders never emit empty batches");
         let expected_height = match state.durable_tip {
             Some(tip) => tip.height.checked_add(1).ok_or(IndexError::Overflow)?,
             None => 0,
         };
-        if state.generation != base_generation
-            || first.height != expected_height
+        if first.height != expected_height
             || state.durable_tip.is_some_and(|tip| first.previous_hash != tip.hash)
         {
             return Err(IndexError::StaleBatch { batch_generation: base_generation });
         }
 
-        let mut timer = WriteTimer::start();
-        for block in &blocks {
-            self.tables.hash_to_height.put(&mut txn, &block.hash, block.height)?;
-        }
-        timer.lap(WriteStage::HashIndex);
+        writer.start_timer();
+        writer.put_hashes(&blocks)?;
         let last = blocks.last().expect("the batch is non-empty");
-        let tip = BlockId::new(last.height, last.hash);
+        writer.set_tip(BlockId::new(last.height, last.hash), end_tree_sizes);
         let mut blocks = blocks.into_iter().peekable();
-        let mut start = state
-            .sealed_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))?;
-
-        while let Some(seal_cutoff) = seal_through {
-            let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;
-            if end > seal_cutoff || end > tip.height {
-                break;
-            }
-            // The head follower writes blocks to `mutable_blocks` before it seals them. Because of
-            // this, the range can be complete in `mutable_blocks`, and the batch can start after it.
-            let first_new = blocks.peek().map_or(end + 1, |block| block.height);
-            let mutable_end = first_new.min(end + 1);
-            let mut range =
-                self.tables.mutable_blocks.read_checked(&txn, start..mutable_end, start)?;
-            timer.seal_read(range.len());
-            while range.len() < RANGE_SIZE as usize {
-                let block = blocks.next().ok_or(IndexError::IncompleteRange { start })?;
-                range.push(block.bytes);
-            }
-            let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
-            let packed = encode_range_from_bytes(&parts)?;
-            drop(parts);
-            drop(range);
-            timer.lap(WriteStage::SealEncode);
-            self.tables.sealed_ranges.put(&mut txn, start, packed.as_slice())?;
-            self.tables.mutable_blocks.delete_range(&mut txn, start..mutable_end)?;
-            timer.lap(WriteStage::SealPut);
-            timer.bytes(WriteStage::SealPut, packed.len());
-            state.sealed_through = Some(end);
-            start = end.checked_add(1).ok_or(IndexError::Overflow)?;
-        }
-        let wrote_mutable = blocks.peek().is_some();
-        for block in blocks {
-            self.tables.mutable_blocks.put(&mut txn, block.height, block.bytes.as_slice())?;
-            timer.bytes(WriteStage::MutablePut, block.bytes.len());
-        }
-        timer.lap_if(wrote_mutable, WriteStage::MutablePut);
-        state.durable_tip = Some(tip);
-        state.tree_sizes = end_tree_sizes;
-        state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        self.tables.metadata.put_state(&mut txn, state)?;
-        timer.lap(WriteStage::StatePut);
-        txn.commit()?;
-        timer.lap(WriteStage::Commit);
-        timer.finish();
-        record_state_metrics(state);
-        Ok(state)
+        writer.seal_batch_ranges(seal_through, &mut blocks)?;
+        writer.put_mutable_blocks(blocks)?;
+        writer.commit()
     }
 
     /// Atomically replaces every mutable block after `ancestor`.
@@ -540,15 +490,12 @@ impl Index {
         records: Vec<CompactBlockRecord>,
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
-        let mut txn = self.env.write_txn()?;
-        let mut state = self.tables.metadata.get_state(&txn)?;
-        if state.generation != base_generation {
-            return Err(IndexError::StaleBatch { batch_generation: base_generation });
-        }
+        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
+        let state = writer.state();
         if state.sealed_through.is_some_and(|sealed| ancestor.height < sealed) {
             return Err(IndexError::Sealed { height: ancestor.height + 1 });
         }
-        let ancestor_record: CompactBlockRecord = self.tables.read(&txn, state, ancestor.height)?;
+        let ancestor_record = writer.read(ancestor.height)?;
         if ancestor_record.hash != ancestor.hash {
             return Err(IndexError::Replacement { height: ancestor.height });
         }
@@ -568,33 +515,17 @@ impl Index {
         if ancestor.height > old_tip.height {
             return Err(IndexError::Replacement { height: ancestor.height });
         }
-        for height in delete_start..=old_tip.height {
-            let bytes = self
-                .tables
-                .mutable_blocks
-                .get(&txn, height)?
-                .ok_or(IndexError::Continuity { height })?;
-            let old = CompactBlockRecord::decode(bytes)?;
-            self.tables.hash_to_height.delete(&mut txn, &old.hash)?;
-            self.tables.mutable_blocks.delete(&mut txn, height)?;
-        }
-        for record in &records {
-            let encoded = record.encode()?;
-            self.tables.mutable_blocks.put(&mut txn, record.height, encoded.as_slice())?;
-            self.tables.hash_to_height.put(&mut txn, &record.hash, record.height)?;
-        }
+        (delete_start..=old_tip.height)
+            .try_for_each(|height| writer.delete_mutable_block(height))?;
+        records.iter().try_for_each(|record| writer.put_block(record))?;
 
-        let tip =
-            records.last().map_or(ancestor, |record| BlockId::new(record.height, record.hash));
-        state.durable_tip = Some(tip);
-        state.tree_sizes =
-            records.last().map_or(ancestor_record.end_tree_sizes, |record| record.end_tree_sizes);
-        self.seal_mutable_ranges(&mut txn, seal_through, &mut state)?;
-        state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        self.tables.metadata.put_state(&mut txn, state)?;
-        txn.commit()?;
-        record_state_metrics(state);
-        Ok(state)
+        let (tip, tree_sizes) =
+            records.last().map_or((ancestor, ancestor_record.end_tree_sizes), |record| {
+                (BlockId::new(record.height, record.hash), record.end_tree_sizes)
+            });
+        writer.set_tip(tip, tree_sizes);
+        writer.seal_mutable_ranges(seal_through)?;
+        writer.commit()
     }
 
     /// Atomically rebuilds every physical range touched by a deep reorg.
@@ -605,20 +536,16 @@ impl Index {
         replacement: Vec<CompactBlockRecord>,
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
-        let mut txn = self.env.write_txn()?;
-        let mut state = self.tables.metadata.get_state(&txn)?;
-        if state.generation != base_generation {
-            return Err(IndexError::StaleBatch { batch_generation: base_generation });
-        }
-        let old_tip = state.durable_tip.ok_or(IndexError::Metadata)?;
-        let common: CompactBlockRecord = self.tables.read(&txn, state, common_ancestor.height)?;
+        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
+        let old_tip = writer.state().durable_tip.ok_or(IndexError::Metadata)?;
+        let common = writer.read(common_ancestor.height)?;
         if common.hash != common_ancestor.hash {
             return Err(IndexError::Replacement { height: common_ancestor.height });
         }
 
         let affected_start = range_start(common_ancestor.height);
         let old_records = (affected_start..=old_tip.height)
-            .map(|height| self.tables.read(&txn, state, height))
+            .map(|height| writer.read(height))
             .collect::<Result<Vec<_>, _>>()?;
         let prefix_len = (common_ancestor.height - affected_start + 1) as usize;
         let mut canonical = old_records[..prefix_len].to_vec();
@@ -630,68 +557,15 @@ impl Index {
             return Err(IndexError::Replacement { height: common_ancestor.height });
         }
 
-        for record in &old_records {
-            self.tables.hash_to_height.delete(&mut txn, &record.hash)?;
-            self.tables.mutable_blocks.delete(&mut txn, record.height)?;
-        }
-        if let Some(old_sealed) = state.sealed_through
-            && affected_start <= old_sealed
-        {
-            let mut start = affected_start;
-            while start <= old_sealed {
-                self.tables.sealed_ranges.delete(&mut txn, start)?;
-                start = start.checked_add(RANGE_SIZE).ok_or(IndexError::Overflow)?;
-            }
-            state.sealed_through =
-                affected_start.checked_sub(1).filter(|height| *height <= old_sealed);
-        }
-
-        for record in &canonical {
-            let encoded = record.encode()?;
-            self.tables.mutable_blocks.put(&mut txn, record.height, encoded.as_slice())?;
-            self.tables.hash_to_height.put(&mut txn, &record.hash, record.height)?;
-        }
+        // Do all deletes before the first put: `canonical` shares its prefix hashes
+        // with `old_records`.
+        old_records.iter().try_for_each(|record| writer.delete_block(record))?;
+        writer.delete_ranges_from(affected_start)?;
+        canonical.iter().try_for_each(|record| writer.put_block(record))?;
         let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
-        state.durable_tip = Some(BlockId::new(tip.height, tip.hash));
-        state.tree_sizes = tip.end_tree_sizes;
-        self.seal_mutable_ranges(&mut txn, seal_through, &mut state)?;
-        state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        self.tables.metadata.put_state(&mut txn, state)?;
-        txn.commit()?;
-        record_state_metrics(state);
-        Ok(state)
-    }
-
-    fn seal_mutable_ranges(
-        &self,
-        txn: &mut RwTxn<'_>,
-        seal_cutoff: Option<u32>,
-        state: &mut IndexState,
-    ) -> Result<(), IndexError> {
-        let Some(seal_cutoff) = seal_cutoff else {
-            return Ok(());
-        };
-        let mut start = state
-            .sealed_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))?;
-
-        loop {
-            let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;
-            // exit early if the range is not ready to be sealed yet
-            if end > seal_cutoff
-                || state.durable_tip.is_none_or(|durable_tip| end > durable_tip.height)
-            {
-                break;
-            }
-            let range = self.tables.mutable_blocks.read_checked(txn, start..end + 1, start)?;
-            let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
-            let encoded = encode_range_from_bytes(&parts)?;
-            self.tables.sealed_ranges.put(txn, start, encoded.as_slice())?;
-            self.tables.mutable_blocks.delete_range(txn, start..=end)?;
-            state.sealed_through = Some(end);
-            start = end.checked_add(1).ok_or(IndexError::Overflow)?;
-        }
-        Ok(())
+        writer.set_tip(BlockId::new(tip.height, tip.hash), tip.end_tree_sizes);
+        writer.seal_mutable_ranges(seal_through)?;
+        writer.commit()
     }
 }
 
@@ -1003,21 +877,7 @@ mod tests {
         let index = Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
         let old = index.write(batch(&index, 0..=50, 60)).unwrap();
         let ancestor = BlockId::new(30, hash(30));
-        let mut previous_hash = ancestor.hash;
-        let replacement = (31..=55)
-            .map(|height| {
-                let record = CompactBlockRecord {
-                    height,
-                    hash: branch_hash(height),
-                    previous_hash,
-                    time: height,
-                    transactions: Vec::new(),
-                    end_tree_sizes: TreeSizes::default(),
-                };
-                previous_hash = record.hash;
-                record
-            })
-            .collect();
+        let replacement = branch(ancestor, 31..=55);
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
         let (state, pinned_hashes) = std::thread::scope(|scope| {
@@ -1059,21 +919,7 @@ mod tests {
         assert_eq!(old.sealed_through(), Some(999));
 
         let common = BlockId::new(950, hash(950));
-        let mut previous_hash = common.hash;
-        let replacement = (951..=1_110)
-            .map(|height| {
-                let record = CompactBlockRecord {
-                    height,
-                    hash: branch_hash(height),
-                    previous_hash,
-                    time: height,
-                    transactions: Vec::new(),
-                    end_tree_sizes: TreeSizes::default(),
-                };
-                previous_hash = record.hash;
-                record
-            })
-            .collect();
+        let replacement = branch(common, 951..=1_110);
         let state =
             index.replace_deep_suffix(old.generation(), common, replacement, Some(1_010)).unwrap();
 
@@ -1081,6 +927,30 @@ mod tests {
         assert_eq!(index.read_block(state.generation(), 950).unwrap().hash, hash(950));
         assert_eq!(index.read_block(state.generation(), 951).unwrap().hash, branch_hash(951));
         assert!(index.read_block_by_hash(state.generation(), hash(951)).unwrap().is_none());
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn deep_reorg_at_a_range_boundary_keeps_the_shared_hashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
+        let old = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
+        assert_eq!(old.sealed_through(), Some(999));
+
+        // The affected range is the whole sealed range 0..=999, and every block in it is in both
+        // the old and the new branch. The writer removes its hashes before it writes them again.
+        let common = BlockId::new(999, hash(999));
+        let replacement = branch(common, 1_000..=1_050);
+        let state =
+            index.replace_deep_suffix(old.generation(), common, replacement, Some(999)).unwrap();
+
+        assert_eq!(state.sealed_through(), Some(999));
+        for height in [0, 500, 999] {
+            let block = index.read_block_by_hash(state.generation(), hash(height)).unwrap();
+            assert_eq!(block.unwrap().height, height);
+        }
+        assert!(index.read_block_by_hash(state.generation(), hash(1_000)).unwrap().is_none());
+        assert_eq!(index.read_block(state.generation(), 1_000).unwrap().hash, branch_hash(1_000));
         index.verify_continuity().unwrap();
     }
 
@@ -1097,6 +967,28 @@ mod tests {
             )
             .unwrap()
             .unwrap()
+    }
+
+    /// A branch of empty blocks over `heights` that chains onto `ancestor`.
+    fn branch(
+        ancestor: BlockId,
+        heights: std::ops::RangeInclusive<u32>,
+    ) -> Vec<CompactBlockRecord> {
+        let mut previous_hash = ancestor.hash;
+        heights
+            .map(|height| {
+                let record = CompactBlockRecord {
+                    height,
+                    hash: branch_hash(height),
+                    previous_hash,
+                    time: height,
+                    transactions: Vec::new(),
+                    end_tree_sizes: TreeSizes::default(),
+                };
+                previous_hash = record.hash;
+                record
+            })
+            .collect()
     }
 
     fn branch_hash(height: u32) -> Digest {
