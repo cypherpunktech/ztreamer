@@ -1,4 +1,91 @@
 //! Generation-pinned LMDB reads, atomic writes, packed ranges, and reorg replacement.
+//!
+//! # Tables
+//!
+//! The [`Index`] keeps the chain in four LMDB databases in one environment. All integers are
+//! big-endian, so LMDB keeps the height keys in height order.
+//!
+//! ```text
+//! table           key                    value
+//! metadata        "state"                IndexState, 62 bytes
+//!                 "identity"             chain identity and fixed policy
+//! sealed_ranges   first height, u32      one packed range of RANGE_SIZE records
+//! mutable_blocks  height, u32            one encoded CompactBlockRecord
+//! hash_to_height  block hash, 32 bytes   height, u32
+//! ```
+//!
+//! # Coverage
+//!
+//! Each height from 0 to the durable tip is in exactly one of `sealed_ranges` and
+//! `mutable_blocks`. The sealed ranges hold the old blocks. The mutable rows hold the newer
+//! blocks. The newest blocks are not in LMDB. For example, with the node tip at 2,544:
+//!
+//! ```text
+//! height   0 ... 999 | 1000 ... 1999 | 2000 ... 2534  | 2535 ... 2544
+//! table    sealed_ranges             | mutable_blocks | not in LMDB
+//! key      0         | 1000          | 2000, 2001 ... |
+//!                                  ^               ^                ^
+//!                     sealed_through     durable tip         node tip
+//!
+//! hash_to_height: one entry for each height in 0..=2534
+//! ```
+//!
+//! The caller selects the blocks to write and the ranges to seal. The head follower writes a
+//! block when it is [`PERSIST_DEPTH`] or more blocks below the node tip. It seals a range when
+//! the last block of the range is [`SEAL_DEPTH`] or more blocks below the node tip. In the
+//! example, the range 2,000 to 2,999 is not complete, so it stays in `mutable_blocks`.
+//!
+//! A deep reorg can go below `sealed_through`. Then [`Index::replace_deep_suffix`] deletes the
+//! affected ranges, writes their blocks again as mutable rows, and seals the complete ranges
+//! again.
+//!
+//! # Rules
+//!
+//! These rules apply after each commit:
+//!
+//! - `sealed_through` is not set, or it is the last height of a range. The sealed ranges cover
+//!   `0..=sealed_through` with no gaps.
+//! - The mutable rows cover `sealed_through + 1` to the durable tip, one row for each height.
+//! - `hash_to_height` has one entry for each height from 0 to the durable tip, and no other
+//!   entries.
+//! - The previous hash of each block is the hash of the block below it.
+//! - The state holds the hash and the tree sizes of the durable tip.
+//! - An empty index has no state row, and its three block tables are empty.
+//!
+//! # Writes and generations
+//!
+//! Each write is one LMDB write transaction. It changes the tables, then it commits. If a write
+//! fails, LMDB discards all of its changes. Each commit increases the generation by 1.
+//!
+//! An LMDB read transaction sees one committed state. The `read_*` methods take a generation, and
+//! they return [`IndexError::Generation`] if the index has a different generation. Thus a reader
+//! cannot mix blocks from two commits. [`Index::read_range_latest`] reads the current generation.
+//! Its caller checks the chain between two calls.
+//!
+//! # Startup checks
+//!
+//! [`Index::open`] rejects an environment with a different identity: a different network, genesis
+//! hash, [`SCHEMA_VERSION`], [`RANGE_SIZE`], [`PERSIST_DEPTH`] or [`SEAL_DEPTH`]. Then
+//! [`Index::verify_continuity`] checks:
+//!
+//! - the number of rows in each block table,
+//! - that the height keys of `sealed_ranges` and `mutable_blocks` start at 0 and have no gaps,
+//! - the links between ranges, and the hash chain of the mutable rows,
+//! - the hash entry of each mutable row, and of the first and the last block of each range,
+//! - the tip hash and the tree sizes in the state.
+//!
+//! It does not decode the blocks inside a range. Thus it does not examine their chain links or
+//! their hash entries. The range encoder checks the chain links when it writes the range.
+//!
+//! # Value formats
+//!
+//! - A mutable row is the encoding of one [`CompactBlockRecord`]:
+//!   `version (u8) | height | hash (32 bytes) | previous hash (32 bytes) | length | protobuf
+//!   CompactBlock`.
+//! - A sealed range holds [`RANGE_SIZE`] records in the same encoding, and an offset table. A
+//!   reader can decode one record and not the others. [`encode_range`](crate::codec::encode_range)
+//!   writes a range. The `write_range` function in `codec.rs` gives its byte layout.
+//! - `index/metadata.rs` gives the byte layout of the state and of the identity.
 
 use std::{fs, io, path::Path, time::Instant};
 

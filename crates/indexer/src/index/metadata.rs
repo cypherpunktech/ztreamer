@@ -1,4 +1,37 @@
 //! The metadata table: the persisted [`IndexState`] and the chain identity.
+//!
+//! The table has two rows. All integers are big-endian.
+//!
+//! `"state"`, 62 bytes. Each commit writes it:
+//!
+//! ```text
+//! offset  size  field
+//!      0     1  format version (1)
+//!      1     4  durable tip height
+//!      5    32  durable tip hash
+//!     37     1  1 if sealed_through is set, else 0
+//!     38     4  sealed_through (0 if not set)
+//!     42     8  generation
+//!     50     4  Sapling tree size
+//!     54     4  Orchard tree size
+//!     58     4  Ironwood tree size
+//! ```
+//!
+//! A tree size is the number of note commitments in the pool, at the end of the durable tip.
+//! An index with no commit has no state row, so a state row always has a durable tip. The decoder
+//! rejects a row with a different length or version, a flag other than 0 or 1, or a
+//! `sealed_through` that is above the tip or is not the last height of a range.
+//!
+//! `"identity"`. [`Index::open`](super::Index::open) writes it once, when it creates the index:
+//!
+//! ```text
+//! SCHEMA_VERSION (4) | RANGE_SIZE (4) | PERSIST_DEPTH (4) | SEAL_DEPTH (4) |
+//! genesis hash (32) | network name (UTF-8, to the end of the value)
+//! ```
+//!
+//! [`Metadata::put_or_check_identity`] compares the stored identity with the identity of the
+//! current build and chain. If they are different, `Index::open` fails with
+//! [`IndexError::Identity`].
 
 use heed::{Database, RoTxn, RwTxn, types::Bytes};
 

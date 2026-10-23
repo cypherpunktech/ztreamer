@@ -1,4 +1,8 @@
 //! The index's four LMDB tables, and the block lookup that spans them.
+//!
+//! Each table has a newtype that knows its key and value types. The newtypes do not enforce the
+//! rules between the tables. The write methods of [`Index`](super::Index) do that. The docs of
+//! the `index` module give the full table layout, the rules, and an example.
 
 use heed::{
     Database, Env, RoIter, RoTxn, RwTxn,
@@ -67,7 +71,13 @@ impl Tables {
     }
 }
 
-/// Packed ranges of [`RANGE_SIZE`] blocks, keyed by the first height of each range.
+/// Packed ranges of [`RANGE_SIZE`] blocks.
+///
+/// - Key: the first height of the range, `u32` big-endian. It is a multiple of [`RANGE_SIZE`].
+/// - Value: the records of the range, packed by `codec::write_range`, which gives the byte
+///   layout.
+///
+/// The ranges cover the heights from 0 to `sealed_through`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SealedRanges(HeightDb);
 
@@ -142,7 +152,14 @@ impl SealedRange<'_> {
     }
 }
 
-/// One encoded block per height, for the blocks above the sealed ranges.
+/// One encoded block for each height above the sealed ranges.
+///
+/// - Key: the height, `u32` big-endian.
+/// - Value: one [`CompactBlockRecord::encode`] output: `version (u8) | height | hash |
+///   previous hash | length | protobuf CompactBlock`.
+///
+/// The rows cover the heights from `sealed_through + 1` to the durable tip. A seal copies the
+/// row bytes into a range without a new encode.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MutableBlocks(HeightDb);
 
@@ -210,6 +227,11 @@ impl MutableBlocks {
 }
 
 /// The height of each canonical block hash.
+///
+/// - Key: the block hash, 32 bytes.
+/// - Value: the height, `u32` big-endian.
+///
+/// It has one entry for each block from 0 to the durable tip, sealed or mutable.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HashIndex(Database<Bytes, U32<BigEndian>>);
 
