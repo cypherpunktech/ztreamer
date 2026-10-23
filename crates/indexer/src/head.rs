@@ -344,6 +344,7 @@ fn current_record(
 #[cfg(test)]
 mod tests {
     use crate::index::BlockId;
+    use crate::test_utils::{hash, raw_block};
 
     use super::*;
     use zakura_chain::transaction;
@@ -549,19 +550,6 @@ mod tests {
         });
     }
 
-    fn raw_block(height: u32) -> RawIndexBlock {
-        let mut bytes = vec![0; 140];
-        bytes[4..36].copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or([0; 32]));
-        bytes[100..104].copy_from_slice(&height.to_le_bytes());
-        bytes.extend_from_slice(&[0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        RawIndexBlock {
-            height: block::Height(height),
-            hash: block::Hash(hash(height)),
-            bytes,
-            txids: vec![transaction::Hash(hash(height))],
-        }
-    }
-
     fn raw_branch_block(height: u32, fork: u32) -> RawIndexBlock {
         let mut block = raw_block(height);
         if height >= fork {
@@ -574,12 +562,6 @@ mod tests {
             });
         }
         block
-    }
-
-    fn hash(height: u32) -> Digest {
-        let mut hash = [0; 32];
-        hash[..4].copy_from_slice(&height.to_be_bytes());
-        hash
     }
 
     fn branch_hash(height: u32) -> Digest {

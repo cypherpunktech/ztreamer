@@ -11,7 +11,11 @@ use crate::{
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
-use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
+use zakura_chain::{
+    block::{self, Block},
+    serialization::ZcashDeserialize as _,
+    transaction,
+};
 use zakura_test::vectors::{
     BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687121_BYTES, BLOCK_TESTNET_1842421_BYTES,
 };
@@ -130,4 +134,33 @@ pub fn populate(
     }
     assert_eq!(state.durable_tip().unwrap().height, tip);
     state
+}
+
+/// An empty block at `height` that chains onto [`hash`] of the previous height.
+pub fn prepared(height: u32) -> ParsedCompactBlock {
+    ParsedCompactBlock {
+        height,
+        hash: hash(height),
+        previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
+        time: height,
+        transactions: Vec::new(),
+        sapling_additions: 0,
+        orchard_additions: 0,
+        ironwood_additions: 0,
+    }
+}
+
+/// A minimal raw block at `height`: a 140-byte header prefix that chains onto [`hash`] of the
+/// previous height, plus one empty transaction.
+pub fn raw_block(height: u32) -> RawIndexBlock {
+    let mut bytes = vec![0; 140];
+    bytes[4..36].copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or([0; 32]));
+    bytes[100..104].copy_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&[0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    RawIndexBlock {
+        height: block::Height(height),
+        hash: block::Hash(hash(height)),
+        bytes,
+        txids: vec![transaction::Hash(hash(height))],
+    }
 }

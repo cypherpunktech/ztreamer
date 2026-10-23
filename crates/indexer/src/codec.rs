@@ -506,6 +506,7 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::hash;
     use crate::types::{CompactSaplingOutput, CompactShieldedAction};
 
     #[test]
@@ -676,11 +677,5 @@ mod tests {
             ephemeral_key: [byte; 32],
             ciphertext: [byte; 52],
         }
-    }
-
-    fn hash(height: u32) -> Digest {
-        let mut hash = [0; 32];
-        hash[..4].copy_from_slice(&height.to_be_bytes());
-        hash
     }
 }
