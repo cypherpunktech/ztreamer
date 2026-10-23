@@ -508,8 +508,7 @@ mod tests {
     use std::sync::mpsc::{TrySendError, sync_channel};
 
     use super::*;
-    use crate::types::ParsedCompactBlock;
-    use crate::{Digest, codec::CompactBlockRecord};
+    use crate::{codec::CompactBlockRecord, test_utils::prepared};
 
     #[test]
     fn builder_stays_one_batch_ahead_of_a_blocked_writer() {
@@ -542,25 +541,6 @@ mod tests {
             release_tx.send(()).unwrap();
             writer.join().unwrap();
         });
-    }
-
-    fn prepared(height: u32) -> ParsedCompactBlock {
-        ParsedCompactBlock {
-            height,
-            hash: hash(height),
-            previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
-            time: height,
-            transactions: Vec::new(),
-            sapling_additions: 0,
-            orchard_additions: 0,
-            ironwood_additions: 0,
-        }
-    }
-
-    fn hash(height: u32) -> Digest {
-        let mut hash = [0; 32];
-        hash[..4].copy_from_slice(&height.to_be_bytes());
-        hash
     }
 }
 

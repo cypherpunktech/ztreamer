@@ -698,10 +698,10 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{hash, prepared};
     use crate::{
         codec::{ProtobufBlockRecord, decode_range_record},
         ingest::OrderedBuilder,
-        types::ParsedCompactBlock,
     };
 
     #[test]
@@ -1097,25 +1097,6 @@ mod tests {
             )
             .unwrap()
             .unwrap()
-    }
-
-    fn prepared(height: u32) -> ParsedCompactBlock {
-        ParsedCompactBlock {
-            height,
-            hash: hash(height),
-            previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
-            time: height,
-            transactions: Vec::new(),
-            sapling_additions: 0,
-            orchard_additions: 0,
-            ironwood_additions: 0,
-        }
-    }
-
-    fn hash(height: u32) -> Digest {
-        let mut hash = [0; 32];
-        hash[..4].copy_from_slice(&height.to_be_bytes());
-        hash
     }
 
     fn branch_hash(height: u32) -> Digest {

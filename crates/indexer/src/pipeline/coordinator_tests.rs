@@ -7,9 +7,9 @@ use std::sync::{
 
 use super::*;
 use crate::{
-    Digest,
     codec::{CompactBlockRecord, TreeSizes},
     ingest::OrderedBuilder,
+    test_utils::hash,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
 
@@ -104,12 +104,6 @@ impl HistoricalSource for Fixture {
         }
         Ok(())
     }
-}
-
-fn hash(height: u32) -> Digest {
-    let mut hash = [0; 32];
-    hash[..4].copy_from_slice(&height.to_be_bytes());
-    hash
 }
 
 fn prepared(height: u32) -> ParsedCompactBlock {
