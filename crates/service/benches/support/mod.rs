@@ -15,8 +15,7 @@ use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStream
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
 use ztreamer_service::CompactService;
 
-#[path = "../../../../benchmarks/fixtures.rs"]
-pub(crate) mod fixtures;
+pub(crate) use ztreamer_indexer::test_utils as fixtures;
 
 pub(crate) type Client = CompactTxStreamerClient<Channel>;
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;

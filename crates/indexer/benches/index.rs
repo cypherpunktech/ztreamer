@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 
-#[path = "../../../benchmarks/fixtures.rs"]
-mod fixtures;
+use ztreamer_indexer::test_utils as fixtures;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use ztreamer_indexer::{
