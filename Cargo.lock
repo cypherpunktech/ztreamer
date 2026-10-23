@@ -8005,6 +8005,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-remote"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "webpki-roots",
+]
+
+[[package]]
 name = "ztreamer-service"
 version = "0.1.0"
 dependencies = [
