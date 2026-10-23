@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
         &cli.index_dir,
         cli.index_map_size.get(),
         &network.to_string(),
-        network.genesis_hash().0,
+        network.genesis_hash(),
     )?);
 
     let p2p = Arc::new(P2pCompactService::pending());

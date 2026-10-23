@@ -196,7 +196,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             return Ok(initial_state);
         }
         if let Some(durable_tip) = durable_tip
-            && self.db.block_hash(durable_tip.height).is_none_or(|hash| hash.0 != durable_tip.hash)
+            && self.db.block_hash(durable_tip.height).is_none_or(|hash| hash != durable_tip.hash)
         {
             return Err(PipelineError::DurableTipMismatch { height: durable_tip.height });
         }

@@ -1,31 +1,32 @@
 //! Versioned codecs for individual compact blocks and random-access 1,000-block ranges.
 
 use prost::{Message, bytes::Bytes};
+use zakura_chain::block;
 use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 
-use crate::{Digest, index::RANGE_SIZE, types::CompactTransaction};
+use crate::{index::RANGE_SIZE, types::CompactTransaction};
 
 const BLOCK_FORMAT_VERSION: u8 = 1;
 const RANGE_FORMAT_VERSION: u8 = 1;
 pub(crate) const MAX_RECORD_BYTES: usize = 2_000_000;
 
-const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<Digest>();
+const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();
 
 /// Owned record views: no LMDB transaction or mapped slice escapes a read call.
 pub trait StoredBlock: Sized {
     fn decode(bytes: &[u8]) -> Result<Self, CodecError>;
     fn from_record(record: &CompactBlockRecord) -> Self;
     fn height(&self) -> u32;
-    fn hash(&self) -> Digest;
-    fn previous_hash(&self) -> Digest;
+    fn hash(&self) -> block::Hash;
+    fn previous_hash(&self) -> block::Hash;
 }
 
 /// Metadata for continuity checks plus a response ready for Prost/Tonic to copy.
 #[derive(Debug)]
 pub struct EncodedBlockRecord {
     pub height: u32,
-    pub hash: Digest,
-    pub previous_hash: Digest,
+    pub hash: block::Hash,
+    pub previous_hash: block::Hash,
     pub block: EncodedCompactBlock,
 }
 
@@ -38,8 +39,8 @@ impl StoredBlock for ProtobufBlockRecord {
         let (height, hash, previous_hash, payload) = protobuf_envelope(bytes)?;
         let block = proto::CompactBlock::decode(payload).map_err(|_| CodecError::InvalidRecord)?;
         if block.height != u64::from(height)
-            || block.hash != hash
-            || block.prev_hash != previous_hash
+            || block.hash != hash.0
+            || block.prev_hash != previous_hash.0
             || block.chain_metadata.is_none()
         {
             return Err(CodecError::InvalidRecord);
@@ -53,11 +54,17 @@ impl StoredBlock for ProtobufBlockRecord {
     fn height(&self) -> u32 {
         self.0.height as u32
     }
-    fn hash(&self) -> Digest {
-        self.0.hash.as_slice().try_into().expect("validated hash")
+    fn hash(&self) -> block::Hash {
+        block::Hash(self.0.hash.as_slice().try_into().expect("decode checked the hash length"))
     }
-    fn previous_hash(&self) -> Digest {
-        self.0.prev_hash.as_slice().try_into().expect("validated previous hash")
+    fn previous_hash(&self) -> block::Hash {
+        block::Hash(
+            self.0
+                .prev_hash
+                .as_slice()
+                .try_into()
+                .expect("decode checked the previous hash length"),
+        )
     }
 }
 
@@ -91,10 +98,10 @@ impl StoredBlock for EncodedBlockRecord {
     fn height(&self) -> u32 {
         self.height
     }
-    fn hash(&self) -> Digest {
+    fn hash(&self) -> block::Hash {
         self.hash
     }
-    fn previous_hash(&self) -> Digest {
+    fn previous_hash(&self) -> block::Hash {
         self.previous_hash
     }
 }
@@ -109,10 +116,10 @@ impl StoredBlock for CompactBlockRecord {
     fn height(&self) -> u32 {
         self.height
     }
-    fn hash(&self) -> Digest {
+    fn hash(&self) -> block::Hash {
         self.hash
     }
-    fn previous_hash(&self) -> Digest {
+    fn previous_hash(&self) -> block::Hash {
         self.previous_hash
     }
 }
@@ -121,8 +128,8 @@ impl StoredBlock for CompactBlockRecord {
 /// The final index record, which gets stored in LMDB.
 pub struct CompactBlockRecord {
     pub height: u32,
-    pub hash: Digest,
-    pub previous_hash: Digest,
+    pub hash: block::Hash,
+    pub previous_hash: block::Hash,
     pub time: u32,
     pub transactions: Vec<CompactTransaction>,
     pub end_tree_sizes: TreeSizes,
@@ -185,8 +192,8 @@ impl CompactBlockRecord {
         bytes.reserve(PROTOBUF_ENVELOPE_BYTES + len);
         bytes.push(BLOCK_FORMAT_VERSION);
         put_u32(bytes, self.height);
-        bytes.extend_from_slice(&self.hash);
-        bytes.extend_from_slice(&self.previous_hash);
+        bytes.extend_from_slice(&self.hash.0);
+        bytes.extend_from_slice(&self.previous_hash.0);
         put_u32(bytes, len as u32);
         block.encode(bytes).map_err(|_| CodecError::Length)
     }
@@ -225,7 +232,7 @@ impl CompactBlockRecord {
     }
 }
 
-fn protobuf_envelope(bytes: &[u8]) -> Result<(u32, Digest, Digest, &[u8]), CodecError> {
+fn protobuf_envelope(bytes: &[u8]) -> Result<(u32, block::Hash, block::Hash, &[u8]), CodecError> {
     if bytes.len() > MAX_RECORD_BYTES {
         return Err(CodecError::Length);
     }
@@ -234,8 +241,8 @@ fn protobuf_envelope(bytes: &[u8]) -> Result<(u32, Digest, Digest, &[u8]), Codec
         return Err(CodecError::InvalidRecord);
     }
     let height = reader.u32()?;
-    let hash = reader.array()?;
-    let previous_hash = reader.array()?;
+    let hash = block::Hash(reader.array()?);
+    let previous_hash = block::Hash(reader.array()?);
     let len = reader.len()?;
     let payload = reader.take(len)?;
     reader.finish().map_err(|_| CodecError::InvalidRecord)?;
@@ -259,13 +266,13 @@ pub fn encode_range_from_bytes(parts: &[&[u8]]) -> Result<Vec<u8>, CodecError> {
 /// A record that [`write_range`] can put into a range.
 trait RangeRecord {
     /// The height, the hash, and the previous hash of the record.
-    fn id(&self) -> Result<(u32, Digest, Digest), CodecError>;
+    fn id(&self) -> Result<(u32, block::Hash, block::Hash), CodecError>;
     /// Writes the record encoding at the end of `bytes`.
     fn write_to(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError>;
 }
 
 impl RangeRecord for CompactBlockRecord {
-    fn id(&self) -> Result<(u32, Digest, Digest), CodecError> {
+    fn id(&self) -> Result<(u32, block::Hash, block::Hash), CodecError> {
         Ok((self.height, self.hash, self.previous_hash))
     }
 
@@ -276,7 +283,7 @@ impl RangeRecord for CompactBlockRecord {
 
 /// The bytes of a `mutable_blocks` row. They are already the record encoding.
 impl RangeRecord for &[u8] {
-    fn id(&self) -> Result<(u32, Digest, Digest), CodecError> {
+    fn id(&self) -> Result<(u32, block::Hash, block::Hash), CodecError> {
         protobuf_envelope(self)
             .map(|(height, hash, previous_hash, _)| (height, hash, previous_hash))
     }
@@ -343,7 +350,7 @@ fn write_range<R: RangeRecord>(records: &[R], body_len: usize) -> Result<Vec<u8>
         .and_then(|len| len.checked_mul(size_of::<u32>()))
         .ok_or(CodecError::Length)?;
     let capacity = 1usize
-        .checked_add(2 * size_of::<u32>() + 2 * size_of::<Digest>())
+        .checked_add(2 * size_of::<u32>() + 2 * size_of::<block::Hash>())
         .and_then(|len| len.checked_add(offsets_len))
         .and_then(|len| len.checked_add(body_len))
         .ok_or(CodecError::Length)?;
@@ -351,8 +358,8 @@ fn write_range<R: RangeRecord>(records: &[R], body_len: usize) -> Result<Vec<u8>
     bytes.push(RANGE_FORMAT_VERSION);
     put_u32(&mut bytes, first_height);
     put_u32(&mut bytes, last_height);
-    bytes.extend_from_slice(&first_previous_hash);
-    bytes.extend_from_slice(&last_hash);
+    bytes.extend_from_slice(&first_previous_hash.0);
+    bytes.extend_from_slice(&last_hash.0);
     // reserve offset table
     let offsets_start = bytes.len();
     bytes.resize(offsets_start + offsets_len, 0);
@@ -383,8 +390,8 @@ pub fn decode_range_record(bytes: &[u8], index: usize) -> Result<CompactBlockRec
 /// Parses a range envelope once, then decodes selected records without allocating an offset table.
 pub(crate) struct RangeDecoder<'a> {
     start: u32,
-    first_previous_hash: Digest,
-    terminal_hash: Digest,
+    first_previous_hash: block::Hash,
+    terminal_hash: block::Hash,
     offsets: &'a [u8],
     body: &'a [u8],
 }
@@ -398,8 +405,8 @@ impl<'a> RangeDecoder<'a> {
         }
         let start = reader.u32()?;
         let end = reader.u32()?;
-        let first_previous_hash = reader.array::<32>()?;
-        let terminal_hash = reader.array::<32>()?;
+        let first_previous_hash = block::Hash(reader.array()?);
+        let terminal_hash = block::Hash(reader.array()?);
         if !start.is_multiple_of(RANGE_SIZE) || start.checked_add(RANGE_SIZE - 1) != Some(end) {
             return Err(CodecError::InvalidRange);
         }
@@ -505,6 +512,8 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zakura_chain::transaction;
+
     use crate::test_utils::hash;
     use crate::types::{CompactSaplingOutput, CompactShieldedAction};
 
@@ -512,13 +521,13 @@ mod tests {
     fn rejects_transactions_without_shielded_data() {
         let record = CompactBlockRecord {
             height: 0,
-            hash: [0; 32],
-            previous_hash: [0; 32],
+            hash: block::Hash([0; 32]),
+            previous_hash: block::Hash([0; 32]),
             time: 0,
             end_tree_sizes: TreeSizes::default(),
             transactions: vec![CompactTransaction {
                 index: 0,
-                txid: [0; 32],
+                txid: transaction::Hash([0; 32]),
                 sapling_spends: vec![],
                 sapling_outputs: vec![],
                 orchard_actions: vec![],
@@ -534,7 +543,7 @@ mod tests {
             for pool in 0..4 {
                 let tx = CompactTransaction {
                     index: u64::MAX,
-                    txid: [0; 32],
+                    txid: transaction::Hash([0; 32]),
                     sapling_spends: if pool == 0 { vec![[0; 32]; count] } else { vec![] },
                     sapling_outputs: if pool == 1 {
                         vec![
@@ -553,8 +562,8 @@ mod tests {
                 };
                 let record = CompactBlockRecord {
                     height: u32::MAX,
-                    hash: [0; 32],
-                    previous_hash: [0; 32],
+                    hash: block::Hash([0; 32]),
+                    previous_hash: block::Hash([0; 32]),
                     time: u32::MAX,
                     transactions: if count == 0 { vec![] } else { vec![tx] },
                     end_tree_sizes: TreeSizes {
@@ -577,7 +586,7 @@ mod tests {
     fn block_and_range_round_trip() {
         let transaction = CompactTransaction {
             index: 2,
-            txid: [3; 32],
+            txid: transaction::Hash([3; 32]),
             sapling_spends: vec![[4; 32]],
             sapling_outputs: vec![CompactSaplingOutput {
                 cmu: [5; 32],
@@ -589,8 +598,8 @@ mod tests {
         };
         let first = CompactBlockRecord {
             height: 0,
-            hash: [1; 32],
-            previous_hash: [0; 32],
+            hash: block::Hash([1; 32]),
+            previous_hash: block::Hash([0; 32]),
             time: 10,
             transactions: vec![transaction],
             end_tree_sizes: TreeSizes { sapling: 1, orchard: 1, ironwood: 1 },
@@ -662,7 +671,7 @@ mod tests {
         records.swap(3, 4);
 
         // Heights in order, but block 500 does not point to the hash of block 499.
-        records[500].previous_hash = [0xee; 32];
+        records[500].previous_hash = block::Hash([0xee; 32]);
         assert_eq!(encode_range(&records), Err(CodecError::InvalidRange));
         let stored: Vec<_> = records.iter().map(|r| r.encode().unwrap()).collect();
         let parts: Vec<_> = stored.iter().map(Vec::as_slice).collect();

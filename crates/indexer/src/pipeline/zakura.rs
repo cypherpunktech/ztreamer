@@ -126,8 +126,8 @@ impl HistoricalSource for ZakuraDb {
             let started = Instant::now();
             let parsed = parse_stored_block(
                 raw_height,
-                hash.0,
-                header.previous_block_hash.0,
+                hash,
+                header.previous_block_hash,
                 u32::try_from(header.time.timestamp()).expect("stored block time is a u32"),
                 block_transactions
                     .iter()

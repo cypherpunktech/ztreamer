@@ -22,7 +22,6 @@ use ztreamer_node::NodeClient;
 use crate::telemetry::ServiceMetrics;
 
 use ztreamer_indexer::{
-    Digest,
     codec::{CompactBlockRecord, StoredBlock},
     index::{BlockId, Index, IndexError, IndexState},
 };
@@ -246,10 +245,11 @@ impl CompactService {
                 return Ok(T::from_record(record));
             }
         } else {
-            let hash: Digest = request
+            let hash = request
                 .hash
                 .as_slice()
                 .try_into()
+                .map(block::Hash)
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
             if let Some(record) = snapshot.volatile_head.iter().find(|record| record.hash == hash) {
                 ensure_tip_ready(&snapshot)?;
@@ -263,9 +263,10 @@ impl CompactService {
                 .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
             tokio::task::spawn_blocking(move || index.read_block_as(generation, height).map(Some))
         } else {
-            let hash: Digest = request
+            let hash = request
                 .hash
                 .try_into()
+                .map(block::Hash)
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
             tokio::task::spawn_blocking(move || index.read_block_by_hash_as(generation, hash))
         };
@@ -281,7 +282,7 @@ impl CompactService {
         ensure_tip_ready(&snapshot)?;
         let tip =
             snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        Ok(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.to_vec() })
+        Ok(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.0.to_vec() })
     }
 
     pub(crate) fn lightd_info(&self) -> proto::LightdInfo {
@@ -325,11 +326,11 @@ impl CompactService {
         &self,
         request: proto::TxFilter,
     ) -> Result<proto::RawTransaction, Status> {
-        let hash: Digest = request
+        let hash = request
             .hash
             .try_into()
+            .map(transaction::Hash)
             .map_err(|_| Status::invalid_argument("transaction hash must be 32 bytes"))?;
-        let hash = transaction::Hash(hash);
         if let Some(transaction) = self.mined_transaction(hash).await? {
             return Ok(transaction);
         }
@@ -421,8 +422,9 @@ mod tests {
     fn ping_answers_only_when_enabled() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Arc::new(Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
+            let index = Arc::new(
+                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+            );
             let (_state_service, read_service, _tip, _change) =
                 zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
                     .await

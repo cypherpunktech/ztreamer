@@ -3,9 +3,11 @@
 use std::collections::HashSet;
 
 use tonic::Status;
-use zakura_chain::{serialization::ZcashDeserialize as _, transaction};
+use zakura_chain::{
+    serialization::{BytesInDisplayOrder as _, ZcashDeserialize as _},
+    transaction,
+};
 use ztreamer_indexer::{
-    Digest,
     parser::parse_transaction,
     types::{CompactShieldedAction, CompactTransaction},
 };
@@ -136,10 +138,10 @@ pub(crate) fn compact_mempool_txs(
     exclude_txid_suffixes: &[Vec<u8>],
 ) -> Result<Vec<proto::CompactTx>, Status> {
     let excluded =
-        excluded_txids(transactions.iter().map(|(_, txid)| txid.0), exclude_txid_suffixes);
+        excluded_txids(transactions.iter().map(|(_, txid)| *txid), exclude_txid_suffixes);
     let mut compact = Vec::with_capacity(transactions.len().saturating_sub(excluded.len()));
     for (bytes, txid) in transactions {
-        if excluded.contains(&txid.0) {
+        if excluded.contains(txid) {
             continue;
         }
         let transaction = parse_transaction(bytes, *txid, 0).map_err(|error| {
@@ -181,30 +183,24 @@ pub(crate) fn compact_mempool_txs(
 }
 
 pub(crate) fn excluded_txids(
-    txids: impl Iterator<Item = Digest>,
+    txids: impl Iterator<Item = transaction::Hash>,
     suffixes: &[Vec<u8>],
-) -> HashSet<Digest> {
+) -> HashSet<transaction::Hash> {
     let mut excluded = HashSet::new();
     if suffixes.is_empty() {
         return excluded;
     }
-    // Reversing turns suffix matches into contiguous prefix matches in sorted order.
-    let mut reversed: Vec<_> = txids
-        .map(|mut txid| {
-            txid.reverse();
-            txid
-        })
-        .collect();
-    reversed.sort_unstable();
+    // A suffix in protocol order is a prefix in display order. After the sort, the txids
+    // that match a prefix are adjacent.
+    let mut displayed: Vec<_> = txids.map(|txid| txid.bytes_in_display_order()).collect();
+    displayed.sort_unstable();
     for suffix in suffixes.iter().filter(|suffix| suffix.len() <= 32) {
         let prefix: Vec<_> = suffix.iter().rev().copied().collect();
-        let start = reversed.partition_point(|txid| txid.as_slice() < prefix.as_slice());
-        if let Some(txid) = reversed.get(start).filter(|txid| txid.starts_with(&prefix))
-            && !reversed.get(start + 1).is_some_and(|next| next.starts_with(&prefix))
+        let start = displayed.partition_point(|txid| txid.as_slice() < prefix.as_slice());
+        if let Some(txid) = displayed.get(start).filter(|txid| txid.starts_with(&prefix))
+            && !displayed.get(start + 1).is_some_and(|next| next.starts_with(&prefix))
         {
-            let mut txid = *txid;
-            txid.reverse();
-            excluded.insert(txid);
+            excluded.insert(transaction::Hash::from_bytes_in_display_order(txid));
         }
     }
     excluded
@@ -255,7 +251,7 @@ fn convert_transaction(
         || nullifiers_only)
         .then(|| proto::CompactTx {
             index: transaction.index,
-            txid: transaction.txid.to_vec(),
+            txid: transaction.txid.0.to_vec(),
             fee: 0,
             spends,
             outputs,
@@ -285,7 +281,9 @@ fn convert_actions(
 mod tests {
     use super::*;
     use zakura_chain::{
-        block::Block, serialization::ZcashSerialize as _, transaction::Transaction,
+        block::{self, Block},
+        serialization::ZcashSerialize as _,
+        transaction::Transaction,
     };
     use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
     use ztreamer_indexer::{
@@ -298,12 +296,12 @@ mod tests {
     fn validates_pools_and_projects_full_and_nullifier_blocks() {
         let record = CompactBlockRecord {
             height: 7,
-            hash: [1; 32],
-            previous_hash: [2; 32],
+            hash: block::Hash([1; 32]),
+            previous_hash: block::Hash([2; 32]),
             time: 3,
             transactions: vec![CompactTransaction {
                 index: 5,
-                txid: [6; 32],
+                txid: transaction::Hash([6; 32]),
                 sapling_spends: vec![[7; 32]],
                 sapling_outputs: vec![CompactSaplingOutput {
                     cmu: [8; 32],
@@ -553,7 +551,7 @@ mod tests {
 
     #[test]
     fn suffix_lookup_handles_every_length_and_mempool_boundary() {
-        let txids: Vec<Digest> = (0..8)
+        let txids: Vec<[u8; 32]> = (0..8)
             .map(|i| {
                 let mut txid = std::array::from_fn(|j| i + j as u8);
                 txid[31] = i % 2;
@@ -567,13 +565,13 @@ mod tests {
                     let matches: Vec<_> =
                         txids[..count].iter().filter(|id| id.ends_with(&suffix)).copied().collect();
                     let expected = if matches.len() == 1 {
-                        HashSet::from([matches[0]])
+                        HashSet::from([transaction::Hash(matches[0])])
                     } else {
                         HashSet::new()
                     };
                     assert_eq!(
                         excluded_txids(
-                            txids[..count].iter().rev().copied(),
+                            txids[..count].iter().rev().copied().map(transaction::Hash),
                             &[suffix.clone(), suffix, vec![0xff], vec![0; 33]]
                         ),
                         expected

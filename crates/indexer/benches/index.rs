@@ -3,13 +3,14 @@
 use ztreamer_indexer::test_utils as fixtures;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use zakura_chain::block;
 use ztreamer_indexer::{
     index::{BlockId, Index, IndexState},
     ingest::OrderedBuilder,
 };
 
 fn open(dir: &tempfile::TempDir) -> Index {
-    Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", [9; 32]).unwrap()
+    Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap()
 }
 
 fn builder(c: &mut Criterion) {
@@ -89,7 +90,7 @@ fn storage(c: &mut Criterion) {
                     let mut previous = fixtures::hash(ancestor);
                     for record in &mut replacement {
                         record.previous_hash = previous;
-                        record.hash[31] = 1;
+                        record.hash.0[31] = 1;
                         previous = record.hash;
                     }
                     (index, dir, state, Some(replacement))
@@ -113,7 +114,7 @@ fn storage(c: &mut Criterion) {
                         )
                     }
                     .unwrap();
-                    assert_eq!(result.durable_tip().unwrap().hash[31], 1);
+                    assert_eq!(result.durable_tip().unwrap().hash.0[31], 1);
                 },
                 BatchSize::PerIteration,
             );

@@ -51,7 +51,7 @@ async fn wire_server_preserves_blocks_filters_and_boundaries() {
         for by_hash in [false, true] {
             let request = proto::BlockId {
                 height: height.into(),
-                hash: if by_hash { support::fixtures::hash(height).to_vec() } else { vec![] },
+                hash: if by_hash { support::fixtures::hash(height).0.to_vec() } else { vec![] },
             };
             let expected = reference.service.block(request.clone(), false).await.unwrap();
             assert_eq!(client.get_block(request.clone()).await.unwrap().into_inner(), expected);
