@@ -2,14 +2,10 @@
 
 use std::{fs, io, path::Path, time::Instant};
 
-use heed::{
-    Database, Env, EnvOpenOptions, RoTxn, RwTxn,
-    byteorder::BigEndian,
-    types::{Bytes, U32},
-};
+use heed::{Env, EnvOpenOptions, RoTxn, RwTxn};
 
 use crate::codec::{
-    CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes, decode_range_record,
+    CodecError, CompactBlockRecord, StoredBlock, TreeSizes, decode_range_record,
     encode_range_from_bytes,
 };
 use crate::{
@@ -17,19 +13,16 @@ use crate::{
     ingest::{EncodedBatch, WriteBatch},
 };
 
-mod state;
+mod metadata;
+mod tables;
 mod telemetry;
-use state::{encode_state, identity, read_state};
+use tables::{Tables, range_start};
 use telemetry::{WriteStage, WriteTimer, record_state_metrics};
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const RANGE_SIZE: u32 = 1_000;
 pub const PERSIST_DEPTH: u32 = 10;
 pub const SEAL_DEPTH: u32 = 100;
-
-const STATE: &[u8] = b"state";
-
-type HeightDb = Database<U32<BigEndian>, Bytes>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// References a block by hash and height.
@@ -47,11 +40,11 @@ impl BlockId {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// Represents the [`Index`]'s current sync state.
 pub struct IndexState {
-    /// The highest contiguous compact block commited to [`Index::mutable_blocks`]
+    /// The highest contiguous compact block committed to the `mutable_blocks` database.
     pub(crate) durable_tip: Option<BlockId>,
-    /// The highest height committed to a [`Index::sealed_ranges`].
+    /// The highest height committed to the `sealed_ranges` database.
     ///
-    /// Blocks above this height live in [`Index::mutable_blocks`].
+    /// Blocks above this height live in the `mutable_blocks` database.
     pub(crate) sealed_through: Option<u32>,
     /// LMDB's monotonically increasing revision number.
     /// Incremented on each successful atomic index mutation.
@@ -121,10 +114,7 @@ pub enum IndexError {
 /// Ztreamer's four-database LMDB index.
 pub struct Index {
     env: Env,
-    metadata: Database<Bytes, Bytes>,
-    sealed_ranges: HeightDb,
-    mutable_blocks: HeightDb,
-    hash_to_height: Database<Bytes, U32<BigEndian>>,
+    tables: Tables,
 }
 
 impl std::fmt::Debug for Index {
@@ -146,20 +136,11 @@ impl Index {
         let env =
             unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(4).open(path.as_ref())? };
         let mut txn = env.write_txn()?;
-        let metadata = env.create_database(&mut txn, Some("metadata"))?;
-        let sealed_ranges = env.create_database(&mut txn, Some("sealed_ranges"))?;
-        let mutable_blocks = env.create_database(&mut txn, Some("mutable_blocks"))?;
-        let hash_to_height = env.create_database(&mut txn, Some("hash_to_height"))?;
-
-        let identity = identity(network, genesis_hash);
-        match metadata.get(&txn, b"identity".as_slice())? {
-            Some(stored) if stored != identity => return Err(IndexError::Identity),
-            None => metadata.put(&mut txn, b"identity".as_slice(), identity.as_slice())?,
-            Some(_) => {}
-        }
+        let tables = Tables::open(&env, &mut txn)?;
+        tables.metadata.put_or_check_identity(&mut txn, network, genesis_hash)?;
         txn.commit()?;
 
-        let index = Self { env, metadata, sealed_ranges, mutable_blocks, hash_to_height };
+        let index = Self { env, tables };
         index.verify_continuity()?;
         record_state_metrics(index.state()?);
         Ok(index)
@@ -167,7 +148,7 @@ impl Index {
 
     pub fn state(&self) -> Result<IndexState, IndexError> {
         let txn = self.env.read_txn()?;
-        read_state(self.metadata, &txn)
+        self.tables.metadata.get_state(&txn)
     }
 
     pub fn read_block(
@@ -186,7 +167,7 @@ impl Index {
     ) -> Result<T, IndexError> {
         let txn = self.env.read_txn()?;
         let state = self.read_generation(&txn, generation)?;
-        self.read_record(&txn, state, height)
+        self.tables.read(&txn, state, height)
     }
 
     pub fn read_block_by_hash(
@@ -205,9 +186,10 @@ impl Index {
     ) -> Result<Option<T>, IndexError> {
         let txn = self.env.read_txn()?;
         let state = self.read_generation(&txn, generation)?;
-        self.hash_to_height
-            .get(&txn, hash.as_slice())?
-            .map(|height| self.read_record(&txn, state, height))
+        self.tables
+            .hash_to_height
+            .get(&txn, &hash)?
+            .map(|height| self.tables.read(&txn, state, height))
             .transpose()
     }
 
@@ -245,7 +227,7 @@ impl Index {
         emit: impl FnMut(T) -> bool,
     ) -> Result<(), IndexError> {
         let txn = self.env.read_txn()?;
-        let state = read_state(self.metadata, &txn)?;
+        let state = self.tables.metadata.get_state(&txn)?;
         self.read_range_in(&txn, state, start, end, emit)
     }
 
@@ -269,19 +251,15 @@ impl Index {
         let mut height = start;
         loop {
             if state.sealed_through.is_some_and(|sealed| height <= sealed) {
-                let range_start = height - height % RANGE_SIZE;
-                let bytes = self
+                let range = self
+                    .tables
                     .sealed_ranges
-                    .get(txn, &range_start)?
+                    .find(txn, height)?
                     .ok_or(IndexError::Coverage { height })?;
-                let range = RangeDecoder::new(bytes)?;
-                let chunk_end = if ascending {
-                    end.min(range_start + RANGE_SIZE - 1)
-                } else {
-                    end.max(range_start)
-                };
+                let chunk_end =
+                    if ascending { end.min(range.end()) } else { end.max(range.start()) };
                 loop {
-                    if !emit(range.record_as((height - range_start) as usize)?) {
+                    if !emit(range.read(height)?) {
                         return Ok(());
                     }
                     if height == chunk_end {
@@ -289,7 +267,7 @@ impl Index {
                     }
                     height = if ascending { height + 1 } else { height - 1 };
                 }
-            } else if !emit(self.read_record(txn, state, height)?) {
+            } else if !emit(self.tables.read(txn, state, height)?) {
                 return Ok(());
             }
 
@@ -301,59 +279,36 @@ impl Index {
     }
 
     fn read_generation(&self, txn: &RoTxn<'_>, generation: u64) -> Result<IndexState, IndexError> {
-        let state = read_state(self.metadata, txn)?;
+        let state = self.tables.metadata.get_state(txn)?;
         if state.generation != generation {
             return Err(IndexError::Generation { expected: generation, actual: state.generation });
         }
         Ok(state)
     }
 
-    fn read_record<T: StoredBlock>(
-        &self,
-        txn: &RoTxn<'_>,
-        state: IndexState,
-        height: u32,
-    ) -> Result<T, IndexError> {
-        if state.durable_tip.is_none_or(|tip| height > tip.height) {
-            return Err(IndexError::Coverage { height });
-        }
-        if state.sealed_through.is_some_and(|sealed| height <= sealed) {
-            let start = height - height % RANGE_SIZE;
-            return RangeDecoder::new(
-                self.sealed_ranges.get(txn, &start)?.ok_or(IndexError::Coverage { height })?,
-            )?
-            .record_as((height - start) as usize)
-            .map_err(Into::into);
-        }
-        T::decode(self.mutable_blocks.get(txn, &height)?.ok_or(IndexError::Coverage { height })?)
-            .map_err(Into::into)
-    }
-
     /// Checks sealed-range summaries and every mutable suffix row without rescanning sealed blocks.
     pub fn verify_continuity(&self) -> Result<(), IndexError> {
         let txn = self.env.read_txn()?;
-        let state = read_state(self.metadata, &txn)?;
+        let Tables { metadata, sealed_ranges, mutable_blocks, hash_to_height } = self.tables;
+        let state = metadata.get_state(&txn)?;
         let Some(tip) = state.durable_tip else {
-            if !self.sealed_ranges.is_empty(&txn)?
-                || !self.mutable_blocks.is_empty(&txn)?
-                || !self.hash_to_height.is_empty(&txn)?
-            {
+            if self.tables.has_blocks(&txn)? {
                 return Err(IndexError::Metadata);
             }
             return Ok(());
         };
 
         let sealed_blocks = state.sealed_through.map_or(0, |height| u64::from(height) + 1);
-        if self.sealed_ranges.len(&txn)? != sealed_blocks / u64::from(RANGE_SIZE)
-            || self.mutable_blocks.len(&txn)? != u64::from(tip.height) + 1 - sealed_blocks
-            || self.hash_to_height.len(&txn)? != u64::from(tip.height) + 1
+        if sealed_ranges.len(&txn)? != sealed_blocks / u64::from(RANGE_SIZE)
+            || mutable_blocks.len(&txn)? != u64::from(tip.height) + 1 - sealed_blocks
+            || hash_to_height.len(&txn)? != u64::from(tip.height) + 1
         {
             return Err(IndexError::Continuity { height: 0 });
         }
 
         let mut next_height = 0u64;
         let mut previous_hash = None;
-        for entry in self.sealed_ranges.iter(&txn)? {
+        for entry in sealed_ranges.iter(&txn)? {
             let (start, bytes) = entry?;
             if u64::from(start) != next_height {
                 return Err(IndexError::Continuity { height: next_height as u32 });
@@ -363,8 +318,8 @@ impl Index {
             if previous_hash.is_some_and(|hash| first.previous_hash != hash) {
                 return Err(IndexError::Continuity { height: start });
             }
-            self.verify_hash_entry(&txn, &first)?;
-            self.verify_hash_entry(&txn, &last)?;
+            hash_to_height.check(&txn, &first)?;
+            hash_to_height.check(&txn, &last)?;
             previous_hash = Some(last.hash);
             next_height += u64::from(RANGE_SIZE);
         }
@@ -372,7 +327,7 @@ impl Index {
             return Err(IndexError::Continuity { height: next_height as u32 });
         }
 
-        for entry in self.mutable_blocks.iter(&txn)? {
+        for entry in mutable_blocks.iter(&txn)? {
             let (height, bytes) = entry?;
             if u64::from(height) != next_height {
                 return Err(IndexError::Continuity { height: next_height as u32 });
@@ -383,41 +338,24 @@ impl Index {
             {
                 return Err(IndexError::Continuity { height });
             }
-            self.verify_hash_entry(&txn, &record)?;
+            hash_to_height.check(&txn, &record)?;
             previous_hash = Some(record.hash);
             next_height += 1;
         }
-        let tip_record = if state.sealed_through.is_some_and(|sealed| tip.height <= sealed) {
-            let start = tip.height - tip.height % RANGE_SIZE;
-            decode_range_record(
-                self.sealed_ranges
-                    .get(&txn, &start)?
-                    .ok_or(IndexError::Continuity { height: tip.height })?,
-                (tip.height - start) as usize,
-            )?
+        let missing_tip = IndexError::Continuity { height: tip.height };
+        let tip_record: CompactBlockRecord = if state
+            .sealed_through
+            .is_some_and(|sealed| tip.height <= sealed)
+        {
+            sealed_ranges.find(&txn, tip.height)?.ok_or(missing_tip)?.read(tip.height)?
         } else {
-            CompactBlockRecord::decode(
-                self.mutable_blocks
-                    .get(&txn, &tip.height)?
-                    .ok_or(IndexError::Continuity { height: tip.height })?,
-            )?
+            CompactBlockRecord::decode(mutable_blocks.get(&txn, tip.height)?.ok_or(missing_tip)?)?
         };
         if next_height != u64::from(tip.height) + 1
             || previous_hash != Some(tip.hash)
             || state.tree_sizes != tip_record.end_tree_sizes
         {
             return Err(IndexError::Continuity { height: tip.height });
-        }
-        Ok(())
-    }
-
-    fn verify_hash_entry(
-        &self,
-        txn: &RoTxn<'_>,
-        record: &CompactBlockRecord,
-    ) -> Result<(), IndexError> {
-        if self.hash_to_height.get(txn, record.hash.as_slice())? != Some(record.height) {
-            return Err(IndexError::HashIndex { height: record.height });
         }
         Ok(())
     }
@@ -435,7 +373,7 @@ impl Index {
     /// Atomically writes a batch with encoded records and packs newly sealed ranges.
     pub(crate) fn write_encoded(&self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
         let mut txn = self.env.write_txn()?;
-        let mut state = read_state(self.metadata, &txn)?;
+        let mut state = self.tables.metadata.get_state(&txn)?;
         let EncodedBatch { base_generation, seal_through, blocks, end_tree_sizes } = batch;
         let first = blocks.first().expect("builders never emit empty batches");
         let expected_height = match state.durable_tip {
@@ -451,7 +389,7 @@ impl Index {
 
         let mut timer = WriteTimer::start();
         for block in &blocks {
-            self.hash_to_height.put(&mut txn, block.hash.as_slice(), &block.height)?;
+            self.tables.hash_to_height.put(&mut txn, &block.hash, block.height)?;
         }
         timer.lap(WriteStage::HashIndex);
         let last = blocks.last().expect("the batch is non-empty");
@@ -470,7 +408,8 @@ impl Index {
             // this, the range can be complete in `mutable_blocks`, and the batch can start after it.
             let first_new = blocks.peek().map_or(end + 1, |block| block.height);
             let mutable_end = first_new.min(end + 1);
-            let mut range = self.read_rows_to_seal(&txn, start..mutable_end, start)?;
+            let mut range =
+                self.tables.mutable_blocks.read_checked(&txn, start..mutable_end, start)?;
             timer.seal_read(range.len());
             while range.len() < RANGE_SIZE as usize {
                 let block = blocks.next().ok_or(IndexError::IncompleteRange { start })?;
@@ -481,10 +420,8 @@ impl Index {
             drop(parts);
             drop(range);
             timer.lap(WriteStage::SealEncode);
-            self.sealed_ranges.put(&mut txn, &start, packed.as_slice())?;
-            for height in start..mutable_end {
-                self.mutable_blocks.delete(&mut txn, &height)?;
-            }
+            self.tables.sealed_ranges.put(&mut txn, start, packed.as_slice())?;
+            self.tables.mutable_blocks.delete_range(&mut txn, start..mutable_end)?;
             timer.lap(WriteStage::SealPut);
             timer.bytes(WriteStage::SealPut, packed.len());
             state.sealed_through = Some(end);
@@ -492,15 +429,14 @@ impl Index {
         }
         let wrote_mutable = blocks.peek().is_some();
         for block in blocks {
-            self.mutable_blocks.put(&mut txn, &block.height, block.bytes.as_slice())?;
+            self.tables.mutable_blocks.put(&mut txn, block.height, block.bytes.as_slice())?;
             timer.bytes(WriteStage::MutablePut, block.bytes.len());
         }
         timer.lap_if(wrote_mutable, WriteStage::MutablePut);
         state.durable_tip = Some(tip);
         state.tree_sizes = end_tree_sizes;
         state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        let encoded = encode_state(state);
-        self.metadata.put(&mut txn, STATE, encoded.as_slice())?;
+        self.tables.metadata.put_state(&mut txn, state)?;
         timer.lap(WriteStage::StatePut);
         txn.commit()?;
         timer.lap(WriteStage::Commit);
@@ -518,14 +454,14 @@ impl Index {
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
         let mut txn = self.env.write_txn()?;
-        let mut state = read_state(self.metadata, &txn)?;
+        let mut state = self.tables.metadata.get_state(&txn)?;
         if state.generation != base_generation {
             return Err(IndexError::StaleBatch { batch_generation: base_generation });
         }
         if state.sealed_through.is_some_and(|sealed| ancestor.height < sealed) {
             return Err(IndexError::Sealed { height: ancestor.height + 1 });
         }
-        let ancestor_record: CompactBlockRecord = self.read_record(&txn, state, ancestor.height)?;
+        let ancestor_record: CompactBlockRecord = self.tables.read(&txn, state, ancestor.height)?;
         if ancestor_record.hash != ancestor.hash {
             return Err(IndexError::Replacement { height: ancestor.height });
         }
@@ -546,16 +482,19 @@ impl Index {
             return Err(IndexError::Replacement { height: ancestor.height });
         }
         for height in delete_start..=old_tip.height {
-            let bytes =
-                self.mutable_blocks.get(&txn, &height)?.ok_or(IndexError::Continuity { height })?;
+            let bytes = self
+                .tables
+                .mutable_blocks
+                .get(&txn, height)?
+                .ok_or(IndexError::Continuity { height })?;
             let old = CompactBlockRecord::decode(bytes)?;
-            self.hash_to_height.delete(&mut txn, old.hash.as_slice())?;
-            self.mutable_blocks.delete(&mut txn, &height)?;
+            self.tables.hash_to_height.delete(&mut txn, &old.hash)?;
+            self.tables.mutable_blocks.delete(&mut txn, height)?;
         }
         for record in &records {
             let encoded = record.encode()?;
-            self.mutable_blocks.put(&mut txn, &record.height, encoded.as_slice())?;
-            self.hash_to_height.put(&mut txn, record.hash.as_slice(), &record.height)?;
+            self.tables.mutable_blocks.put(&mut txn, record.height, encoded.as_slice())?;
+            self.tables.hash_to_height.put(&mut txn, &record.hash, record.height)?;
         }
 
         let tip =
@@ -563,10 +502,9 @@ impl Index {
         state.durable_tip = Some(tip);
         state.tree_sizes =
             records.last().map_or(ancestor_record.end_tree_sizes, |record| record.end_tree_sizes);
-        self.pack_sealed_ranges(&mut txn, seal_through, &mut state)?;
+        self.seal_mutable_ranges(&mut txn, seal_through, &mut state)?;
         state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        let encoded = encode_state(state);
-        self.metadata.put(&mut txn, STATE, encoded.as_slice())?;
+        self.tables.metadata.put_state(&mut txn, state)?;
         txn.commit()?;
         record_state_metrics(state);
         Ok(state)
@@ -581,19 +519,19 @@ impl Index {
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
         let mut txn = self.env.write_txn()?;
-        let mut state = read_state(self.metadata, &txn)?;
+        let mut state = self.tables.metadata.get_state(&txn)?;
         if state.generation != base_generation {
             return Err(IndexError::StaleBatch { batch_generation: base_generation });
         }
         let old_tip = state.durable_tip.ok_or(IndexError::Metadata)?;
-        let common: CompactBlockRecord = self.read_record(&txn, state, common_ancestor.height)?;
+        let common: CompactBlockRecord = self.tables.read(&txn, state, common_ancestor.height)?;
         if common.hash != common_ancestor.hash {
             return Err(IndexError::Replacement { height: common_ancestor.height });
         }
 
-        let affected_start = common_ancestor.height - common_ancestor.height % RANGE_SIZE;
+        let affected_start = range_start(common_ancestor.height);
         let old_records = (affected_start..=old_tip.height)
-            .map(|height| self.read_record(&txn, state, height))
+            .map(|height| self.tables.read(&txn, state, height))
             .collect::<Result<Vec<_>, _>>()?;
         let prefix_len = (common_ancestor.height - affected_start + 1) as usize;
         let mut canonical = old_records[..prefix_len].to_vec();
@@ -606,15 +544,15 @@ impl Index {
         }
 
         for record in &old_records {
-            self.hash_to_height.delete(&mut txn, record.hash.as_slice())?;
-            self.mutable_blocks.delete(&mut txn, &record.height)?;
+            self.tables.hash_to_height.delete(&mut txn, &record.hash)?;
+            self.tables.mutable_blocks.delete(&mut txn, record.height)?;
         }
         if let Some(old_sealed) = state.sealed_through
             && affected_start <= old_sealed
         {
             let mut start = affected_start;
             while start <= old_sealed {
-                self.sealed_ranges.delete(&mut txn, &start)?;
+                self.tables.sealed_ranges.delete(&mut txn, start)?;
                 start = start.checked_add(RANGE_SIZE).ok_or(IndexError::Overflow)?;
             }
             state.sealed_through =
@@ -623,44 +561,21 @@ impl Index {
 
         for record in &canonical {
             let encoded = record.encode()?;
-            self.mutable_blocks.put(&mut txn, &record.height, encoded.as_slice())?;
-            self.hash_to_height.put(&mut txn, record.hash.as_slice(), &record.height)?;
+            self.tables.mutable_blocks.put(&mut txn, record.height, encoded.as_slice())?;
+            self.tables.hash_to_height.put(&mut txn, &record.hash, record.height)?;
         }
         let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
         state.durable_tip = Some(BlockId::new(tip.height, tip.hash));
         state.tree_sizes = tip.end_tree_sizes;
-        self.pack_sealed_ranges(&mut txn, seal_through, &mut state)?;
+        self.seal_mutable_ranges(&mut txn, seal_through, &mut state)?;
         state.generation = state.generation.checked_add(1).ok_or(IndexError::Overflow)?;
-        let encoded = encode_state(state);
-        self.metadata.put(&mut txn, STATE, encoded.as_slice())?;
+        self.tables.metadata.put_state(&mut txn, state)?;
         txn.commit()?;
         record_state_metrics(state);
         Ok(state)
     }
 
-    /// Reads the mutable rows of `heights` for a seal of the range at `start`. A mutable row
-    /// holds the same record bytes that a range holds, so this copies the bytes and does not
-    /// encode them again. It decodes and checks each row once, with the same rules as
-    /// [`CompactBlockRecord::encode`], so that a damaged row does not go into a sealed range.
-    fn read_rows_to_seal(
-        &self,
-        txn: &RoTxn<'_>,
-        heights: std::ops::Range<u32>,
-        start: u32,
-    ) -> Result<Vec<Vec<u8>>, IndexError> {
-        heights
-            .map(|height| {
-                let bytes = self
-                    .mutable_blocks
-                    .get(txn, &height)?
-                    .ok_or(IndexError::IncompleteRange { start })?;
-                CompactBlockRecord::decode(bytes)?.check()?;
-                Ok(bytes.to_vec())
-            })
-            .collect()
-    }
-
-    fn pack_sealed_ranges(
+    fn seal_mutable_ranges(
         &self,
         txn: &mut RwTxn<'_>,
         seal_cutoff: Option<u32>,
@@ -681,13 +596,11 @@ impl Index {
             {
                 break;
             }
-            let range = self.read_rows_to_seal(txn, start..end + 1, start)?;
+            let range = self.tables.mutable_blocks.read_checked(txn, start..end + 1, start)?;
             let parts: Vec<_> = range.iter().map(Vec::as_slice).collect();
             let encoded = encode_range_from_bytes(&parts)?;
-            self.sealed_ranges.put(txn, &start, encoded.as_slice())?;
-            for height in start..=end {
-                self.mutable_blocks.delete(txn, &height)?;
-            }
+            self.tables.sealed_ranges.put(txn, start, encoded.as_slice())?;
+            self.tables.mutable_blocks.delete_range(txn, start..=end)?;
             state.sealed_through = Some(end);
             start = end.checked_add(1).ok_or(IndexError::Overflow)?;
         }
@@ -727,11 +640,11 @@ mod tests {
         assert_eq!(state.sealed_through(), Some(999));
         assert_eq!(state.generation(), 1);
         let txn = index.env.read_txn().unwrap();
-        assert!(index.mutable_blocks.get(&txn, &0).unwrap().is_none());
-        assert!(index.mutable_blocks.get(&txn, &1_000).unwrap().is_some());
-        let range = index.sealed_ranges.get(&txn, &0).unwrap().unwrap();
+        assert!(index.tables.mutable_blocks.get(&txn, 0).unwrap().is_none());
+        assert!(index.tables.mutable_blocks.get(&txn, 1_000).unwrap().is_some());
+        let range = index.tables.sealed_ranges.get(&txn, 0).unwrap().unwrap();
         assert_eq!(decode_range_record(range, 537).unwrap().height, 537);
-        assert_eq!(index.hash_to_height.get(&txn, hash(537).as_slice()).unwrap(), Some(537));
+        assert_eq!(index.tables.hash_to_height.get(&txn, &hash(537)).unwrap(), Some(537));
         drop(txn);
 
         assert!(matches!(index.write(stale), Err(IndexError::StaleBatch { batch_generation: 0 })));
@@ -759,7 +672,7 @@ mod tests {
             assert_eq!(index.read_block(state.generation(), height).unwrap().height, height);
         }
         let txn = index.env.read_txn().unwrap();
-        assert!(index.mutable_blocks.get(&txn, &999).unwrap().is_none());
+        assert!(index.tables.mutable_blocks.get(&txn, 999).unwrap().is_none());
         drop(txn);
         index.verify_continuity().unwrap();
     }
@@ -815,10 +728,10 @@ mod tests {
 
         // Change the hash in the payload. The hash in the envelope stays correct.
         let mut txn = index.env.write_txn().unwrap();
-        let mut row = index.mutable_blocks.get(&txn, &5).unwrap().unwrap().to_vec();
+        let mut row = index.tables.mutable_blocks.get(&txn, 5).unwrap().unwrap().to_vec();
         let payload_hash = row.windows(32).rposition(|w| w == hash(5)).unwrap();
         row[payload_hash] ^= 1;
-        index.mutable_blocks.put(&mut txn, &5, &row).unwrap();
+        index.tables.mutable_blocks.put(&mut txn, 5, &row).unwrap();
         txn.commit().unwrap();
 
         assert!(matches!(
@@ -839,7 +752,7 @@ mod tests {
         // Add a transaction without shielded data to a row. The row still decodes, but
         // `CompactBlockRecord::encode` does not accept it, so the seal must not accept it.
         let mut txn = index.env.write_txn().unwrap();
-        let row = index.mutable_blocks.get(&txn, &5).unwrap().unwrap().to_vec();
+        let row = index.tables.mutable_blocks.get(&txn, 5).unwrap().unwrap().to_vec();
         let mut block = ProtobufBlockRecord::decode(&row).unwrap().0;
         block
             .vtx
@@ -850,7 +763,7 @@ mod tests {
         damaged.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         damaged.extend_from_slice(&payload);
         CompactBlockRecord::decode(&damaged).unwrap();
-        index.mutable_blocks.put(&mut txn, &5, &damaged).unwrap();
+        index.tables.mutable_blocks.put(&mut txn, 5, &damaged).unwrap();
         txn.commit().unwrap();
 
         assert!(matches!(
@@ -867,7 +780,7 @@ mod tests {
         let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", [1; 32]).unwrap();
         index.write(batch(&index, 0..=10, 20)).unwrap();
         let mut txn = index.env.write_txn().unwrap();
-        index.mutable_blocks.delete(&mut txn, &5).unwrap();
+        index.tables.mutable_blocks.delete(&mut txn, 5).unwrap();
         txn.commit().unwrap();
         drop(index);
 
@@ -886,14 +799,14 @@ mod tests {
 
         assert!(builder.build_batch(None, None, 10 * 1024 * 1024).unwrap().is_none());
         let txn = index.env.read_txn().unwrap();
-        assert!(index.mutable_blocks.get(&txn, &0).unwrap().is_none());
+        assert!(index.tables.mutable_blocks.get(&txn, 0).unwrap().is_none());
         drop(txn);
 
         let state = index
             .write(builder.build_batch(Some(0), None, 10 * 1024 * 1024).unwrap().unwrap())
             .unwrap();
         let txn = index.env.read_txn().unwrap();
-        assert!(index.mutable_blocks.get(&txn, &0).unwrap().is_some());
+        assert!(index.tables.mutable_blocks.get(&txn, 0).unwrap().is_some());
         drop(txn);
 
         let mut builder = OrderedBuilder::new(state, 10 * 1024 * 1024).unwrap();
@@ -904,8 +817,8 @@ mod tests {
             .write(builder.build_batch(Some(90), Some(0), 10 * 1024 * 1024).unwrap().unwrap())
             .unwrap();
         let txn = index.env.read_txn().unwrap();
-        assert!(index.mutable_blocks.get(&txn, &0).unwrap().is_some());
-        assert!(index.sealed_ranges.get(&txn, &0).unwrap().is_none());
+        assert!(index.tables.mutable_blocks.get(&txn, 0).unwrap().is_some());
+        assert!(index.tables.sealed_ranges.get(&txn, 0).unwrap().is_none());
         drop(txn);
 
         let mut builder = OrderedBuilder::new(state, 10 * 1024 * 1024).unwrap();
@@ -917,8 +830,8 @@ mod tests {
             .unwrap();
         let txn = index.env.read_txn().unwrap();
         assert_eq!(state.sealed_through(), Some(999));
-        assert!(index.mutable_blocks.get(&txn, &0).unwrap().is_none());
-        assert!(index.sealed_ranges.get(&txn, &0).unwrap().is_some());
+        assert!(index.tables.mutable_blocks.get(&txn, 0).unwrap().is_none());
+        assert!(index.tables.sealed_ranges.get(&txn, 0).unwrap().is_some());
     }
 
     #[test]
@@ -932,22 +845,22 @@ mod tests {
         let records = (0..RANGE_SIZE)
             .map(|height| {
                 CompactBlockRecord::decode(
-                    index.mutable_blocks.get(&txn, &height).unwrap().unwrap(),
+                    index.tables.mutable_blocks.get(&txn, height).unwrap().unwrap(),
                 )
                 .unwrap()
             })
             .collect::<Vec<_>>();
         let encoded = crate::codec::encode_range(&records).unwrap();
-        index.sealed_ranges.put(&mut txn, &0, encoded.as_slice()).unwrap();
+        index.tables.sealed_ranges.put(&mut txn, 0, encoded.as_slice()).unwrap();
         for height in 0..RANGE_SIZE / 2 {
-            index.mutable_blocks.delete(&mut txn, &height).unwrap();
+            index.tables.mutable_blocks.delete(&mut txn, height).unwrap();
         }
         drop(txn); // simulated failure before commit
 
         let txn = index.env.read_txn().unwrap();
-        assert!(index.sealed_ranges.get(&txn, &0).unwrap().is_none());
-        assert_eq!(index.mutable_blocks.len(&txn).unwrap(), 1_000);
-        assert_eq!(index.hash_to_height.len(&txn).unwrap(), 1_000);
+        assert!(index.tables.sealed_ranges.get(&txn, 0).unwrap().is_none());
+        assert_eq!(index.tables.mutable_blocks.len(&txn).unwrap(), 1_000);
+        assert_eq!(index.tables.hash_to_height.len(&txn).unwrap(), 1_000);
         drop(txn);
         assert_eq!(index.state().unwrap(), state);
         index.verify_continuity().unwrap();
