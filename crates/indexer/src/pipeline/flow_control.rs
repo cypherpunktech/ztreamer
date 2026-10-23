@@ -153,10 +153,11 @@ impl Drop for ReadAheadSender {
     }
 }
 
-/// The sender for one segment. It checks that the worker sends the heights of the segment in
-/// ascending order. A missing height must not cause a wait: if the block at
-/// `first_missing_height` never comes, all workers wait for all time.
-pub(crate) struct SegmentSender<'a> {
+/// The sender a [`HistoricalSource`](super::HistoricalSource) gets for one segment. It checks
+/// that the worker sends the heights of the segment in ascending order. A missing height must
+/// not cause a wait: if the block at `first_missing_height` never comes, all workers wait for all
+/// time.
+pub struct SegmentSender<'a> {
     sender: &'a mut ReadAheadSender,
     /// The height that the worker must send next.
     next_height: u64,
@@ -164,10 +165,20 @@ pub(crate) struct SegmentSender<'a> {
     end_height: u64,
 }
 
+impl std::fmt::Debug for SegmentSender<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SegmentSender")
+            .field("next_height", &self.next_height)
+            .field("end_height", &self.end_height)
+            .finish_non_exhaustive()
+    }
+}
+
 impl SegmentSender<'_> {
     /// Sends the next block of the segment. The result is an error if the block is not the next
-    /// height of the segment, or if the pipeline stopped.
-    pub(crate) fn send(&mut self, block: ParsedCompactBlock) -> Result<(), PipelineError> {
+    /// height of the segment, or if the pipeline stopped. The call waits while the read-ahead
+    /// budget is spent.
+    pub fn send(&mut self, block: ParsedCompactBlock) -> Result<(), PipelineError> {
         let height = u64::from(block.height);
         if height != self.next_height || height > self.end_height {
             return Err(PipelineError::SourceGap {
@@ -180,7 +191,7 @@ impl SegmentSender<'_> {
     }
 
     /// Ends the segment. The result is an error if the worker did not send all its heights.
-    pub(crate) const fn finish(self) -> Result<(), PipelineError> {
+    pub const fn finish(self) -> Result<(), PipelineError> {
         if self.next_height <= self.end_height {
             return Err(PipelineError::SourceGap {
                 expected: self.next_height as u32,

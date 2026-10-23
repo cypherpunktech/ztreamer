@@ -1,6 +1,6 @@
 //! Repeats finalized historical passes until two consecutive Zakura tips agree.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use zakura_state::ZakuraDb;
 
@@ -39,14 +39,8 @@ impl ZakuraSource {
         pipeline_config: PipelineConfig,
         stop: &AtomicBool,
     ) -> Result<IndexState, ZakuraSyncError> {
-        let pipeline = HistoricalPipeline::new(index, &self.db, pipeline_config)?.with_stop(stop);
-        let mut previous_tip = None;
-        loop {
-            let state = pipeline.sync()?;
-            if stop.load(Ordering::Relaxed) || previous_tip == Some(state.durable_tip()) {
-                return Ok(state);
-            }
-            previous_tip = Some(state.durable_tip());
-        }
+        Ok(HistoricalPipeline::new(index, &self.db, pipeline_config)?
+            .with_stop(stop)
+            .sync_until_stable()?)
     }
 }

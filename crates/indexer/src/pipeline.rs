@@ -14,7 +14,8 @@ use tracing::info;
 mod flow_control;
 mod telemetry;
 mod zakura;
-use flow_control::{ReadAheadReceiver, ReadAheadSender, SegmentSender};
+pub use flow_control::SegmentSender;
+use flow_control::{ReadAheadReceiver, ReadAheadSender};
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
@@ -33,18 +34,32 @@ pub(crate) const MAX_SOURCE_BLOCKS: u32 = 4096;
 /// How often the coordinator checks the stop flag while it waits for a block.
 const STOP_POLL: Duration = Duration::from_millis(50);
 
-#[derive(Clone, Default)]
-pub(crate) struct WorkerStats {
-    read: Duration,
-    header_read: Duration,
-    transaction_read: Duration,
-    txid_read: Duration,
-    parse: Duration,
-    send_wait: Duration,
-    ranges: u64,
-    blocks: u64,
-    bytes: u64,
-    transactions: u64,
+/// Per-worker timing and volume counters. A [`HistoricalSource`] fills these in
+/// [`HistoricalSource::process_segment`]; the pipeline sums them over all workers and logs the
+/// totals at the end of a pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorkerStats {
+    /// Total time spent reading from the source. Sources that split their reads keep this equal
+    /// to the sum of the three `*_read` fields.
+    pub read: Duration,
+    /// Time spent reading block headers.
+    pub header_read: Duration,
+    /// Time spent reading raw transactions.
+    pub transaction_read: Duration,
+    /// Time spent reading transaction ids.
+    pub txid_read: Duration,
+    /// Time spent in [`parse_stored_block`](crate::parser::parse_stored_block) or an equivalent.
+    pub parse: Duration,
+    /// Time spent waiting in [`SegmentSender::send`] for read-ahead budget.
+    pub send_wait: Duration,
+    /// Segments processed. The source sets this to 1 for one segment.
+    pub ranges: u64,
+    /// Blocks sent.
+    pub blocks: u64,
+    /// Source bytes read, as the serialized block size.
+    pub bytes: u64,
+    /// Transactions sent.
+    pub transactions: u64,
 }
 
 impl WorkerStats {
@@ -121,13 +136,39 @@ pub enum PipelineError {
     Panic,
 }
 
-/// A segment-oriented source seam: production keeps its native range iterators.
-/// Implementations must send every height in the inclusive range, in ascending order, or return
-/// an error. A missing height or a height out of order stops the pass with an error.
-pub(crate) trait HistoricalSource: Sync {
+/// Where the historical pass reads finalized blocks from.
+///
+/// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
+/// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
+/// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
+/// read in-process with its native range iterators. A source over a remote node implements the
+/// same four methods.
+///
+/// The methods are called from blocking worker threads, never from an async context. A source
+/// that talks to the network blocks on its own runtime handle.
+///
+/// # Contract
+///
+/// - [`Self::tip`], [`Self::block_hash`] and [`Self::prune_height`] describe the finalized chain
+///   as the source sees it when called. The pass is planned from one `tip` call and ends with an
+///   error if the source changes under it.
+/// - [`Self::process_segment`] must send every height from `start` to `end` inclusive, in
+///   ascending order, through `parsed_tx`, or return an error. A missing height or a height out
+///   of order ends the pass; the sender refuses it with [`PipelineError::SourceGap`].
+/// - When `expected_end_hash` is set and the block at `end` has a different hash, the source
+///   returns [`PipelineError::SourceChanged`].
+/// - A block whose serialized size plus 32 bytes per transaction id exceeds `max_source_bytes`
+///   is reported as [`PipelineError::BlockExceedsByteLimit`], not sent.
+/// - A block body the source no longer has is [`PipelineError::MissingBody`].
+pub trait HistoricalSource: Sync {
+    /// The highest finalized block, or `None` when the source has no blocks yet.
     fn tip(&self) -> Option<(Height, block::Hash)>;
+    /// The hash of the finalized block at `height`, or `None` when the source has no such block.
     fn block_hash(&self, height: u32) -> Option<block::Hash>;
+    /// The lowest height whose body the source still has. Zero when nothing is pruned.
     fn prune_height(&self) -> u32;
+    /// Reads and parses the blocks from `start` to `end` inclusive and sends each one through
+    /// `parsed_tx` in ascending order. See the trait documentation for the contract.
     fn process_segment(
         &self,
         start: u32,
@@ -139,8 +180,24 @@ pub(crate) trait HistoricalSource: Sync {
     ) -> Result<(), PipelineError>;
 }
 
-/// Fetch-and-parse workers feed one [`OrderedBuilder`], which feeds one LMDB writer.
-pub(crate) struct HistoricalPipeline<'a, S = ZakuraDb> {
+/// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
+/// [`OrderedBuilder`], which feeds one LMDB writer.
+///
+/// [`crate::source::ZakuraSource`] builds one over the embedded database. A source in another
+/// crate builds one the same way:
+///
+/// ```no_run
+/// # use std::sync::atomic::AtomicBool;
+/// # use ztreamer_indexer::{index::Index, pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig, PipelineError}};
+/// # fn run(index: &Index, source: &impl HistoricalSource, stop: &AtomicBool) -> Result<(), PipelineError> {
+/// let state = HistoricalPipeline::new(index, source, PipelineConfig::default())?
+///     .with_stop(stop)
+///     .sync_until_stable()?;
+/// # let _ = state;
+/// # Ok(())
+/// # }
+/// ```
+pub struct HistoricalPipeline<'a, S = ZakuraDb> {
     index: &'a Index,
     db: &'a S,
     config: PipelineConfig,
@@ -149,12 +206,16 @@ pub(crate) struct HistoricalPipeline<'a, S = ZakuraDb> {
     stop: Option<&'a AtomicBool>,
 }
 
+impl<S> std::fmt::Debug for HistoricalPipeline<'_, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoricalPipeline").field("config", &self.config).finish_non_exhaustive()
+    }
+}
+
 impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
-    pub(crate) fn new(
-        index: &'a Index,
-        db: &'a S,
-        config: PipelineConfig,
-    ) -> Result<Self, PipelineError> {
+    /// Builds a pipeline over `db` that writes into `index`. Fails with
+    /// [`PipelineError::Config`] when a limit in `config` is zero or out of range.
+    pub fn new(index: &'a Index, db: &'a S, config: PipelineConfig) -> Result<Self, PipelineError> {
         let pipeline = Self { index, db, config, metrics: PipelineMetrics::new(), stop: None };
         pipeline.validate_config()?;
         Ok(pipeline)
@@ -163,7 +224,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
     /// Lets `stop` end the pass early, for example at shutdown. When `stop` is set, each worker
     /// completes its segment and starts no new segment. The writer writes the blocks that it
     /// has, and the pass returns a state with a lower tip.
-    pub(crate) const fn with_stop(mut self, stop: &'a AtomicBool) -> Self {
+    pub const fn with_stop(mut self, stop: &'a AtomicBool) -> Self {
         self.stop = Some(stop);
         self
     }
@@ -172,8 +233,21 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         self.stop.is_some_and(|stop| stop.load(Ordering::Relaxed))
     }
 
+    /// Repeats [`Self::sync`] until two consecutive passes see the same durable tip, or until
+    /// the stop flag is set, and returns the index state at the end.
+    pub fn sync_until_stable(&self) -> Result<IndexState, PipelineError> {
+        let mut previous_tip = None;
+        loop {
+            let state = self.sync()?;
+            if self.stopped() || previous_tip == Some(state.durable_tip()) {
+                return Ok(state);
+            }
+            previous_tip = Some(state.durable_tip());
+        }
+    }
+
     /// Ingests the finalized durable blocks available when this call starts.
-    pub(crate) fn sync(&self) -> Result<IndexState, PipelineError> {
+    pub fn sync(&self) -> Result<IndexState, PipelineError> {
         let mut pass = self.metrics.pass();
         let result = self.sync_inner();
         pass.finish(result.is_ok());
@@ -384,7 +458,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
                 return Err(error);
             }
             segment.success = true;
-            stats.add(segment.stats.clone());
+            stats.add(segment.stats);
         }
     }
 

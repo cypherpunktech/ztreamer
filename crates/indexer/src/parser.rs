@@ -159,7 +159,11 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
     })
 }
 
-pub(crate) fn parse_stored_block<'a>(
+/// Parses a block from its stored parts: the header fields the index keeps and each transaction's
+/// raw bytes with its id. This is what a [`HistoricalSource`](crate::pipeline::HistoricalSource)
+/// calls for every block it sends; it never deserializes the transactions beyond what the compact
+/// format needs.
+pub fn parse_stored_block<'a>(
     height: u32,
     hash: block::Hash,
     previous_hash: block::Hash,
