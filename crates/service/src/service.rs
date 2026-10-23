@@ -6,15 +6,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{Semaphore, mpsc, watch};
-use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tokio::sync::{Semaphore, watch};
+use tokio_stream::{Stream, StreamExt};
 use tonic::Status;
 use tower::ServiceExt;
 use zakura_chain::{
     block,
     parameters::{ConsensusBranchId, NetworkUpgrade},
     serialization::ZcashSerialize,
-    subtree::NoteCommitmentSubtreeIndex,
     transaction,
 };
 use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
@@ -34,6 +33,9 @@ use ztreamer_protocol::{EncodedCompactBlock, proto};
 
 mod address;
 mod mempool;
+#[cfg(test)]
+mod test_utils;
+mod tree;
 
 pub(crate) type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 const MAX_RANGE_STREAMS: usize = 16;
@@ -607,84 +609,6 @@ impl CompactService {
         }))))
     }
 
-    pub(crate) async fn tree_state(
-        &self,
-        request: proto::BlockId,
-    ) -> Result<proto::TreeState, Status> {
-        let record = self.record(request).await?;
-        let source = self.zakura.clone();
-        let hash = block::Hash(record.hash);
-        let (sapling, orchard, ironwood) = tokio::try_join!(
-            source.clone().oneshot(ReadRequest::SaplingTree(hash.into())),
-            source.clone().oneshot(ReadRequest::OrchardTree(hash.into())),
-            source.oneshot(ReadRequest::IronwoodTree(hash.into())),
-        )
-        .map_err(source_status)?;
-
-        let sapling_tree = match sapling {
-            ReadResponse::SaplingTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Sapling tree response")),
-        };
-        let orchard_tree = match orchard {
-            ReadResponse::OrchardTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Orchard tree response")),
-        };
-        let ironwood_tree = match ironwood {
-            ReadResponse::IronwoodTree(tree) => {
-                tree.map(|tree| hex::encode(tree.to_rpc_bytes())).unwrap_or_default()
-            }
-            _ => return Err(Status::internal("unexpected Ironwood tree response")),
-        };
-
-        Ok(proto::TreeState {
-            network: self.chain_name.to_string(),
-            height: u64::from(record.height),
-            hash: hash.to_string(),
-            time: record.time,
-            sapling_tree,
-            orchard_tree,
-            ironwood_tree,
-        })
-    }
-
-    fn subtree_stream(
-        &self,
-        roots: Vec<(Vec<u8>, u32)>,
-        snapshot: ServingSnapshot,
-    ) -> RpcStream<proto::SubtreeRoot> {
-        let index = Arc::clone(&self.index);
-        let (sender, receiver) = mpsc::channel(1);
-        tokio::task::spawn_blocking(move || {
-            for (root_hash, height) in roots {
-                let block = match snapshot.volatile(height) {
-                    Some(block) => block.clone(),
-                    None => match index.read_block(snapshot.generation, height) {
-                        Ok(block) => block,
-                        Err(error) => {
-                            let _ = sender.blocking_send(Err(index_status(error)));
-                            return;
-                        }
-                    },
-                };
-                if sender
-                    .blocking_send(Ok(proto::SubtreeRoot {
-                        root_hash,
-                        completing_block_hash: block.hash.to_vec(),
-                        completing_block_height: u64::from(height),
-                    }))
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        });
-        Box::pin(ReceiverStream::new(receiver))
-    }
-
     pub(crate) fn latest_block(&self) -> Result<proto::BlockId, Status> {
         let snapshot = self.snapshot();
         ensure_tip_ready(&snapshot)?;
@@ -782,65 +706,6 @@ impl CompactService {
         }
     }
 
-    pub(crate) async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {
-        let snapshot = self.snapshot();
-        ensure_tip_ready(&snapshot)?;
-        let tip =
-            snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        self.tree_state(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.to_vec() })
-            .await
-    }
-
-    pub(crate) async fn subtree_roots(
-        &self,
-        request: proto::GetSubtreeRootsArg,
-    ) -> Result<RpcStream<proto::SubtreeRoot>, Status> {
-        let start_index = NoteCommitmentSubtreeIndex(
-            request
-                .start_index
-                .try_into()
-                .map_err(|_| Status::invalid_argument("subtree start index exceeds u16"))?,
-        );
-        let limit = match request.max_entries {
-            0 => None,
-            limit => Some(NoteCommitmentSubtreeIndex(
-                limit
-                    .try_into()
-                    .map_err(|_| Status::invalid_argument("subtree entry limit exceeds u16"))?,
-            )),
-        };
-        let source = self.zakura.clone();
-        let response = match proto::ShieldedProtocol::try_from(request.shielded_protocol) {
-            Ok(proto::ShieldedProtocol::Sapling) => {
-                source.oneshot(ReadRequest::SaplingSubtrees { start_index, limit }).await
-            }
-            Ok(proto::ShieldedProtocol::Orchard) => {
-                source.oneshot(ReadRequest::OrchardSubtrees { start_index, limit }).await
-            }
-            Ok(proto::ShieldedProtocol::Ironwood) => {
-                source.oneshot(ReadRequest::IronwoodSubtrees { start_index, limit }).await
-            }
-            Err(_) => return Err(Status::invalid_argument("invalid shielded protocol")),
-        }
-        .map_err(source_status)?;
-        let roots = match response {
-            ReadResponse::SaplingSubtrees(subtrees) => subtrees
-                .into_values()
-                .map(|subtree| (subtree.root.to_bytes().to_vec(), subtree.end_height.0))
-                .collect(),
-            ReadResponse::OrchardSubtrees(subtrees) => subtrees
-                .into_values()
-                .map(|subtree| (subtree.root.to_repr().to_vec(), subtree.end_height.0))
-                .collect(),
-            ReadResponse::IronwoodSubtrees(subtrees) => subtrees
-                .into_values()
-                .map(|subtree| (subtree.root.to_repr().to_vec(), subtree.end_height.0))
-                .collect(),
-            _ => return Err(Status::internal("unexpected subtree response")),
-        };
-        Ok(self.subtree_stream(roots, self.snapshot()))
-    }
-
     fn node(&self) -> Result<&NodeClient, Status> {
         self.node
             .as_ref()
@@ -898,17 +763,15 @@ mod tests {
     use super::*;
     use tokio_stream::StreamExt;
     use tonic::Request;
-    use zakura_chain::{block, parameters::Network, transaction};
+    use zakura_chain::{block, parameters::Network};
     use zakura_state::Config;
     use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamer;
 
     use ztreamer_indexer::{
-        codec::CompactBlockRecord,
-        head::HeadError,
-        ingest::OrderedBuilder,
-        parser::{ParsedCompactBlock, RawIndexBlock},
-        pipeline::PipelineConfig,
+        head::HeadError, ingest::OrderedBuilder, parser::RawIndexBlock, pipeline::PipelineConfig,
     };
+
+    use super::test_utils::{hash, index_through, parsed, range, raw_block, record};
 
     struct HeadSource(Vec<RawIndexBlock>);
 
@@ -1168,29 +1031,6 @@ mod tests {
     }
 
     #[test]
-    fn subtree_stream_resolves_volatile_completion_blocks() {
-        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let dir = tempfile::tempdir().unwrap();
-            let index =
-                Arc::new(Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", [9; 32]).unwrap());
-            let state = index_through(&index, 1_005);
-            let (_state_service, read_service, _tip, _change) =
-                zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                    .await
-                    .expect("ephemeral state initializes");
-            let service = CompactService::new(index, state, "main", read_service);
-            service.publish_head(state, vec![record(1_006), record(1_007)]).unwrap();
-
-            let mut stream = service.subtree_stream(vec![(vec![7; 32], 1_007)], service.snapshot());
-            let root = stream.next().await.unwrap().unwrap();
-
-            assert_eq!(root.root_hash, vec![7; 32]);
-            assert_eq!(root.completing_block_hash, hash(1_007));
-            assert_eq!(root.completing_block_height, 1_007);
-        });
-    }
-
-    #[test]
     fn range_admission_is_shared_and_releases_on_drop() {
         tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
             async {
@@ -1409,68 +1249,5 @@ mod tests {
                 assert_eq!(heights, (100..=202).rev().collect::<Vec<_>>());
             },
         );
-    }
-
-    fn range(start: u32, end: u32) -> proto::BlockRange {
-        proto::BlockRange {
-            start: Some(proto::BlockId { height: u64::from(start), hash: Vec::new() }),
-            end: Some(proto::BlockId { height: u64::from(end), hash: Vec::new() }),
-            pool_types: Vec::new(),
-        }
-    }
-
-    fn parsed(height: u32) -> ParsedCompactBlock {
-        ParsedCompactBlock {
-            height,
-            hash: hash(height),
-            previous_hash: height.checked_sub(1).map(hash).unwrap_or([0; 32]),
-            time: height,
-            transactions: Vec::new(),
-            sapling_additions: 0,
-            orchard_additions: 0,
-            ironwood_additions: 0,
-        }
-    }
-
-    fn raw_block(height: u32) -> RawIndexBlock {
-        let mut bytes = vec![0; 140];
-        bytes[4..36].copy_from_slice(&height.checked_sub(1).map(hash).unwrap_or([0; 32]));
-        bytes[100..104].copy_from_slice(&height.to_le_bytes());
-        bytes.extend_from_slice(&[0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        RawIndexBlock {
-            height: block::Height(height),
-            hash: block::Hash(hash(height)),
-            bytes,
-            txids: vec![transaction::Hash(hash(height))],
-        }
-    }
-
-    fn record(height: u32) -> CompactBlockRecord {
-        CompactBlockRecord {
-            height,
-            hash: hash(height),
-            previous_hash: hash(height - 1),
-            time: height,
-            transactions: Vec::new(),
-            end_tree_sizes: ztreamer_indexer::codec::TreeSizes::default(),
-        }
-    }
-
-    fn index_through(index: &Index, tip: u32) -> IndexState {
-        let mut builder = OrderedBuilder::new(IndexState::default(), 1024 * 1024).unwrap();
-        for height in 0..=tip {
-            builder.push(parsed(height)).unwrap();
-        }
-        let mut state = IndexState::default();
-        while let Some(batch) = builder.build_batch(Some(tip), Some(tip), 1024 * 1024).unwrap() {
-            state = index.write(batch).unwrap();
-        }
-        state
-    }
-
-    fn hash(height: u32) -> Digest {
-        let mut hash = [0; 32];
-        hash[..4].copy_from_slice(&height.to_be_bytes());
-        hash
     }
 }
