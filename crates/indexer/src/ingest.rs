@@ -27,11 +27,45 @@ pub enum IngestError {
     Overflow,
 }
 
+/// The owner of the estimated encoded bytes of one pending block.
+///
+/// [`OrderedBuilder`] keeps a lease next to each block in `pending`. When
+/// [`OrderedBuilder::build_batch`] moves blocks into a batch, it merges their leases and drops the
+/// result when it returns. So the leases of one batch release at one time.
+///
+/// `usize` is a lease in no budget: it only carries the number. A lease that holds bytes in a
+/// shared budget gives them back in its [`Drop`] implementation.
+///
+/// # Implementation guide
+///
+/// - [`ByteLease::bytes`] must return the same value for the life of the lease, except after
+///   [`ByteLease::merge`], which adds the bytes of `other` to `self`.
+/// - [`ByteLease::merge`] must make the release of `other` a no-op, so that the merged lease
+///   releases all bytes at one time.
+pub trait ByteLease {
+    /// The estimated encoded bytes of the block.
+    fn bytes(&self) -> usize;
+
+    /// Joins `other` into `self`, so that both release at one time.
+    fn merge(&mut self, other: Self);
+}
+
+impl ByteLease for usize {
+    fn bytes(&self) -> usize {
+        *self
+    }
+
+    fn merge(&mut self, other: Self) {
+        *self += other;
+    }
+}
+
 /// Single-threaded coordinator between parallel parsers that push
 /// out of order [`ParsedCompactBlock`]s and the [`crate::index::Index`].
 ///
-/// Produces [`WriteBatch`]es of ordered blocks.
-pub struct OrderedBuilder {
+/// Produces [`WriteBatch`]es of ordered blocks. `L` is the [`ByteLease`] that owns the estimated
+/// encoded bytes of each pending block. The default, `usize`, holds the bytes in no budget.
+pub struct OrderedBuilder<L = usize> {
     /// Lowest height that will be included in the next batch.
     next_height: u32,
     /// Expected parent hash for `next_height`.
@@ -41,8 +75,8 @@ pub struct OrderedBuilder {
     /// The next [`WriteBatch::base_generation`].
     generation: u64,
 
-    /// Ordered map of parsed blocks pending batch inclusion.
-    pending: BTreeMap<u32, (ParsedCompactBlock, usize)>,
+    /// Ordered map of parsed blocks pending batch inclusion, each with the lease of its bytes.
+    pending: BTreeMap<u32, (ParsedCompactBlock, L)>,
     /// Total encoded size of all blocks in `pending`.
     pending_bytes: usize,
 
@@ -55,7 +89,7 @@ pub struct OrderedBuilder {
     max_pending_bytes: usize,
 }
 
-impl std::fmt::Debug for OrderedBuilder {
+impl<L> std::fmt::Debug for OrderedBuilder<L> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OrderedBuilder")
             .field("next_height", &self.next_height)
@@ -165,7 +199,7 @@ pub(crate) struct EncodedBlock {
     pub(crate) bytes: Vec<u8>,
 }
 
-impl OrderedBuilder {
+impl<L: ByteLease> OrderedBuilder<L> {
     pub fn new(state: IndexState, max_pending_bytes: usize) -> Result<Self, IngestError> {
         let next_height = match state.durable_tip {
             Some(tip) => tip.height.checked_add(1).ok_or(IngestError::Overflow)?,
@@ -184,25 +218,37 @@ impl OrderedBuilder {
         })
     }
 
-    /// Hands a block over to queue inclusion in a [`WriteBatch`]
-    pub fn push(&mut self, block: ParsedCompactBlock) -> Result<(), IngestError> {
-        if block.height < self.next_height || self.pending.contains_key(&block.height) {
-            return Err(IngestError::DuplicateHeight { height: block.height });
+    /// Hands a block over to queue inclusion in a [`WriteBatch`]. `lease` owns the block's
+    /// estimated encoded bytes.
+    pub fn push_leased(&mut self, block: ParsedCompactBlock, lease: L) -> Result<(), IngestError> {
+        self.check_new_height(block.height)?;
+        self.insert(block, lease)
+    }
+
+    /// The result is an error if `height` is below the next batch or is already pending.
+    fn check_new_height(&self, height: u32) -> Result<(), IngestError> {
+        if height < self.next_height || self.pending.contains_key(&height) {
+            return Err(IngestError::DuplicateHeight { height });
         }
-        let bytes = CompactBlockRecord::encoded_size_bound(&block.transactions)?;
-        let pending_bytes = self.pending_bytes.checked_add(bytes).ok_or(IngestError::Overflow)?;
+        Ok(())
+    }
+
+    /// Adds a checked block and its lease to `pending`, and extends the ready prefix.
+    fn insert(&mut self, block: ParsedCompactBlock, lease: L) -> Result<(), IngestError> {
+        let pending_bytes =
+            self.pending_bytes.checked_add(lease.bytes()).ok_or(IngestError::Overflow)?;
         if pending_bytes > self.max_pending_bytes {
             return Err(IngestError::PendingBytes { limit: self.max_pending_bytes });
         }
         self.pending_bytes = pending_bytes;
         let height = block.height;
-        self.pending.insert(height, (block, bytes));
+        self.pending.insert(height, (block, lease));
         if u64::from(height) == self.ready_end {
             while let Ok(height) = self.ready_end.try_into()
-                && let Some((_, bytes)) = self.pending.get(&height)
+                && let Some((_, lease)) = self.pending.get(&height)
             {
                 self.ready_bytes =
-                    self.ready_bytes.checked_add(*bytes).ok_or(IngestError::Overflow)?;
+                    self.ready_bytes.checked_add(lease.bytes()).ok_or(IngestError::Overflow)?;
                 self.ready_end += 1;
             }
         }
@@ -244,12 +290,17 @@ impl OrderedBuilder {
         let base_generation = self.generation;
         let mut batch_bytes = 0usize;
         let mut records = Vec::new();
+        // The leases of the blocks in the batch. They release at one time, when this function
+        // returns.
+        let mut released: Option<L> = None;
 
-        while let Some((block, bytes)) = self.pending.get(&self.next_height) {
+        while let Some((block, lease)) = self.pending.get(&self.next_height) {
             if durable_through.is_none_or(|height| block.height > height) {
                 break;
             }
-            if batch_bytes.checked_add(*bytes).ok_or(IngestError::Overflow)? > max_batch_bytes {
+            if batch_bytes.checked_add(lease.bytes()).ok_or(IngestError::Overflow)?
+                > max_batch_bytes
+            {
                 if records.is_empty() {
                     return Err(IngestError::BatchBytes { limit: max_batch_bytes });
                 }
@@ -284,12 +335,17 @@ impl OrderedBuilder {
                     .ok_or(IngestError::TreeSize { height: block.height })?,
             };
             let next_height = self.next_height.checked_add(1).ok_or(IngestError::Overflow)?;
-            let (block, bytes) =
+            let (block, lease) =
                 self.pending.remove(&self.next_height).expect("the pending block was just checked");
 
+            let bytes = lease.bytes();
             batch_bytes += bytes;
             self.pending_bytes -= bytes;
             self.ready_bytes -= bytes;
+            match &mut released {
+                Some(all) => all.merge(lease),
+                None => released = Some(lease),
+            }
             self.next_height = next_height;
             self.previous_hash = Some(block.hash);
             self.tree_sizes = end_tree_sizes;
@@ -311,11 +367,78 @@ impl OrderedBuilder {
     }
 }
 
+impl OrderedBuilder<usize> {
+    /// Hands a block over to queue inclusion in a [`WriteBatch`]. The builder computes the
+    /// block's estimated encoded bytes itself.
+    pub fn push(&mut self, block: ParsedCompactBlock) -> Result<(), IngestError> {
+        self.check_new_height(block.height)?;
+        let bytes = CompactBlockRecord::encoded_size_bound(&block.transactions)?;
+        self.insert(block, bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, rc::Rc};
+
     use super::*;
     use crate::test_utils::prepared;
     use crate::types::{CompactSaplingOutput, CompactTransaction};
+
+    /// Counts the released bytes and the number of releases, which a merge does not add to.
+    #[derive(Default)]
+    struct Releases {
+        bytes: Cell<usize>,
+        count: Cell<u32>,
+    }
+
+    struct TrackedLease {
+        bytes: usize,
+        releases: Rc<Releases>,
+    }
+
+    impl ByteLease for TrackedLease {
+        fn bytes(&self) -> usize {
+            self.bytes
+        }
+
+        fn merge(&mut self, mut other: Self) {
+            self.bytes += std::mem::take(&mut other.bytes);
+        }
+    }
+
+    impl Drop for TrackedLease {
+        fn drop(&mut self) {
+            if self.bytes > 0 {
+                self.releases.bytes.set(self.releases.bytes.get() + self.bytes);
+                self.releases.count.set(self.releases.count.get() + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn a_batch_releases_the_leases_of_its_blocks_at_one_time() {
+        let bytes = CompactBlockRecord::encoded_size_bound(&[]).unwrap();
+        let releases = Rc::new(Releases::default());
+        let lease = || TrackedLease { bytes, releases: Rc::clone(&releases) };
+        let mut builder = OrderedBuilder::new(IndexState::default(), 1_000_000).unwrap();
+        for height in 0..3 {
+            builder.push_leased(prepared(height), lease()).unwrap();
+        }
+        assert_eq!(builder.pending_bytes(), 3 * bytes);
+        assert_eq!(builder.ready_bytes(), 3 * bytes);
+        assert_eq!(releases.bytes.get(), 0);
+
+        let batch = builder.build_batch(Some(2), None, 2 * bytes).unwrap().unwrap();
+        assert_eq!(batch.records.len(), 2);
+        assert_eq!(builder.pending_bytes(), bytes);
+        assert_eq!(releases.bytes.get(), 2 * bytes);
+        assert_eq!(releases.count.get(), 1);
+
+        drop(builder);
+        assert_eq!(releases.bytes.get(), 3 * bytes);
+        assert_eq!(releases.count.get(), 2);
+    }
 
     #[test]
     fn reassembles_out_of_order_blocks_and_assigns_tree_sizes() {
