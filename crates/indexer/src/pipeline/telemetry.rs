@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use metrics::{Counter, Gauge, Histogram};
 
 use super::{OrderedBuilder, WorkerStats};
+use crate::ingest::ByteLease;
 
 pub(crate) struct PipelineMetrics {
     pub target: Gauge,
@@ -65,7 +66,7 @@ impl PipelineMetrics {
         ActiveWorker(self)
     }
 
-    pub(crate) fn buffer(&self, builder: &OrderedBuilder) {
+    pub(crate) fn buffer<L: ByteLease>(&self, builder: &OrderedBuilder<L>) {
         self.pending_bytes.set(builder.pending_bytes() as f64);
         self.ready_bytes.set(builder.ready_bytes() as f64);
         self.first_missing.set(builder.first_missing_height() as f64);
