@@ -12,33 +12,45 @@ use std::{
     mem::size_of,
     ops::RangeInclusive,
     sync::{Arc, Mutex, PoisonError},
+    time::Duration,
 };
 
+use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
 use lru::LruCache;
 use sapling_crypto::Node as SaplingNode;
+use tokio::sync::watch;
 use zakura_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
     ironwood, orchard,
     parameters::Network,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto as _},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto as _, ZcashSerialize as _},
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
-use zakura_rpc::client::{GetRawTransactionResponse, GetSubtreesByIndexResponse};
+use zakura_rpc::{
+    client::{
+        GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosResponse,
+        GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
+    },
+    methods::GetAddressUtxosRequest,
+};
 use zakura_state::{HashOrHeight, MAX_BLOCK_REORG_HEIGHT};
 use ztreamer_remote::{RpcCode, RpcError, ZakuraClient};
 
 use crate::backend::{
-    BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState,
+    AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState,
 };
 
 /// The bytes that the subtree cache of one pool can hold: approximately 16,000 subtrees.
 const SUBTREE_CACHE_BYTES: usize = 2 << 20;
 
-/// The PR that adds the methods that this backend does not serve yet.
-const NEXT_PR: &str = "feat(service): RemoteBackend addresses, mempool and submit";
+/// The most `getrawtransaction` calls in flight for one mempool read.
+const MEMPOOL_FETCHES: usize = 16;
+
+/// The time between two `getbestblockhash` calls of a tip listener.
+const TIP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Why [`RemoteBackend::connect`] refused the node.
 #[derive(Debug, thiserror::Error)]
@@ -177,10 +189,75 @@ impl RemoteBackend {
         Ok(subtrees)
     }
 
-    fn not_yet<T>(what: &str) -> Result<T, BackendError> {
-        Err(BackendError::Unavailable(format!(
-            "RemoteBackend does not serve {what} yet; the PR \"{NEXT_PR}\" adds it"
-        )))
+    /// A mempool transaction. `None` when it left the mempool after `getrawmempool`.
+    async fn mempool_transaction(&self, id: String) -> Result<Option<UnminedTx>, BackendError> {
+        let id: transaction::Hash = id.parse().map_err(|_| {
+            BackendError::Unexpected(format!("remote zakura sent a bad mempool id {id:?}"))
+        })?;
+        let request = self.node.get_raw_transaction(id, false).await;
+        let Some(response) = request.or_not_found(RpcCode::INVALID_ADDRESS_OR_KEY)? else {
+            return Ok(None);
+        };
+        let GetRawTransactionResponse::Raw(raw) = response else {
+            return Err(BackendError::Unexpected(
+                "remote zakura sent a verbose transaction for a raw request".into(),
+            ));
+        };
+        let transaction: Transaction = decode(raw.as_ref().to_vec(), "transaction").await?;
+        Ok(Some(transaction.into()))
+    }
+}
+
+fn address_strings(addresses: HashSet<transparent::Address>) -> Vec<String> {
+    addresses.iter().map(ToString::to_string).collect()
+}
+
+fn amount(zatoshis: u64) -> Result<Amount<NonNegative>, BackendError> {
+    Amount::try_from(zatoshis).map_err(|error| {
+        BackendError::Unexpected(format!("remote zakura sent a bad amount {zatoshis}: {error}"))
+    })
+}
+
+/// Polls `getbestblockhash` and sends each new hash. The first hash is the start, so it does not
+/// wake the listener. It stops when the listener is dropped or a call fails.
+async fn poll_best_hash(
+    node: ZakuraClient,
+    sender: watch::Sender<Result<Option<block::Hash>, BackendError>>,
+) {
+    let mut interval = tokio::time::interval(TIP_POLL_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = sender.closed() => return,
+            _ = interval.tick() => {}
+        }
+        let best = match node.get_best_block_hash().await {
+            Ok(best) => best.hash(),
+            Err(error) => {
+                // The send fails only when the listener is gone.
+                let _ = sender.send(Err(error.into()));
+                return;
+            }
+        };
+        sender.send_if_modified(|last| {
+            let changed = matches!(last, Ok(Some(hash)) if *hash != best);
+            *last = Ok(Some(best));
+            changed
+        });
+    }
+}
+
+/// Wakes when [`poll_best_hash`] sees a new best block hash.
+struct RemoteTipListener(watch::Receiver<Result<Option<block::Hash>, BackendError>>);
+
+#[tonic::async_trait]
+impl TipListener for RemoteTipListener {
+    async fn tip_changed(&mut self) -> Result<(), BackendError> {
+        self.0
+            .changed()
+            .await
+            .map_err(|_| BackendError::Unavailable("remote zakura tip poller stopped".into()))?;
+        self.0.borrow_and_update().clone().map(|_| ())
     }
 }
 
@@ -519,49 +596,110 @@ impl StateBackend for RemoteBackend {
 
     async fn address_transaction_ids(
         &self,
-        _address: transparent::Address,
-        _heights: RangeInclusive<block::Height>,
+        address: transparent::Address,
+        heights: RangeInclusive<block::Height>,
     ) -> Result<Vec<transaction::Hash>, BackendError> {
-        Self::not_yet("address transactions")
+        // The node reads an end of 0 as the tip. The genesis block is not in the address index,
+        // so a range that ends at it has no transactions.
+        if heights.end().0 == 0 {
+            return Ok(Vec::new());
+        }
+        let request = GetAddressTxIdsRequest::new(
+            vec![address.to_string()],
+            Some(heights.start().0),
+            Some(heights.end().0),
+        );
+        self.node
+            .get_address_tx_ids(&request)
+            .await?
+            .iter()
+            .map(|id| {
+                id.parse().map_err(|_| {
+                    BackendError::Unexpected(format!("remote zakura sent a bad txid {id:?}"))
+                })
+            })
+            .collect()
     }
 
     async fn address_balance(
         &self,
-        _addresses: HashSet<transparent::Address>,
+        addresses: HashSet<transparent::Address>,
     ) -> Result<Amount<NonNegative>, BackendError> {
-        Self::not_yet("address balances")
+        let request = GetAddressBalanceRequest::new(address_strings(addresses));
+        amount(self.node.get_address_balance(&request).await?.balance())
     }
 
     async fn address_utxos(
         &self,
-        _addresses: HashSet<transparent::Address>,
-    ) -> Result<Vec<crate::backend::AddressUtxo>, BackendError> {
-        Self::not_yet("address UTXOs")
+        addresses: HashSet<transparent::Address>,
+    ) -> Result<Vec<AddressUtxo>, BackendError> {
+        let request = GetAddressUtxosRequest::new(address_strings(addresses), false);
+        let utxos = match self.node.get_address_utxos(&request).await? {
+            GetAddressUtxosResponse::Utxos(utxos) => utxos,
+            GetAddressUtxosResponse::UtxosAndChainInfo(object) => object.utxos().clone(),
+        };
+        utxos
+            .iter()
+            .map(|utxo| {
+                let (address, hash, index, lock_script, zatoshis, height) = utxo.into_parts();
+                Ok(AddressUtxo {
+                    address,
+                    outpoint: transparent::OutPoint { hash, index: index.index() },
+                    output: transparent::Output { value: amount(zatoshis)?, lock_script },
+                    height,
+                })
+            })
+            .collect()
     }
 
     async fn mempool_transactions(&self) -> Result<Vec<UnminedTx>, BackendError> {
-        Self::not_yet("the mempool")
+        let ids = match self.node.get_raw_mempool().await? {
+            GetRawMempoolResponse::TxIds(ids) => ids,
+            GetRawMempoolResponse::Verbose(objects) => objects.into_keys().collect(),
+        };
+        stream::iter(ids)
+            .map(|id| self.mempool_transaction(id))
+            .buffer_unordered(MEMPOOL_FETCHES)
+            .try_filter_map(future::ok)
+            .try_collect()
+            .await
     }
 
     async fn submit_transaction(
         &self,
-        _transaction: Transaction,
+        transaction: Transaction,
     ) -> Result<transaction::Hash, BackendError> {
-        Self::not_yet("transaction submission")
+        let bytes = transaction.zcash_serialize_to_vec().map_err(|error| {
+            BackendError::Rejected(format!("transaction does not serialize: {error}"))
+        })?;
+        match self.node.send_raw_transaction(&bytes).await {
+            Ok(sent) => Ok(sent.hash()),
+            Err(RpcError::Rpc { code, message, .. }) => Err(BackendError::Rejected(format!(
+                "remote zakura rejected transaction: {message} ({code})"
+            ))),
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn tip_listener(&self) -> Result<Box<dyn TipListener>, BackendError> {
-        Self::not_yet("tip changes")
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|error| BackendError::Unavailable(format!("no tokio runtime: {error}")))?;
+        let (sender, receiver) = watch::channel(Ok(None));
+        runtime.spawn(poll_best_hash(self.node.clone(), sender));
+        Ok(Box::new(RemoteTipListener(receiver)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     use super::*;
     use serde_json::{Value, json};
-    use zakura_rpc::client::{GetBlockchainInfoResponse, HexData, TransactionObject};
+    use zakura_rpc::client::{GetBlockchainInfoResponse, HexData, TransactionObject, Utxo};
     use zakura_test::vectors::BLOCK_MAINNET_1_BYTES;
     use ztreamer_remote::{
         RpcClient,
@@ -828,13 +966,120 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn methods_of_the_next_pr_are_unavailable() {
+    async fn tree_state_is_unavailable_without_a_request() {
         let mock = mainnet(1, |_, _| Reply::Close).await;
         let backend = backend(&mock).await;
         let requests = mock.seen().len();
-        let error = backend.mempool_transactions().await.unwrap_err();
-        assert!(matches!(&error, BackendError::Unavailable(message) if message.contains(NEXT_PR)));
-        assert!(backend.tree_state(block::Hash([0; 32])).await.is_err());
+        let error = backend.tree_state(block::Hash([0; 32])).await.unwrap_err();
+        assert!(matches!(&error, BackendError::Unavailable(message) if message.contains("#114")));
         assert_eq!(mock.seen().len(), requests);
+    }
+
+    const ADDRESS: &str = "t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak";
+
+    fn address() -> transparent::Address {
+        ADDRESS.parse().unwrap()
+    }
+
+    /// The params of the last request of the mock.
+    fn last_params(mock: &MockNode) -> Value {
+        mock.seen().last().unwrap().body["params"].clone()
+    }
+
+    #[tokio::test]
+    async fn address_reads_parse_each_answer() {
+        let txid = block_1().transactions[0].hash();
+        let mock = mainnet(1, move |method, _| match method {
+            "getaddresstxids" => Reply::Result(json!([txid.to_string()])),
+            "getaddressbalance" => Reply::Result(json!({"balance": 5, "received": 7})),
+            _ => Reply::Result(
+                serde_json::to_value(vec![Utxo::new(
+                    ADDRESS.parse().unwrap(),
+                    txid,
+                    transparent::OutputIndex::from_index(2),
+                    transparent::Script::new(&[0x51]),
+                    9,
+                    block::Height(1),
+                )])
+                .unwrap(),
+            ),
+        })
+        .await;
+        let backend = backend(&mock).await;
+        let heights = block::Height(1)..=block::Height(5);
+        assert_eq!(backend.address_transaction_ids(address(), heights).await.unwrap(), [txid]);
+        assert_eq!(last_params(&mock), json!([{"addresses": [ADDRESS], "start": 1, "end": 5}]));
+        let requests = mock.seen().len();
+        let genesis = block::Height(0)..=block::Height(0);
+        assert!(backend.address_transaction_ids(address(), genesis).await.unwrap().is_empty());
+        assert_eq!(mock.seen().len(), requests);
+
+        let addresses = HashSet::from([address()]);
+        assert_eq!(backend.address_balance(addresses.clone()).await.unwrap(), amount(5).unwrap());
+        assert_eq!(last_params(&mock), json!([{"addresses": [ADDRESS]}]));
+        assert_eq!(
+            backend.address_utxos(addresses).await.unwrap(),
+            [AddressUtxo {
+                address: address(),
+                outpoint: transparent::OutPoint { hash: txid, index: 2 },
+                output: transparent::Output {
+                    value: amount(9).unwrap(),
+                    lock_script: transparent::Script::new(&[0x51]),
+                },
+                height: block::Height(1),
+            }]
+        );
+        assert_eq!(last_params(&mock), json!([{"addresses": [ADDRESS], "chainInfo": false}]));
+    }
+
+    #[tokio::test]
+    async fn mempool_skips_transactions_that_left() {
+        let coinbase = block_1().transactions[0].clone();
+        let (id, gone) = (coinbase.hash(), transaction::Hash([1; 32]));
+        let mock = mainnet(1, move |method, params| match method {
+            "getrawmempool" => Reply::Result(json!([id.to_string(), gone.to_string()])),
+            _ if params[0] == json!(id.to_string()) => {
+                Reply::Result(json!(hex::encode(coinbase.zcash_serialize_to_vec().unwrap())))
+            }
+            _ => Reply::Error { code: RpcCode::INVALID_ADDRESS_OR_KEY, message: "not found" },
+        })
+        .await;
+        let mempool = backend(&mock).await.mempool_transactions().await.unwrap();
+        assert_eq!(mempool.iter().map(|tx| tx.id().mined_id()).collect::<Vec<_>>(), [id]);
+    }
+
+    #[tokio::test]
+    async fn submit_maps_a_node_error_to_rejected() {
+        let coinbase = block_1().transactions[0].clone();
+        let id = coinbase.hash();
+        let mock = mainnet(1, move |_, _| Reply::Result(json!(id.to_string()))).await;
+        let accepting = backend(&mock).await;
+        assert_eq!(accepting.submit_transaction((*coinbase).clone()).await.unwrap(), id);
+        assert_eq!(
+            last_params(&mock),
+            json!([hex::encode(coinbase.zcash_serialize_to_vec().unwrap())])
+        );
+
+        let mock =
+            mainnet(1, |_, _| Reply::Error { code: RpcCode(-26), message: "bad-txns" }).await;
+        let error = backend(&mock).await.submit_transaction((*coinbase).clone()).await.unwrap_err();
+        assert!(matches!(&error, BackendError::Rejected(message) if message.contains("bad-txns")));
+    }
+
+    #[tokio::test]
+    async fn tip_listener_resolves_when_the_best_hash_changes() {
+        let moved = Arc::new(AtomicBool::new(false));
+        let tip = moved.clone();
+        let mock = mainnet(1, move |_, _| {
+            let hash = block::Hash([u8::from(tip.load(Ordering::SeqCst)); 32]);
+            Reply::Result(json!(hash.to_string()))
+        })
+        .await;
+        let mut listener = backend(&mock).await.tip_listener().unwrap();
+        // The first poll gives the start hash, and the second poll gives the same hash.
+        let wait = TIP_POLL_INTERVAL + Duration::from_millis(500);
+        assert!(tokio::time::timeout(wait, listener.tip_changed()).await.is_err());
+        moved.store(true, Ordering::SeqCst);
+        tokio::time::timeout(2 * wait, listener.tip_changed()).await.unwrap().unwrap();
     }
 }

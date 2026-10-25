@@ -8041,6 +8041,7 @@ dependencies = [
  "blake3",
  "clap",
  "criterion",
+ "futures-util",
  "hdrhistogram",
  "hex",
  "lru",
