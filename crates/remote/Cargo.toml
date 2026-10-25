@@ -8,6 +8,10 @@ description = "JSON-RPC client for a remote zakura node"
 [lints]
 workspace = true
 
+[features]
+# A mock zakura node for tests, in `ztreamer_remote::test_utils`.
+test-utils = ["hyper/server", "tokio/macros", "tokio/net", "tokio/rt", "tokio/sync"]
+
 [dependencies]
 base64 = "0.22"
 bytes = "1"
@@ -25,6 +29,6 @@ tracing = "0.1"
 webpki-roots = "1"
 
 [dev-dependencies]
-hyper = { version = "1", features = ["server"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+ztreamer-remote = { path = ".", features = ["test-utils"] }

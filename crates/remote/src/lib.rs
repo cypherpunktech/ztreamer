@@ -33,6 +33,8 @@ mod auth;
 mod client;
 mod envelope;
 mod error;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 pub use auth::{Auth, Secret, read_cookie};
 pub use client::{CallOptions, RetryPolicy, RpcClient, RpcConfig};
