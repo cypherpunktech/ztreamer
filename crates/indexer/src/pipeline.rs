@@ -12,14 +12,17 @@ use std::{
 use tracing::info;
 
 mod flow_control;
+mod remote;
 mod telemetry;
 mod zakura;
 pub use flow_control::SegmentSender;
 use flow_control::{ReadAheadReceiver, ReadAheadSender};
+pub use remote::{DEFAULT_REQUESTS_IN_FLIGHT, RemoteTailSource};
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
 use zakura_state::ZakuraDb;
+use ztreamer_remote::RpcError;
 
 use crate::{
     index::{Index, IndexError, IndexState},
@@ -27,6 +30,7 @@ use crate::{
         EncodedBatch, IngestError, OrderedBuilder, WriteBatch, partial_range_flush_threshold,
     },
     parser::CompactParseError,
+    types::RawBlockError,
 };
 
 const MIB: usize = 1024 * 1024;
@@ -122,6 +126,10 @@ pub enum PipelineError {
     MissingBody { height: u32 },
     #[error("Zakura block at height {height} needs {required} source bytes, limit is {limit}")]
     BlockExceedsByteLimit { height: u32, required: usize, limit: usize },
+    #[error("Zakura block at height {height} could not be decoded: {source}")]
+    BlockDecode { height: u32, source: RawBlockError },
+    #[error("remote Zakura request failed: {0}")]
+    Remote(#[from] RpcError),
     #[error("Zakura source size overflowed at height {height}")]
     SourceSize { height: u32 },
     #[error("Zakura source changed during historical ingestion")]
@@ -141,8 +149,8 @@ pub enum PipelineError {
 /// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
 /// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
 /// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
-/// read in-process with its native range iterators. A source over a remote node implements the
-/// same four methods.
+/// read in-process with its native range iterators. [`RemoteTailSource`] reads a remote node
+/// over JSON-RPC.
 ///
 /// The methods are called from blocking worker threads, never from an async context. A source
 /// that talks to the network blocks on its own runtime handle.

@@ -19,6 +19,7 @@ metrics = "0.24"
 prost = "0.14.4"
 sapling-crypto.workspace = true
 thiserror = "2"
+tokio = { version = "1", features = ["rt"] }
 tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
@@ -30,13 +31,14 @@ ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 criterion = "0.8"
 metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 tempfile = "3"
 zakura-test.workspace = true
 # Enables `test_utils` for this crate's benches.
 ztreamer-indexer = { path = ".", features = ["test-utils"] }
+ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 
 [[bench]]
 name = "parser"
