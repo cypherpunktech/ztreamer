@@ -23,6 +23,7 @@ all = { level = "warn", priority = -1 }
 [workspace.dependencies]
 zakura-chain = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakura-network = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
+zakura-rpc = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1", default-features = false }

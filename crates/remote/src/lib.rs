@@ -2,8 +2,9 @@
 //!
 //! `ztreamerd` can run without an embedded node. Everything it then needs from the chain comes
 //! over zakura's JSON-RPC listener: chain tip, raw blocks, tree state, mempool, transaction
-//! broadcast. This crate is the transport for those calls. It knows nothing about the methods
-//! themselves; typed wrappers live one layer up.
+//! broadcast. This crate is the transport for those calls. [`RpcClient`] knows nothing about the
+//! methods. [`ZakuraClient`] adds typed calls for the methods that `ztreamerd` uses, with the
+//! request and response types of `zakura_rpc`.
 //!
 //! What it handles:
 //!
@@ -33,9 +34,11 @@ mod auth;
 mod client;
 mod envelope;
 mod error;
+mod methods;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use auth::{Auth, Secret, read_cookie};
 pub use client::{CallOptions, RetryPolicy, RpcClient, RpcConfig};
 pub use error::{RpcCode, RpcError, RpcErrorObject};
+pub use methods::{DEFAULT_METHOD_TIMEOUTS, ZakuraClient};

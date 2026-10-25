@@ -27,8 +27,11 @@ thiserror = "2"
 tokio = { version = "1", features = ["time"] }
 tracing = "0.1"
 webpki-roots = "1"
+zakura-rpc.workspace = true
+zakura-state.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+zakura-test.workspace = true
 ztreamer-remote = { path = ".", features = ["test-utils"] }

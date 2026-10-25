@@ -8023,6 +8023,9 @@ dependencies = [
  "tokio",
  "tracing",
  "webpki-roots",
+ "zakura-rpc",
+ "zakura-state",
+ "zakura-test",
  "ztreamer-remote",
 ]
 
