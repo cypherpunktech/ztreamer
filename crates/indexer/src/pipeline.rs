@@ -126,8 +126,15 @@ pub enum PipelineError {
     MissingBody { height: u32 },
     #[error("Zakura block at height {height} needs {required} source bytes, limit is {limit}")]
     BlockExceedsByteLimit { height: u32, required: usize, limit: usize },
+    /// The source could not decode the serialized block at `height`.
     #[error("Zakura block at height {height} could not be decoded: {source}")]
-    BlockDecode { height: u32, source: RawBlockError },
+    BlockDecode {
+        /// The height of the block.
+        height: u32,
+        /// Why the block was refused.
+        source: RawBlockError,
+    },
+    /// A request to a remote zakura node failed.
     #[error("remote Zakura request failed: {0}")]
     Remote(#[from] RpcError),
     #[error("Zakura source size overflowed at height {height}")]
@@ -160,6 +167,9 @@ pub enum PipelineError {
 /// - [`Self::tip`], [`Self::block_hash`] and [`Self::prune_height`] describe the finalized chain
 ///   as the source sees it when called. The pass is planned from one `tip` call and ends with an
 ///   error if the source changes under it.
+/// - These three methods return an error when the source cannot read the chain, for example
+///   when a request to a remote node fails. `None` means only that the source has no such
+///   block. Thus the pipeline does not report a read failure as a mismatch.
 /// - [`Self::process_segment`] must send every height from `start` to `end` inclusive, in
 ///   ascending order, through `parsed_tx`, or return an error. A missing height or a height out
 ///   of order ends the pass; the sender refuses it with [`PipelineError::SourceGap`].
@@ -170,11 +180,11 @@ pub enum PipelineError {
 /// - A block body the source no longer has is [`PipelineError::MissingBody`].
 pub trait HistoricalSource: Sync {
     /// The highest finalized block, or `None` when the source has no blocks yet.
-    fn tip(&self) -> Option<(Height, block::Hash)>;
+    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError>;
     /// The hash of the finalized block at `height`, or `None` when the source has no such block.
-    fn block_hash(&self, height: u32) -> Option<block::Hash>;
+    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError>;
     /// The lowest height whose body the source still has. Zero when nothing is pruned.
-    fn prune_height(&self) -> u32;
+    fn prune_height(&self) -> Result<u32, PipelineError>;
     /// Reads and parses the blocks from `start` to `end` inclusive and sends each one through
     /// `parsed_tx` in ascending order. See the trait documentation for the contract.
     fn process_segment(
@@ -272,17 +282,17 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         let start = durable_tip
             .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
 
-        let (tip_height, tip_hash) = self.db.tip().ok_or(PipelineError::NoSourceTip)?;
+        let (tip_height, tip_hash) = self.db.tip()?.ok_or(PipelineError::NoSourceTip)?;
         // The live-head reconciler validates durable records newer than Zakura's finalized tip.
         if durable_tip.is_some_and(|tip| tip.height > tip_height.0) {
             return Ok(initial_state);
         }
         if let Some(durable_tip) = durable_tip
-            && self.db.block_hash(durable_tip.height).is_none_or(|hash| hash != durable_tip.hash)
+            && self.db.block_hash(durable_tip.height)?.is_none_or(|hash| hash != durable_tip.hash)
         {
             return Err(PipelineError::DurableTipMismatch { height: durable_tip.height });
         }
-        if start < self.db.prune_height() {
+        if start < self.db.prune_height()? {
             return Err(PipelineError::MissingBody { height: start });
         }
         let target = tip_height.0;

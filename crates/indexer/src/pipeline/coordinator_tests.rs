@@ -45,16 +45,16 @@ impl Fixture {
 }
 
 impl HistoricalSource for Fixture {
-    fn tip(&self) -> Option<(Height, block::Hash)> {
-        self.count.checked_sub(1).map(|height| (Height(height), hash(height)))
+    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
+        Ok(self.count.checked_sub(1).map(|height| (Height(height), hash(height))))
     }
 
-    fn block_hash(&self, height: u32) -> Option<block::Hash> {
-        (height < self.count).then(|| hash(height))
+    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError> {
+        Ok((height < self.count).then(|| hash(height)))
     }
 
-    fn prune_height(&self) -> u32 {
-        0
+    fn prune_height(&self) -> Result<u32, PipelineError> {
+        Ok(0)
     }
 
     fn process_segment(

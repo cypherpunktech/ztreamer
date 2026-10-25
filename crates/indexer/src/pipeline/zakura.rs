@@ -13,16 +13,16 @@ use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentS
 use crate::parser::parse_stored_block;
 
 impl HistoricalSource for ZakuraDb {
-    fn tip(&self) -> Option<(Height, block::Hash)> {
-        ZakuraDb::tip(self)
+    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
+        Ok(ZakuraDb::tip(self))
     }
 
-    fn block_hash(&self, height: u32) -> Option<block::Hash> {
-        self.block_header(Height(height).into()).map(|header| header.hash())
+    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError> {
+        Ok(self.block_header(Height(height).into()).map(|header| header.hash()))
     }
 
-    fn prune_height(&self) -> u32 {
-        ZakuraDb::prune_height(self).unwrap_or(Height::MIN).0
+    fn prune_height(&self) -> Result<u32, PipelineError> {
+        Ok(ZakuraDb::prune_height(self).unwrap_or(Height::MIN).0)
     }
 
     fn process_segment(

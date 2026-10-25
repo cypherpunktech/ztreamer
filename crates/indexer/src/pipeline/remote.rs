@@ -1,23 +1,26 @@
 //! A [`HistoricalSource`] over the JSON-RPC interface of a remote zakura node.
 
-use std::{collections::VecDeque, num::NonZeroUsize, panic, time::Instant};
+use std::{collections::VecDeque, num::NonZeroUsize, ops::RangeInclusive, panic, time::Instant};
 
 use tokio::{runtime::Handle, task::JoinHandle};
-use tracing::warn;
 use zakura_chain::block::{self, Height};
-use zakura_state::{HashOrHeight, MAX_BLOCK_REORG_HEIGHT};
+use zakura_state::HashOrHeight;
 use ztreamer_remote::{RpcError, ZakuraClient};
 
 use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentSender};
-use crate::{parser::parse_block, types::RawIndexBlock};
+use crate::{index::SEAL_DEPTH, parser::parse_block, types::RawIndexBlock};
 
 /// The `getblock` requests that one worker keeps in flight when it does not set another value.
 pub const DEFAULT_REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
-/// The finalized chain of a remote zakura node, read over JSON-RPC.
+/// The chain of a remote zakura node below the head, read over JSON-RPC.
 ///
-/// zakura finalizes a block when it is [`MAX_BLOCK_REORG_HEIGHT`] blocks below the best tip. This
-/// source reports that height as its tip. The head follower reads the blocks above it.
+/// This source reports the block [`SEAL_DEPTH`] below the best tip as its tip. The index seals
+/// blocks at that depth, and a reorg below it is a deep reorg for the index with any source.
+/// The head follower reads the blocks above, and it can read at most
+/// [`MAX_BLOCK_REORG_HEIGHT`](zakura_state::MAX_BLOCK_REORG_HEIGHT) of them. Thus the head has
+/// space for the blocks that arrive after the tail pass. A tip at zakura's finalized height,
+/// which is that maximum below the best tip, would leave no space.
 ///
 /// # Runtime
 ///
@@ -72,50 +75,46 @@ impl RemoteTailSource {
         self
     }
 
-    async fn finalized_tip(&self) -> Result<(Height, block::Hash), RpcError> {
+    async fn tail_tip(&self) -> Result<(Height, block::Hash), RpcError> {
         let info = self.node.get_blockchain_info().await?;
         let best = info.blocks();
-        let finalized = Height(best.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT));
-        if finalized == best {
+        let tail = Height(best.0.saturating_sub(SEAL_DEPTH));
+        if tail == best {
             return Ok((best, info.best_block_hash()));
         }
-        Ok((finalized, self.node.get_block_hash(finalized).await?.hash()))
+        Ok((tail, self.node.get_block_hash(tail).await?.hash()))
+    }
+
+    /// The error for a block at `height` that the node did not find: [`PipelineError::MissingBody`]
+    /// when the node pruned it, else [`PipelineError::SourceGap`].
+    fn missing_block(&self, height: u32) -> PipelineError {
+        match self.prune_height() {
+            Ok(prune_height) if height < prune_height => PipelineError::MissingBody { height },
+            Ok(_) => PipelineError::SourceGap { expected: height, actual: None },
+            Err(error) => error,
+        }
     }
 }
 
 impl HistoricalSource for RemoteTailSource {
-    /// The best height minus [`MAX_BLOCK_REORG_HEIGHT`], or genesis on a shorter chain. `None`
-    /// when a request fails.
-    fn tip(&self) -> Option<(Height, block::Hash)> {
-        self.runtime
-            .block_on(self.finalized_tip())
-            .inspect_err(|error| warn!(%error, "remote tip request failed"))
-            .ok()
+    /// The best height minus [`SEAL_DEPTH`], or genesis on a shorter chain.
+    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
+        Ok(Some(self.runtime.block_on(self.tail_tip())?))
     }
 
-    /// The hash from `getblockhash`. `None` when the node has no block at `height` or the
-    /// request fails.
-    fn block_hash(&self, height: u32) -> Option<block::Hash> {
-        self.runtime
-            .block_on(self.node.get_block_hash(Height(height)))
-            .inspect_err(|error| {
-                if !error.is_block_not_found() {
-                    warn!(%error, height, "remote block hash request failed");
-                }
-            })
-            .ok()
-            .map(|hash| hash.hash())
+    /// The hash from `getblockhash`. `None` when the node has no block at `height`.
+    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError> {
+        match self.runtime.block_on(self.node.get_block_hash(Height(height))) {
+            Ok(hash) => Ok(Some(hash.hash())),
+            Err(error) if error.is_block_not_found() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
-    /// The `pruneheight` field of `getblockchaininfo`. Zero when the node does not prune or the
-    /// request fails.
-    fn prune_height(&self) -> u32 {
-        self.runtime
-            .block_on(self.node.get_blockchain_info())
-            .inspect_err(|error| warn!(%error, "remote prune height request failed"))
-            .ok()
-            .and_then(|info| info.prune_height())
-            .map_or(0, |height| height.0)
+    /// The `pruneheight` field of `getblockchaininfo`. Zero when the node does not prune.
+    fn prune_height(&self) -> Result<u32, PipelineError> {
+        let info = self.runtime.block_on(self.node.get_blockchain_info())?;
+        Ok(info.prune_height().map_or(0, |height| height.0))
     }
 
     fn process_segment(
@@ -185,44 +184,45 @@ impl HistoricalSource for RemoteTailSource {
     }
 }
 
-/// The `getblock` requests of one segment, in height order. Up to the source's
-/// `requests_in_flight` run on the runtime ahead of the block that the worker waits for. When
-/// this value is dropped, it aborts the requests that are left, for example after an error.
+/// The `getblock` requests of one segment, in height order. At most the source's
+/// `requests_in_flight` run on the runtime at the same time, the request that the worker waits
+/// for included. When this value is dropped, it aborts the requests that are left, for example
+/// after an error.
 struct BlockRequests<'a> {
     source: &'a RemoteTailSource,
-    next: u32,
-    end: u32,
+    /// The heights that have no request yet.
+    heights: RangeInclusive<u32>,
     pending: VecDeque<JoinHandle<Result<Vec<u8>, RpcError>>>,
 }
 
 impl<'a> BlockRequests<'a> {
     fn new(source: &'a RemoteTailSource, start: u32, end: u32) -> Self {
-        let mut requests = Self { source, next: start, end, pending: VecDeque::new() };
+        let mut requests = Self { source, heights: start..=end, pending: VecDeque::new() };
         requests.fill();
         requests
     }
 
     fn fill(&mut self) {
-        while self.pending.len() < self.source.requests_in_flight.get() && self.next <= self.end {
+        while self.pending.len() < self.source.requests_in_flight.get()
+            && let Some(height) = self.heights.next()
+        {
             let node = self.source.node.clone();
-            let height = Height(self.next);
             self.pending.push_back(self.source.runtime.spawn(async move {
-                node.get_block_raw(HashOrHeight::Height(height)).await.map(|bytes| bytes.0)
+                node.get_block_raw(HashOrHeight::Height(Height(height))).await.map(|bytes| bytes.0)
             }));
-            self.next += 1;
         }
     }
 
     /// Waits for the serialized block at `height`, the next height of the segment. A block that
-    /// the node does not have is [`PipelineError::SourceGap`].
+    /// the node does not have is [`PipelineError::MissingBody`] when the node pruned it, else
+    /// [`PipelineError::SourceGap`].
     fn next(&mut self, height: u32) -> Result<Vec<u8>, PipelineError> {
         let request = self.pending.pop_front().expect("the segment has a request for each height");
+        let result = self.source.runtime.block_on(request);
         self.fill();
-        match self.source.runtime.block_on(request) {
+        match result {
             Ok(Ok(bytes)) => Ok(bytes),
-            Ok(Err(error)) if error.is_block_not_found() => {
-                Err(PipelineError::SourceGap { expected: height, actual: None })
-            }
+            Ok(Err(error)) if error.is_block_not_found() => Err(self.source.missing_block(height)),
             Ok(Err(error)) => Err(error.into()),
             Err(error) if error.is_panic() => panic::resume_unwind(error.into_panic()),
             // The runtime shut down and dropped the request.
@@ -260,10 +260,10 @@ mod tests {
         Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
     }
 
-    /// A best chain whose finalized tip is at height `finalized`.
-    fn chain(finalized: u32) -> Vec<Block> {
+    /// A best chain whose tail tip is at height `tail`.
+    fn chain(tail: u32) -> Vec<Block> {
         let mut chain = Vec::new();
-        grow_chain(&mut chain, finalized + MAX_BLOCK_REORG_HEIGHT, 0);
+        grow_chain(&mut chain, tail + SEAL_DEPTH, 0);
         chain
     }
 
@@ -295,22 +295,33 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_finalized_tip_and_the_prune_height() {
+    fn reads_the_tail_tip_and_the_prune_height() {
         let runtime = runtime();
         let blocks = chain(100);
         let chain = MockChain::new(&blocks);
         let (_mock, source) = node(&runtime, serve(&chain));
 
-        assert_eq!(source.tip(), Some((Height(100), blocks[100].hash())));
-        assert_eq!(source.block_hash(7), Some(blocks[7].hash()));
-        assert_eq!(source.block_hash(5_000), None);
-        assert_eq!(source.prune_height(), 0);
+        assert_eq!(source.tip().unwrap(), Some((Height(100), blocks[100].hash())));
+        assert_eq!(source.block_hash(7).unwrap(), Some(blocks[7].hash()));
+        assert_eq!(source.block_hash(5_000).unwrap(), None);
+        assert_eq!(source.prune_height().unwrap(), 0);
         chain.set_prune_height(Some(Height(40)));
-        assert_eq!(source.prune_height(), 40);
+        assert_eq!(source.prune_height().unwrap(), 40);
 
-        // A chain shorter than the reorg window has only genesis finalized.
+        // A chain shorter than the seal depth has only genesis in the tail.
         chain.set_blocks(&blocks[..=10]);
-        assert_eq!(source.tip(), Some((Height(0), blocks[0].hash())));
+        assert_eq!(source.tip().unwrap(), Some((Height(0), blocks[0].hash())));
+    }
+
+    #[test]
+    fn a_failed_request_is_an_error_not_a_missing_block() {
+        let runtime = runtime();
+        let (_mock, source) =
+            node(&runtime, |_, _| Reply::Error { code: RpcCode(-20), message: "database error" });
+
+        assert!(matches!(source.tip(), Err(PipelineError::Remote(_))));
+        assert!(matches!(source.block_hash(7), Err(PipelineError::Remote(_))));
+        assert!(matches!(source.prune_height(), Err(PipelineError::Remote(_))));
     }
 
     #[test]
@@ -355,6 +366,29 @@ mod tests {
             matches!(result, Err(PipelineError::SourceGap { expected: 150, actual: None })),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn a_block_pruned_during_the_pass_is_a_missing_body() {
+        let runtime = runtime();
+        let chain = MockChain::new(&chain(300));
+        let serve = serve(&chain);
+        let (_mock, source) = node(&runtime, move |n, request| {
+            if request.body["method"] == "getblock" && request.body["params"][0] == "150" {
+                chain.set_prune_height(Some(Height(200)));
+                return Reply::Error {
+                    code: RpcCode::INVALID_PARAMETER,
+                    message: "Block not found",
+                };
+            }
+            serve(n, request)
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let index = index(&dir);
+
+        let result = HistoricalPipeline::new(&index, &source, config()).unwrap().sync();
+
+        assert!(matches!(result, Err(PipelineError::MissingBody { height: 150 })), "{result:?}");
     }
 
     #[test]
