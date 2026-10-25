@@ -7965,6 +7965,8 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "heed",
+ "hex",
+ "incrementalmerkletree",
  "metrics",
  "metrics-util 0.20.4",
  "prost",
@@ -7974,6 +7976,7 @@ dependencies = [
  "tonic",
  "tracing",
  "zakura-chain",
+ "zakura-primitives",
  "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",

@@ -13,6 +13,8 @@ test-utils = ["dep:zakura-test"]
 
 [dependencies]
 heed = { version = "0.22.1", default-features = false }
+hex = "0.4"
+incrementalmerkletree.workspace = true
 metrics = "0.24"
 prost = "0.14.4"
 sapling-crypto.workspace = true
@@ -22,6 +24,7 @@ tracing = "0.1"
 zakura-chain.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test = { workspace = true, optional = true }
+zcash_primitives.workspace = true
 ztreamer-node = { path = "../node" }
 ztreamer-protocol = { path = "../protocol" }
 

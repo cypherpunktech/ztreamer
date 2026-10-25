@@ -5,6 +5,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod codec;
+pub mod frontier;
 pub mod head;
 pub mod index;
 pub mod ingest;
