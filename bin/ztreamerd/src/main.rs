@@ -23,14 +23,15 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
 use ztreamer_indexer::{
-    head::HeadSyncError,
+    head::{CanonicalBlockSource, HeadSyncError},
     index::{Index, IndexState},
-    pipeline::PipelineConfig,
-    source::ZakuraSource,
+    pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
 use ztreamer_node as node;
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
-use ztreamer_service::{CompactService, HeadFollowerConfig, p2p::P2pCompactService};
+use ztreamer_service::{
+    CompactService, HeadFollowerConfig, InProcessBackend, StateBackend, p2p::P2pCompactService,
+};
 
 mod lifecycle;
 
@@ -161,13 +162,19 @@ async fn main() -> Result<()> {
             _ = shutdown.cancelled() => return Ok(()),
             result = ready_rx => result.wrap_err("Zakura stopped before readiness")?,
         };
+        let client = node::NodeClient::from_services(services);
+        let sources = NodeSources {
+            tail: client.database(),
+            head: client.clone(),
+            backend: InProcessBackend::with_node(client),
+        };
         run_application(
             cli,
             grpc_server,
             index,
             network.bip70_network_name(),
             p2p.clone(),
-            node::NodeClient::from_services(services),
+            sources,
             shutdown.clone(),
         )
         .await
@@ -176,22 +183,69 @@ async fn main() -> Result<()> {
     lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
 }
 
-async fn run_application(
+/// The chain access that one node mode gives the daemon.
+struct NodeSources<T, H, B> {
+    /// Finalized blocks for the historical index pass.
+    tail: T,
+    /// The canonical head, for head reconciliation and the head follower.
+    head: H,
+    /// Chain state and node requests for the gRPC service.
+    backend: B,
+}
+
+/// The wait until a node mode can serve the daemon.
+trait Readiness {
+    /// Waits until the node is ready for the historical index pass. Breaks on shutdown.
+    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>>;
+}
+
+impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
+    /// Waits until Zakura is near the chain tip and has a finalized block. Breaks on shutdown.
+    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>> {
+        let client = &self.head;
+        info!("waiting for Zakura to sync near the chain tip");
+        tokio::select! {
+            result = client.wait_until_close_to_tip() => {
+                result.map_err(|error| eyre!("wait for Zakura sync: {error}"))?;
+            }
+            _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
+        }
+        info!(tip = ?client.tip(), "Zakura is near the chain tip");
+
+        while client.database().tip().is_none() {
+            info!("waiting for Zakura's first finalized block");
+            tokio::select! {
+                _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+            }
+        }
+        Ok(ControlFlow::Continue(()))
+    }
+}
+
+async fn run_application<T, H, B>(
     cli: Cli,
     grpc_server: Server,
     index: Arc<Index>,
     chain_name: String,
     p2p: Arc<P2pCompactService>,
-    client: node::NodeClient,
+    sources: NodeSources<T, H, B>,
     shutdown: CancellationToken,
-) -> Result<()> {
-    if wait_for_node(&client, &shutdown).await?.is_break() {
+) -> Result<()>
+where
+    NodeSources<T, H, B>: Readiness,
+    T: HistoricalSource + Send + 'static,
+    H: CanonicalBlockSource + Clone + 'static,
+    B: StateBackend,
+{
+    if sources.wait_ready(&shutdown).await?.is_break() {
         return Ok(());
     }
+    let NodeSources { tail, head, backend } = sources;
 
     let pipeline = PipelineConfig::from(&cli);
     let ControlFlow::Continue(state) =
-        sync_historical(&client, &index, pipeline, cli.index_only, &shutdown).await?
+        sync_historical(tail, &index, pipeline, cli.index_only, &shutdown).await?
     else {
         return Ok(());
     };
@@ -199,58 +253,37 @@ async fn run_application(
         return Ok(());
     }
 
-    let compact = CompactService::with_node(index, state, chain_name, client.clone())
+    let compact = CompactService::with_backend(index, state, chain_name, backend)
         .with_ping_enabled(cli.ping_very_insecure);
-    if reconcile_head(&compact, client.clone(), pipeline, &shutdown).await?.is_break() {
+    if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
     p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     drop(p2p);
 
-    serve(compact, client, pipeline, grpc_server, &cli, &shutdown).await
-}
-
-/// Waits until Zakura is near the chain tip and has a finalized block. Breaks on shutdown.
-async fn wait_for_node(
-    client: &node::NodeClient,
-    shutdown: &CancellationToken,
-) -> Result<ControlFlow<()>> {
-    info!("waiting for Zakura to sync near the chain tip");
-    tokio::select! {
-        result = client.wait_until_close_to_tip() => {
-            result.map_err(|error| eyre!("wait for Zakura sync: {error}"))?;
-        }
-        _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
-    }
-    info!(tip = ?client.tip(), "Zakura is near the chain tip");
-
-    while client.database().tip().is_none() {
-        info!("waiting for Zakura's first finalized block");
-        tokio::select! {
-            _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
-            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
-        }
-    }
-    Ok(ControlFlow::Continue(()))
+    serve(compact, head, pipeline, grpc_server, &cli, &shutdown).await
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
 /// with `index_only` because the index was the whole job.
 async fn sync_historical(
-    client: &node::NodeClient,
+    source: impl HistoricalSource + Send + 'static,
     index: &Arc<Index>,
     pipeline: PipelineConfig,
     index_only: bool,
     shutdown: &CancellationToken,
 ) -> Result<ControlFlow<(), IndexState>> {
-    let source = ZakuraSource::new(client.database());
     let sync_index = Arc::clone(index);
     info!("syncing historical compact index");
     let historical_started = Instant::now();
     let stop = Arc::new(AtomicBool::new(false));
     let mut historical = tokio::task::spawn_blocking({
         let stop = Arc::clone(&stop);
-        move || source.sync(&sync_index, pipeline, &stop)
+        move || {
+            HistoricalPipeline::new(&sync_index, &source, pipeline)?
+                .with_stop(&stop)
+                .sync_until_stable()
+        }
     });
     let state = tokio::select! {
         result = &mut historical => result.wrap_err("historical index task panicked")??,
@@ -283,14 +316,14 @@ async fn sync_historical(
 /// Breaks on shutdown.
 async fn reconcile_head(
     compact: &CompactService,
-    mut client: node::NodeClient,
+    mut source: impl CanonicalBlockSource,
     pipeline: PipelineConfig,
     shutdown: &CancellationToken,
 ) -> Result<ControlFlow<()>> {
     let reconcile = async {
-        match compact.sync_head(&mut client, pipeline).await {
+        match compact.sync_head(&mut source, pipeline).await {
             Err(HeadSyncError::DeepReorg { .. }) => {
-                compact.recover_deep_reorg(&mut client, pipeline).await
+                compact.recover_deep_reorg(&mut source, pipeline).await
             }
             result => result,
         }
@@ -305,7 +338,7 @@ async fn reconcile_head(
 /// Runs the head follower and gRPC server until shutdown or until either task stops.
 async fn serve(
     compact: CompactService,
-    client: node::NodeClient,
+    source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     mut grpc_server: Server,
     cli: &Cli,
@@ -317,7 +350,7 @@ async fn serve(
         let receiver = server_shutdown.subscribe();
         async move {
             compact
-                .follow_head(client, pipeline, HeadFollowerConfig::default(), receiver)
+                .follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
                 .await
                 .wrap_err("head follower failed")
         }
