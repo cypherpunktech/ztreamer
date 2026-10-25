@@ -192,6 +192,7 @@ pub async fn sync_head_once(
     let base_state = anchor_record.as_ref().map_or_else(IndexState::default, |anchor| IndexState {
         durable_tip: Some(BlockId::new(anchor.height, anchor.hash)),
         sealed_through: state.sealed_through(),
+        verified_through: state.verified_through(),
         generation: state.generation(),
         tree_sizes: anchor.end_tree_sizes,
     });
@@ -267,6 +268,7 @@ pub async fn recover_deep_reorg(
     let base_state = IndexState {
         durable_tip: Some(BlockId::new(common.height, common.hash)),
         sealed_through: state.sealed_through(),
+        verified_through: state.verified_through(),
         generation: state.generation(),
         tree_sizes: common.end_tree_sizes,
     };

@@ -7974,6 +7974,7 @@ dependencies = [
  "tonic",
  "tracing",
  "zakura-chain",
+ "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
  "ztreamer-indexer",

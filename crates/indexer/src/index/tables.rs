@@ -1,4 +1,4 @@
-//! The index's four LMDB tables, and the block lookup that spans them.
+//! The index's five LMDB tables, and the block lookup that spans them.
 //!
 //! Each table has a newtype that knows its key and value types. The newtypes do not enforce the
 //! rules between the tables. [`IndexWriter`](super::writer::IndexWriter) does that. The docs of
@@ -11,7 +11,7 @@ use heed::{
 };
 use zakura_chain::block;
 
-use super::{IndexError, IndexState, RANGE_SIZE, metadata::Metadata};
+use super::{IndexError, IndexState, RANGE_SIZE, metadata::Metadata, range_meta::RangeMetaTable};
 use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock};
 
 type HeightDb = Database<U32<BigEndian>, Bytes>;
@@ -22,23 +22,25 @@ pub(crate) const fn range_start(height: u32) -> u32 {
     height - height % RANGE_SIZE
 }
 
-/// Handles to the four databases of one LMDB environment.
+/// Handles to the five databases of one LMDB environment.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Tables {
     pub(crate) metadata: Metadata,
     pub(crate) sealed_ranges: SealedRanges,
     pub(crate) mutable_blocks: MutableBlocks,
     pub(crate) hash_to_height: HashIndex,
+    pub(crate) range_meta: RangeMetaTable,
 }
 
 impl Tables {
-    /// Opens the four named databases, and creates the ones that do not exist.
+    /// Opens the five named databases, and creates the ones that do not exist.
     pub(crate) fn open(env: &Env, txn: &mut RwTxn<'_>) -> Result<Self, IndexError> {
         Ok(Self {
             metadata: Metadata::new(env.create_database(txn, Some("metadata"))?),
             sealed_ranges: SealedRanges(env.create_database(txn, Some("sealed_ranges"))?),
             mutable_blocks: MutableBlocks(env.create_database(txn, Some("mutable_blocks"))?),
             hash_to_height: HashIndex(env.create_database(txn, Some("hash_to_height"))?),
+            range_meta: RangeMetaTable::new(env.create_database(txn, Some("range_meta"))?),
         })
     }
 

@@ -121,8 +121,8 @@ impl<'env> IndexWriter<'env> {
         self.state.tree_sizes = tree_sizes;
     }
 
-    /// Deletes every sealed range from `start` on, so that its blocks can be written again as
-    /// mutable rows.
+    /// Deletes every sealed range from `start` on, with its metadata, so that its blocks can be
+    /// written again as mutable rows. A verified prefix that reached `start` ends below it.
     pub(crate) fn delete_ranges_from(&mut self, start: u32) -> Result<(), IndexError> {
         let Some(old_sealed) = self.state.sealed_through.filter(|sealed| start <= *sealed) else {
             return Ok(());
@@ -130,7 +130,9 @@ impl<'env> IndexWriter<'env> {
         (start..=old_sealed).step_by(RANGE_SIZE as usize).try_for_each(|range| {
             self.tables.sealed_ranges.delete(&mut self.txn, range).map(drop)
         })?;
+        self.tables.range_meta.delete_from(&mut self.txn, start)?;
         self.state.sealed_through = start.checked_sub(1);
+        self.state.verified_through = self.state.verified_through.min(self.state.sealed_through);
         Ok(())
     }
 

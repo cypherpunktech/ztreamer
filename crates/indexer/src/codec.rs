@@ -467,13 +467,15 @@ fn set_u32(bytes: &mut [u8], offset: usize, value: usize) -> Result<(), CodecErr
     Ok(())
 }
 
-struct Reader<'a> {
+/// A cursor over an encoded value. Every read is bounds-checked; a short value is
+/// [`CodecError::Truncated`].
+pub(crate) struct Reader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
 impl<'a> Reader<'a> {
-    const fn new(bytes: &'a [u8]) -> Self {
+    pub(crate) const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
@@ -481,30 +483,44 @@ impl<'a> Reader<'a> {
         self.bytes.len() - self.offset
     }
 
-    fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
+    pub(crate) fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
         let end = self.offset.checked_add(len).ok_or(CodecError::Length)?;
         let value = self.bytes.get(self.offset..end).ok_or(CodecError::Truncated)?;
         self.offset = end;
         Ok(value)
     }
 
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
         Ok(self.take(N)?.try_into().expect("length was checked"))
     }
 
-    fn u8(&mut self) -> Result<u8, CodecError> {
+    pub(crate) fn u8(&mut self) -> Result<u8, CodecError> {
         Ok(self.array::<1>()?[0])
     }
 
-    fn u32(&mut self) -> Result<u32, CodecError> {
+    pub(crate) fn u16(&mut self) -> Result<u16, CodecError> {
+        Ok(u16::from_be_bytes(self.array()?))
+    }
+
+    pub(crate) fn u32(&mut self) -> Result<u32, CodecError> {
         Ok(u32::from_be_bytes(self.array()?))
     }
 
-    fn len(&mut self) -> Result<usize, CodecError> {
+    pub(crate) fn u64(&mut self) -> Result<u64, CodecError> {
+        Ok(u64::from_be_bytes(self.array()?))
+    }
+
+    pub(crate) fn len(&mut self) -> Result<usize, CodecError> {
         Ok(self.u32()? as usize)
     }
 
-    const fn finish(self) -> Result<(), CodecError> {
+    /// Reads a `u32` length and that many bytes.
+    pub(crate) fn bytes(&mut self) -> Result<&'a [u8], CodecError> {
+        let len = self.len()?;
+        self.take(len)
+    }
+
+    pub(crate) const fn finish(self) -> Result<(), CodecError> {
         if self.remaining() == 0 { Ok(()) } else { Err(CodecError::TrailingBytes) }
     }
 }

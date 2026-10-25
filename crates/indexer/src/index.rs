@@ -2,16 +2,17 @@
 //!
 //! # Tables
 //!
-//! The [`Index`] keeps the chain in four LMDB databases in one environment. All integers are
+//! The [`Index`] keeps the chain in five LMDB databases in one environment. All integers are
 //! big-endian, so LMDB keeps the height keys in height order.
 //!
 //! ```text
 //! table           key                    value
-//! metadata        "state"                IndexState, 62 bytes
+//! metadata        "state"                IndexState, 62 or 67 bytes
 //!                 "identity"             chain identity and fixed policy
 //! sealed_ranges   first height, u32      one packed range of RANGE_SIZE records
 //! mutable_blocks  height, u32            one encoded CompactBlockRecord
 //! hash_to_height  block hash, 32 bytes   height, u32
+//! range_meta      first height, u32      one RangeMeta record for a sealed range
 //! ```
 //!
 //! # Coverage
@@ -50,12 +51,18 @@
 //!   entries.
 //! - The previous hash of each block is the hash of the block below it.
 //! - The state holds the hash and the tree sizes of the durable tip.
-//! - An empty index has no state row, and its three block tables are empty.
+//! - `verified_through` is not set, or it is the last height of a range at or below
+//!   `sealed_through`.
+//! - Every `range_meta` key is the first height of a sealed range. A sealed range may have no
+//!   `range_meta` row.
+//! - An empty index has no state row, and its block tables and `range_meta` are empty.
 //!
 //! # Writes and generations
 //!
 //! Each write is one LMDB write transaction. It changes the tables, then it commits. If a write
-//! fails, LMDB discards all of its changes. Each commit increases the generation by 1.
+//! fails, LMDB discards all of its changes. Each commit increases the generation by 1, except
+//! [`Index::put_range_meta`]: range metadata is not part of what a reader sees at a generation,
+//! so writing it does not invalidate the readers of the current generation.
 //!
 //! An LMDB read transaction sees one committed state. The `read_*` methods take a generation, and
 //! they return [`IndexError::Generation`] if the index has a different generation. Thus a reader
@@ -72,7 +79,8 @@
 //! - that the height keys of `sealed_ranges` and `mutable_blocks` start at 0 and have no gaps,
 //! - the links between ranges, and the hash chain of the mutable rows,
 //! - the hash entry of each mutable row, and of the first and the last block of each range,
-//! - the tip hash and the tree sizes in the state.
+//! - the tip hash and the tree sizes in the state,
+//! - that each `range_meta` key is the start of a sealed range.
 //!
 //! It does not decode the blocks inside a range. Thus it does not examine their chain links or
 //! their hash entries. The range encoder checks the chain links when it writes the range.
@@ -85,7 +93,8 @@
 //! - A sealed range holds [`RANGE_SIZE`] records in the same encoding, and an offset table. A
 //!   reader can decode one record and not the others. [`encode_range`](crate::codec::encode_range)
 //!   writes a range. The `write_range` function in `codec.rs` gives its byte layout.
-//! - `index/metadata.rs` gives the byte layout of the state and of the identity.
+//! - `index/metadata.rs` gives the byte layout of the state and of the identity, and
+//!   `index/range_meta.rs` the layout of a range metadata record.
 
 use std::{fs, io, path::Path, time::Instant};
 
@@ -96,9 +105,11 @@ use crate::codec::{CodecError, CompactBlockRecord, StoredBlock, TreeSizes, decod
 use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod metadata;
+pub mod range_meta;
 mod tables;
 mod telemetry;
 mod writer;
+use range_meta::RangeMeta;
 use tables::{Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
@@ -130,6 +141,10 @@ pub struct IndexState {
     ///
     /// Blocks above this height live in the `mutable_blocks` database.
     pub(crate) sealed_through: Option<u32>,
+    /// The highest height through which every sealed range is verified against a node.
+    ///
+    /// Embedded mode never sets it. It is at most `sealed_through`.
+    pub(crate) verified_through: Option<u32>,
     /// LMDB's monotonically increasing revision number.
     /// Incremented on each successful atomic index mutation.
     pub(crate) generation: u64,
@@ -149,6 +164,12 @@ impl IndexState {
     /// Blocks above this height live in the `mutable_blocks` database.
     pub const fn sealed_through(&self) -> Option<u32> {
         self.sealed_through
+    }
+
+    /// Returns the highest height through which every sealed range is verified against a node,
+    /// or `None` when no range is.
+    pub const fn verified_through(&self) -> Option<u32> {
+        self.verified_through
     }
 
     /// Identifies the exact committed revision of the durable index that an
@@ -193,9 +214,11 @@ pub enum IndexError {
     Sealed { height: u32 },
     #[error("replacement suffix does not connect at height {height}")]
     Replacement { height: u32 },
+    #[error("range metadata at {start} does not describe a sealed range that starts there")]
+    RangeMeta { start: u32 },
 }
 
-/// Ztreamer's four-database LMDB index.
+/// Ztreamer's five-database LMDB index.
 pub struct Index {
     env: Env,
     tables: Tables,
@@ -218,7 +241,7 @@ impl Index {
         fs::create_dir_all(path.as_ref())?;
         // SAFETY: callers must not open this path with incompatible LMDB options in this process.
         let env =
-            unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(4).open(path.as_ref())? };
+            unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(5).open(path.as_ref())? };
         let mut txn = env.write_txn()?;
         let tables = Tables::open(&env, &mut txn)?;
         tables.metadata.put_or_check_identity(&mut txn, network, genesis_hash)?;
@@ -233,6 +256,33 @@ impl Index {
     pub fn state(&self) -> Result<IndexState, IndexError> {
         let txn = self.env.read_txn()?;
         self.tables.metadata.get_state(&txn)
+    }
+
+    /// Reads the metadata of the sealed range that starts at `start`, if any was written.
+    pub fn range_meta(&self, start: u32) -> Result<Option<RangeMeta>, IndexError> {
+        let txn = self.env.read_txn()?;
+        self.tables.range_meta.get(&txn, start)
+    }
+
+    /// Writes the metadata of the sealed range that starts at `start`, replacing any earlier
+    /// row. The range must be sealed, and `meta.entry` must describe exactly that range.
+    ///
+    /// The write does not advance the generation: range metadata is not part of a generation's
+    /// block coverage, so readers of the current generation are not disturbed.
+    pub fn put_range_meta(&self, start: u32, meta: &RangeMeta) -> Result<(), IndexError> {
+        let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;
+        let mut txn = self.env.write_txn()?;
+        let state = self.tables.metadata.get_state(&txn)?;
+        if start != range_start(start)
+            || meta.entry.start_height != start
+            || meta.entry.end_height != end
+            || state.sealed_through.is_none_or(|sealed| end > sealed)
+        {
+            return Err(IndexError::RangeMeta { start });
+        }
+        self.tables.range_meta.put(&mut txn, start, meta)?;
+        txn.commit()?;
+        Ok(())
     }
 
     pub fn read_block(
@@ -373,14 +423,20 @@ impl Index {
     /// Checks sealed-range summaries and every mutable suffix row without rescanning sealed blocks.
     pub fn verify_continuity(&self) -> Result<(), IndexError> {
         let txn = self.env.read_txn()?;
-        let Tables { metadata, sealed_ranges, mutable_blocks, hash_to_height } = self.tables;
+        let Tables { metadata, sealed_ranges, mutable_blocks, hash_to_height, range_meta } =
+            self.tables;
         let state = metadata.get_state(&txn)?;
         let Some(tip) = state.durable_tip else {
-            if self.tables.has_blocks(&txn)? {
+            if self.tables.has_blocks(&txn)? || !range_meta.starts(&txn)?.is_empty() {
                 return Err(IndexError::Metadata);
             }
             return Ok(());
         };
+        for start in range_meta.starts(&txn)? {
+            if start != range_start(start) || sealed_ranges.get(&txn, start)?.is_none() {
+                return Err(IndexError::RangeMeta { start });
+            }
+        }
 
         let sealed_blocks = state.sealed_through.map_or(0, |height| u64::from(height) + 1);
         if sealed_ranges.len(&txn)? != sealed_blocks / u64::from(RANGE_SIZE)
@@ -573,11 +629,148 @@ mod tests {
     use crate::test_utils::{hash, prepared};
     use crate::{
         codec::{ProtobufBlockRecord, decode_range_record},
+        index::range_meta::full_meta,
         ingest::OrderedBuilder,
     };
 
+    /// An index environment as a build before the `range_meta` table left it: four named
+    /// databases and the identity row, and nothing else.
     #[test]
-    fn creates_four_databases_and_checks_chain_identity() {
+    fn opens_an_index_created_before_range_meta() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index");
+        fs::create_dir_all(&path).unwrap();
+        let identity = [
+            SCHEMA_VERSION.to_be_bytes().as_slice(),
+            RANGE_SIZE.to_be_bytes().as_slice(),
+            PERSIST_DEPTH.to_be_bytes().as_slice(),
+            SEAL_DEPTH.to_be_bytes().as_slice(),
+            [1; 32].as_slice(),
+            b"Mainnet",
+        ]
+        .concat();
+        {
+            // SAFETY: the test owns this directory.
+            let env = unsafe {
+                EnvOpenOptions::new().map_size(10 * 1024 * 1024).max_dbs(4).open(&path).unwrap()
+            };
+            let mut txn = env.write_txn().unwrap();
+            let metadata = env
+                .create_database::<heed::types::Bytes, heed::types::Bytes>(
+                    &mut txn,
+                    Some("metadata"),
+                )
+                .unwrap();
+            for name in ["sealed_ranges", "mutable_blocks", "hash_to_height"] {
+                env.create_database::<heed::types::Bytes, heed::types::Bytes>(&mut txn, Some(name))
+                    .unwrap();
+            }
+            metadata.put(&mut txn, b"identity", identity.as_slice()).unwrap();
+            txn.commit().unwrap();
+        }
+
+        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        assert_eq!(index.state().unwrap(), IndexState::default());
+        assert_eq!(index.range_meta(0).unwrap(), None);
+        let state = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
+        assert_eq!(state.sealed_through(), Some(999));
+        assert_eq!(state.verified_through(), None);
+        index.put_range_meta(0, &full_meta(0)).unwrap();
+        assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
+    }
+
+    #[test]
+    fn range_meta_round_trips_for_a_sealed_range_and_refuses_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index");
+        let index = Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let state = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
+        assert_eq!(state.sealed_through(), Some(1_999));
+
+        index.put_range_meta(0, &full_meta(0)).unwrap();
+        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
+        assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
+        assert_eq!(index.range_meta(1_000).unwrap(), Some(full_meta(1_000)));
+        assert_eq!(index.range_meta(2_000).unwrap(), None);
+        // Metadata writes leave the generation alone.
+        assert_eq!(index.state().unwrap(), state);
+
+        // The range at 2,000 is not sealed; 500 is not a range start; the entry must match.
+        let refused = |start| matches!(index.put_range_meta(start, &full_meta(start)), Err(IndexError::RangeMeta { start: s }) if s == start);
+        assert!(refused(2_000));
+        assert!(refused(500));
+        assert!(matches!(
+            index.put_range_meta(0, &full_meta(1_000)),
+            Err(IndexError::RangeMeta { start: 0 })
+        ));
+        assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
+
+        drop(index);
+        let reopened =
+            Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        assert_eq!(reopened.range_meta(1_000).unwrap(), Some(full_meta(1_000)));
+        assert_eq!(reopened.state().unwrap(), state);
+    }
+
+    #[test]
+    fn continuity_rejects_metadata_for_a_range_that_is_not_sealed() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
+
+        let mut txn = index.env.write_txn().unwrap();
+        index.tables.range_meta.put(&mut txn, 1_000, &full_meta(1_000)).unwrap();
+        txn.commit().unwrap();
+        assert!(matches!(index.verify_continuity(), Err(IndexError::RangeMeta { start: 1_000 })));
+
+        let mut txn = index.env.write_txn().unwrap();
+        index.tables.range_meta.delete_from(&mut txn, 1_000).unwrap();
+        txn.commit().unwrap();
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn deep_reorg_drops_the_metadata_and_the_verified_prefix_of_rebuilt_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let old = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
+        assert_eq!(old.sealed_through(), Some(1_999));
+        index.put_range_meta(0, &full_meta(0)).unwrap();
+        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
+        let old = IndexState { verified_through: Some(1_999), ..old };
+        let mut txn = index.env.write_txn().unwrap();
+        index.tables.metadata.put_state(&mut txn, old).unwrap();
+        txn.commit().unwrap();
+        assert_eq!(index.state().unwrap().verified_through(), Some(1_999));
+
+        // The reorg rebuilds the range 1,000..=1,999: its metadata goes, the first range's stays,
+        // and the verified prefix ends with the first range.
+        let common = BlockId::new(1_950, hash(1_950));
+        let replacement = branch(common, 1_951..=2_110);
+        let state =
+            index.replace_deep_suffix(old.generation(), common, replacement, Some(2_010)).unwrap();
+
+        assert_eq!(state.sealed_through(), Some(1_999));
+        assert_eq!(state.verified_through(), Some(999));
+        assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
+        assert_eq!(index.range_meta(1_000).unwrap(), None);
+        index.verify_continuity().unwrap();
+
+        // A reorg into the first range ends the verified prefix altogether.
+        let common = BlockId::new(950, hash(950));
+        let replacement = branch(common, 951..=2_110);
+        let state = index
+            .replace_deep_suffix(state.generation(), common, replacement, Some(2_010))
+            .unwrap();
+        assert_eq!(state.verified_through(), None);
+        assert_eq!(index.range_meta(0).unwrap(), None);
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn creates_the_databases_and_checks_chain_identity() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
 
