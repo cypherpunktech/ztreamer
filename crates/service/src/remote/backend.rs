@@ -30,7 +30,9 @@ use zakura_rpc::client::{GetRawTransactionResponse, GetSubtreesByIndexResponse};
 use zakura_state::{HashOrHeight, MAX_BLOCK_REORG_HEIGHT};
 use ztreamer_remote::{RpcCode, RpcError, ZakuraClient};
 
-use super::{BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState};
+use crate::backend::{
+    BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState,
+};
 
 /// The most subtree roots that the cache keeps for one pool.
 const SUBTREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(16_384).unwrap();
@@ -84,7 +86,7 @@ impl From<RpcError> for BackendError {
 /// ```no_run
 /// use zakura_chain::parameters::Network;
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_service::backend::RemoteBackend;
+/// use ztreamer_service::remote::RemoteBackend;
 ///
 /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
@@ -328,7 +330,7 @@ impl StateBackend for RemoteBackend {
     }
 
     async fn tip_height(&self) -> Result<Option<block::Height>, BackendError> {
-        Ok(Some(self.node.get_blockchain_info().await?.blocks()))
+        Ok(Some(self.node.get_block_count().await?))
     }
 
     async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
@@ -427,7 +429,7 @@ impl StateBackend for RemoteBackend {
     async fn address_utxos(
         &self,
         _addresses: HashSet<transparent::Address>,
-    ) -> Result<Vec<super::AddressUtxo>, BackendError> {
+    ) -> Result<Vec<crate::backend::AddressUtxo>, BackendError> {
         Self::not_yet("address UTXOs")
     }
 
@@ -474,6 +476,7 @@ mod tests {
                     info["blocks"] = json!(tip);
                     Reply::Result(info)
                 }
+                "getblockcount" => Reply::Result(json!(tip)),
                 "getblockhash" => Reply::Result(json!(Network::Mainnet.genesis_hash().to_string())),
                 _ => answer(method, params),
             }

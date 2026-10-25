@@ -171,6 +171,11 @@ impl ZakuraClient {
         self.call(Method::GetBestBlockHash, ()).await
     }
 
+    /// `getblockcount`: the height of the tip. This is the cheapest call that gives the tip.
+    pub async fn get_block_count(&self) -> Result<block::Height, RpcError> {
+        self.rpc.call("getblockcount", ()).await.map(block::Height)
+    }
+
     /// `getblockhash`: the hash of the best-chain block at `height`.
     pub async fn get_block_hash(
         &self,
