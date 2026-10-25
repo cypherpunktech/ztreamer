@@ -1,5 +1,7 @@
 //! Versioned codecs for individual compact blocks and random-access 1,000-block ranges.
 
+use std::fmt;
+
 use prost::{Message, bytes::Bytes};
 use zakura_chain::block;
 use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
@@ -403,7 +405,7 @@ pub fn decode_range_record(bytes: &[u8], index: usize) -> Result<CompactBlockRec
 }
 
 /// Parses a range envelope once, then decodes selected records without allocating an offset table.
-pub(crate) struct RangeDecoder<'a> {
+pub struct RangeDecoder<'a> {
     start: u32,
     first_previous_hash: block::Hash,
     terminal_hash: block::Hash,
@@ -412,7 +414,8 @@ pub(crate) struct RangeDecoder<'a> {
 }
 
 impl<'a> RangeDecoder<'a> {
-    pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, CodecError> {
+    /// Reads the envelope and the offset table of a range written by [`encode_range`].
+    pub fn new(bytes: &'a [u8]) -> Result<Self, CodecError> {
         let mut reader = Reader::new(bytes);
         let version = reader.u8()?;
         if version != RANGE_FORMAT_VERSION {
@@ -439,7 +442,9 @@ impl<'a> RangeDecoder<'a> {
         Ok(decoder)
     }
 
-    pub(crate) fn record(&self, index: usize) -> Result<CompactBlockRecord, CodecError> {
+    /// Decodes record `index` of the range. Checks that its height is the range start plus
+    /// `index`, and that the first and the last record agree with the hashes in the envelope.
+    pub fn record(&self, index: usize) -> Result<CompactBlockRecord, CodecError> {
         self.record_as(index)
     }
 
@@ -469,6 +474,17 @@ impl<'a> RangeDecoder<'a> {
                 .try_into()
                 .expect("offset table width was checked"),
         ) as usize
+    }
+}
+
+impl fmt::Debug for RangeDecoder<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RangeDecoder")
+            .field("start", &self.start)
+            .field("first_previous_hash", &self.first_previous_hash)
+            .field("terminal_hash", &self.terminal_hash)
+            .field("body_len", &self.body.len())
+            .finish()
     }
 }
 

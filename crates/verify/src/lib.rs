@@ -13,3 +13,4 @@
 
 pub mod epoch;
 pub mod manifest;
+pub mod range;
