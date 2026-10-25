@@ -21,6 +21,7 @@ missing_const_for_fn = "warn"
 all = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
+blake3 = "1.8.7"
 zakura-chain = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakura-network = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
 zakura-rpc = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }

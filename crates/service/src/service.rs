@@ -191,6 +191,16 @@ impl CompactService {
         self
     }
 
+    /// Returns a receiver for each serving snapshot that the service publishes after this call.
+    pub fn subscribe(&self) -> watch::Receiver<ServingSnapshot> {
+        self.snapshot.subscribe()
+    }
+
+    /// Returns the backend that answers the chain state requests and the node requests.
+    pub fn backend(&self) -> Arc<dyn StateBackend> {
+        Arc::clone(&self.backend)
+    }
+
     pub fn publish(&self, state: IndexState) {
         self.snapshot.send_replace(state.into());
     }

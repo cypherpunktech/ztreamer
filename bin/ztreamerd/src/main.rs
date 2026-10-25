@@ -30,7 +30,8 @@ use ztreamer_indexer::{
 use ztreamer_node as node;
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
 use ztreamer_service::{
-    CompactService, HeadFollowerConfig, InProcessBackend, StateBackend, p2p::P2pCompactService,
+    CompactService, HeadFollowerConfig, InProcessBackend, RangeMetaFiller, StateBackend,
+    p2p::P2pCompactService,
 };
 
 mod lifecycle;
@@ -95,6 +96,11 @@ struct Cli {
     /// Exit after historical indexing instead of starting servers and the head follower.
     #[arg(long)]
     index_only: bool,
+
+    /// Write a `range_meta` row for each sealed range in the background. Then the index can be a
+    /// snapshot source.
+    #[arg(long)]
+    fill_range_meta: bool,
 }
 
 impl From<&Cli> for PipelineConfig {
@@ -253,6 +259,7 @@ where
         return Ok(());
     }
 
+    let filler_index = cli.fill_range_meta.then(|| Arc::clone(&index));
     let compact = CompactService::with_backend(index, state, chain_name, backend)
         .with_ping_enabled(cli.ping_very_insecure);
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
@@ -261,7 +268,9 @@ where
     p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     drop(p2p);
 
-    serve(compact, head, pipeline, grpc_server, &cli, &shutdown).await
+    let filler = filler_index
+        .map(|index| RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe()));
+    serve(compact, head, pipeline, grpc_server, &cli, filler, &shutdown).await
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -335,15 +344,18 @@ async fn reconcile_head(
     }
 }
 
-/// Runs the head follower and gRPC server until shutdown or until either task stops.
+/// Runs the head follower and gRPC server until shutdown or until either task stops. If
+/// `filler` is set, runs it beside them and stops it with them.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     mut grpc_server: Server,
     cli: &Cli,
+    filler: Option<impl Future<Output = ()> + Send + 'static>,
     shutdown: &CancellationToken,
 ) -> Result<()> {
+    let filler = filler.map(tokio::spawn);
     let (server_shutdown, _) = watch::channel(false);
     let mut follower = tokio::spawn({
         let compact = compact.clone();
@@ -378,6 +390,9 @@ async fn serve(
     }
     let task_exited = grpc_result.is_some() || follower_result.is_some();
     let _ = server_shutdown.send(true);
+    if let Some(filler) = &filler {
+        filler.abort();
+    }
 
     // Drain both tasks before inspecting either result, including on failure.
     let (grpc_result, follower_result) =
