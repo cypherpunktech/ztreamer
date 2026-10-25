@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use ztreamer_remote::{
-    Auth, CallOptions, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError,
+    Auth, CallOptions, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, ZakuraClient,
     test_utils::{MockNode, Reply},
 };
 
@@ -305,4 +305,18 @@ async fn unreachable_node_is_a_transport_error() {
     let error = client.call::<_, Value>("getblockcount", ()).await.unwrap_err();
     assert!(matches!(error, RpcError::Transport { .. }), "{error:?}");
     assert!(error.is_retryable());
+}
+
+#[tokio::test]
+async fn send_raw_transaction_is_not_retried() {
+    let mock = MockNode::start(|_, _| Reply::Status {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        body: "busy",
+    })
+    .await;
+    let node =
+        ZakuraClient::new(RpcClient::new(mock.config().with_retry(fast_retries(3))).unwrap());
+    let error = node.send_raw_transaction(&[0xde, 0xad]).await.unwrap_err();
+    assert!(error.is_retryable(), "{error}");
+    assert_eq!(mock.seen().len(), 1);
 }

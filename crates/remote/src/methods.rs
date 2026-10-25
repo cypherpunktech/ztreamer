@@ -19,7 +19,7 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 
-use crate::{RpcClient, RpcConfig, RpcError};
+use crate::{CallOptions, RpcClient, RpcConfig, RpcError};
 
 /// A zakura JSON-RPC method that [`ZakuraClient`] calls.
 ///
@@ -241,11 +241,15 @@ impl ZakuraClient {
     }
 
     /// `sendrawtransaction`: sends a serialized transaction to the mempool of the node.
+    ///
+    /// This call makes one attempt. After a timeout, the node can have the transaction already,
+    /// and a second attempt then gets the error "transaction already exists in mempool".
     pub async fn send_raw_transaction(
         &self,
         transaction: &[u8],
     ) -> Result<SendRawTransactionResponse, RpcError> {
-        self.call(Method::SendRawTransaction, (HexData(transaction.to_vec()),)).await
+        let params = (HexData(transaction.to_vec()),);
+        self.rpc.call_with(Method::SendRawTransaction.name(), params, CallOptions::no_retry()).await
     }
 
     /// `getaddresstxids`: the ids of the transactions that touch the addresses.
