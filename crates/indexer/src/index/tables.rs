@@ -137,7 +137,7 @@ pub(crate) struct SealedRange<'txn> {
 }
 
 impl<'txn> SealedRange<'txn> {
-    /// Parses the envelope of the packed range `bytes`, stored under the key `start`.
+    /// Parses the envelope of the packed range `bytes`. `start` is the key of the range.
     pub(crate) fn new(start: u32, bytes: &'txn [u8]) -> Result<Self, CodecError> {
         Ok(Self { start, decoder: RangeDecoder::new(bytes)? })
     }
@@ -156,9 +156,9 @@ impl<'txn> SealedRange<'txn> {
         self.decoder.record_as(index as usize)
     }
 
-    /// Decodes every record in height order. It checks each record with the rules of
-    /// [`CompactBlockRecord::encode`], and the link of each record to the record below it. The
-    /// decoder checks only the links at the two ends of the range.
+    /// Decodes all records in height order. It checks each record with the rules of
+    /// [`CompactBlockRecord::encode`]. It also checks the link of each record to the record below
+    /// it. The decoder checks the links at the two ends of the range only.
     pub(crate) fn records(&self) -> Result<Vec<CompactBlockRecord>, CodecError> {
         let records = (self.start()..=self.end())
             .map(|height| {

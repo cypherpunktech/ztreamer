@@ -56,7 +56,7 @@ impl<'env> IndexWriter<'env> {
         Ok(writer)
     }
 
-    /// Starts a write transaction on the current generation. The caller checks the state.
+    /// Starts a write transaction on the current generation. The caller must check the state.
     pub(crate) fn start_latest(env: &'env Env, tables: Tables) -> Result<Self, IndexError> {
         let txn = env.write_txn()?;
         let state = tables.metadata.get_state(&txn)?;
@@ -104,12 +104,12 @@ impl<'env> IndexWriter<'env> {
         self.delete_block(&old)
     }
 
-    /// Returns whether this transaction sees a mutable row.
+    /// Returns `true` if this transaction sees a mutable row.
     pub(crate) fn has_mutable_rows(&self) -> Result<bool, IndexError> {
         Ok(!self.tables.mutable_blocks.is_empty(&self.txn)?)
     }
 
-    /// Writes the hash entry of every block in an appended batch or an installed range.
+    /// Writes the hash entry of each block in an appended batch or in an installed range.
     pub(crate) fn put_hashes(
         &mut self,
         blocks: impl IntoIterator<Item = BlockId>,
@@ -153,9 +153,9 @@ impl<'env> IndexWriter<'env> {
         Ok(())
     }
 
-    /// Writes a packed range from a snapshot and its metadata, and advances `sealed_through` to
-    /// the range end. A [`VerifyState::Verified`] range extends a verified prefix that ends just
-    /// below it. The caller checks that the range follows `sealed_through`.
+    /// Writes a packed range from a snapshot and its metadata. Moves `sealed_through` to the
+    /// range end. A [`VerifyState::Verified`] range advances `verified_through` if the old value
+    /// is `start - 1`. The caller must check that `start` is `sealed_through + 1`.
     pub(crate) fn put_sealed_range(
         &mut self,
         start: u32,

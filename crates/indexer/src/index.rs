@@ -40,10 +40,11 @@
 //! affected ranges, writes their blocks again as mutable rows, and seals the complete ranges
 //! again.
 //!
-//! A replica fills an empty index from a snapshot, not from a node. [`Index::install_sealed_range`]
-//! writes one packed range and its `range_meta` row, in height order and with no gaps. During an
-//! import the index has no mutable rows, so the durable tip is `sealed_through`.
-//! [`Index::read_sealed_range_bytes`] reads the packed range that a snapshot publishes.
+//! A replica gets its sealed ranges from a snapshot, not from a node.
+//! [`Index::install_sealed_range`] writes one packed range and its `range_meta` row. It accepts
+//! ranges only in height order, with no gaps. During an import, the index has no mutable rows.
+//! Thus the durable tip is `sealed_through`. [`Index::read_sealed_range_bytes`] reads the packed
+//! range that a snapshot gives.
 //!
 //! # Rules
 //!
@@ -57,8 +58,8 @@
 //! - The previous hash of each block is the hash of the block below it.
 //! - The state holds the hash and the tree sizes of the durable tip.
 //! - `verified_through` is not set, or it is the last height of a range at or below
-//!   `sealed_through`. Only an install of a [`VerifyState::Verified`] range that starts at
-//!   `verified_through + 1`, or at 0, advances it.
+//!   `sealed_through`. Only an install of a [`VerifyState::Verified`] range advances it. The
+//!   range must start at `verified_through + 1`, or at 0.
 //! - Every `range_meta` key is the first height of a sealed range. A sealed range may have no
 //!   `range_meta` row.
 //! - An empty index has no state row, and its block tables and `range_meta` are empty.
@@ -69,7 +70,7 @@
 //! fails, LMDB discards all of its changes. Each commit increases the generation by 1, except
 //! [`Index::put_range_meta`]: range metadata is not part of what a reader sees at a generation,
 //! so writing it does not invalidate the readers of the current generation. An install writes a
-//! `range_meta` row and a range in one commit, so it increases the generation.
+//! `range_meta` row and a range in one commit. Thus an install increases the generation.
 //!
 //! An LMDB read transaction sees one committed state. The `read_*` methods take a generation, and
 //! they return [`IndexError::Generation`] if the index has a different generation. Thus a reader
@@ -91,7 +92,7 @@
 //!
 //! It does not decode the blocks inside a range. Thus it does not examine their chain links or
 //! their hash entries. The range encoder checks the chain links when it writes the range. An
-//! install decodes each block of the range, checks the chain links, and writes each hash entry.
+//! install decodes each block of the range. It checks the chain links and writes each hash entry.
 //!
 //! # Value formats
 //!
@@ -226,11 +227,11 @@ pub enum IndexError {
     RangeMeta { start: u32 },
     #[error("height {height} is not the first height of a range")]
     RangeStart { height: u32 },
-    #[error("sealed range at {start} does not follow the sealed ranges, the next range is {next}")]
+    #[error("sealed range at {start} is not the next range; the next range starts at {next}")]
     RangeOrder { start: u32, next: u32 },
-    #[error("range blob does not hold the range at {start} with a link to the block below it")]
+    #[error("range blob is not the range at {start}, or it does not link to the block below it")]
     RangeBlob { start: u32 },
-    #[error("an install needs an index with no mutable rows")]
+    #[error("index has mutable rows; an install needs an index with no mutable rows")]
     MutableRows,
 }
 
@@ -301,8 +302,9 @@ impl Index {
         Ok(())
     }
 
-    /// Reads the packed blob of the sealed range that starts at `start`, as `sealed_ranges` stores
-    /// it, or `None` when no sealed range starts there. It reads the current generation.
+    /// Reads the packed blob of the sealed range that starts at `start`. The bytes are the same
+    /// as in `sealed_ranges`. Returns `None` if no sealed range starts at `start`. Reads the
+    /// current generation.
     pub fn read_sealed_range_bytes(&self, start: u32) -> Result<Option<Vec<u8>>, IndexError> {
         if start != range_start(start) {
             return Err(IndexError::RangeStart { height: start });
@@ -311,19 +313,23 @@ impl Index {
         Ok(self.tables.sealed_ranges.get(&txn, start)?.map(<[u8]>::to_vec))
     }
 
-    /// Installs one packed range from a snapshot, with its metadata, in one write. The caller
-    /// has checked the blob digest.
+    /// Installs one packed range from a snapshot, and its metadata, in one write. The caller
+    /// must check the blob digest first.
     ///
-    /// The index must have no mutable rows, and `start` must be the next height after
-    /// `sealed_through`, or 0 on an empty index. Thus ranges install in order, with no gaps. The
-    /// blob must decode, its first block must link to the tip, or to the genesis previous hash
-    /// for range 0, and `meta.entry` must give the heights, the end hash and the end tree sizes
-    /// of the blob. A [`VerifyState::Rejected`] range is refused.
+    /// Conditions for an install:
     ///
-    /// The write adds the blob, its hash entries and `meta`, and moves the tip and
+    /// - The index has no mutable rows.
+    /// - `start` is `sealed_through + 1`, or 0 on an empty index. Thus ranges install in height
+    ///   order, with no gaps.
+    /// - The blob decodes. Its first block links to the tip, or to the genesis previous hash for
+    ///   range 0.
+    /// - `meta.entry` gives the heights, the end hash and the end tree sizes of the blob.
+    /// - `meta.state` is not [`VerifyState::Rejected`].
+    ///
+    /// The write adds the blob, its hash entries and `meta`. It moves the tip and
     /// `sealed_through` to the range end. A [`VerifyState::Verified`] range advances
-    /// `verified_through` when the verified prefix ends just below `start`. Other states do not
-    /// change it.
+    /// `verified_through` if the old value is `start - 1`, or not set for range 0. Other states
+    /// do not change `verified_through`.
     pub fn install_sealed_range(
         &self,
         start: u32,
@@ -343,7 +349,7 @@ impl Index {
         if writer.has_mutable_rows()? {
             return Err(IndexError::MutableRows);
         }
-        // With no mutable rows, the tip is the last block of the sealed ranges.
+        // The index has no mutable rows. Thus the tip is the last block of the sealed ranges.
         let parent = state.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
         if first.height != start || first.previous_hash != parent {
             return Err(IndexError::RangeBlob { start });
@@ -852,7 +858,7 @@ mod tests {
         TreeSizes { sapling: height, orchard: height / 2, ironwood: 0 }
     }
 
-    /// The records of the range at `start`, with tree sizes that grow with the height.
+    /// The records of the range at `start`. The tree sizes increase with the height.
     fn range_records(start: u32) -> Vec<CompactBlockRecord> {
         (start..start + RANGE_SIZE)
             .map(|height| CompactBlockRecord {
@@ -862,7 +868,7 @@ mod tests {
             .collect()
     }
 
-    /// The blob of the range at `start` as a snapshot publishes it, and a `state` row for it.
+    /// The blob of the range at `start`, as a snapshot gives it, and its metadata with `state`.
     fn snapshot_range(start: u32, state: VerifyState) -> (Vec<u8>, RangeMeta) {
         let mut meta = full_meta(start);
         meta.entry.end_tree_sizes = tree_sizes(start + RANGE_SIZE - 1);
@@ -952,14 +958,14 @@ mod tests {
             let meta = snapshot_range(start, VerifyState::Verified).1;
             matches!(index.install_sealed_range(start, blob, &meta), Err(IndexError::RangeBlob { start: s }) if s == start)
         };
-        // Range 0 must link to the genesis previous hash, and a blob must hold its own range.
+        // Range 0 must link to the genesis previous hash. A blob must hold the range at `start`.
         assert!(refused(0, &unlinked(0)));
         assert!(refused(0, &snapshot_range(1_000, VerifyState::Verified).0));
         install(&index, 0, VerifyState::Verified).unwrap();
         assert!(refused(1_000, &unlinked(1_000)));
 
-        // A record inside the blob that does not link to the record below it. The encoder
-        // refuses such a range, so change the bytes of one record after the encode.
+        // A record in the blob does not link to the record below it. The encoder refuses this
+        // range. Thus change the bytes of one record after the encode.
         let (mut blob, meta) = snapshot_range(1_000, VerifyState::Verified);
         let good = range_records(1_000)[500].encode().unwrap();
         let bad =
@@ -1022,7 +1028,7 @@ mod tests {
         let verified = |state: IndexState| state.verified_through();
         assert_eq!(verified(install(&index, 0, VerifyState::Verified).unwrap()), Some(999));
         assert_eq!(verified(install(&index, 1_000, VerifyState::ChainOk).unwrap()), Some(999));
-        // The range at 1,000 is not verified, so the verified prefix cannot reach 2,999.
+        // The range at 1,000 is not verified. Thus the verified prefix stays at 999.
         let state = install(&index, 2_000, VerifyState::Verified).unwrap();
         assert_eq!((state.sealed_through(), verified(state)), (Some(2_999), Some(999)));
 
