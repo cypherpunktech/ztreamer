@@ -27,6 +27,7 @@ use zakura_chain::{
     block::{self, Block},
     ironwood, orchard,
     parameters::Network,
+    sapling,
     serialization::{ZcashDeserialize, ZcashDeserializeInto as _, ZcashSerialize as _},
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction, UnminedTx},
@@ -36,16 +37,20 @@ use zakura_rpc::{
     client::{
         GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosResponse,
         GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
-        TransactionObject,
+        TransactionObject, Treestate,
     },
     methods::GetAddressUtxosRequest,
 };
 use zakura_state::{HashOrHeight, MAX_BLOCK_REORG_HEIGHT};
+use ztreamer_indexer::frontier::FromRpc;
 use ztreamer_remote::{RpcCode, RpcError, ZakuraClient};
 
 use crate::backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState,
 };
+
+/// The bytes that the tree-state cache can hold: approximately 4,000 tree states.
+const TREE_CACHE_BYTES: usize = 16 << 20;
 
 /// The bytes that the subtree cache of one pool can hold: approximately 16,000 subtrees.
 const SUBTREE_CACHE_BYTES: usize = 2 << 20;
@@ -116,6 +121,7 @@ impl From<RpcError> for BackendError {
 pub struct RemoteBackend {
     node: ZakuraClient,
     network: Network,
+    tree_states: LruMap<block::Hash, TreeState>,
     sapling_subtrees: SubtreeCache<SaplingNode>,
     orchard_subtrees: SubtreeCache<orchard::tree::Node>,
     ironwood_subtrees: SubtreeCache<ironwood::tree::Node>,
@@ -169,6 +175,7 @@ impl RemoteBackend {
         let backend = Self {
             node,
             network,
+            tree_states: LruMap::new("tree_states", TREE_CACHE_BYTES),
             sapling_subtrees: LruMap::new("sapling_subtrees", SUBTREE_CACHE_BYTES),
             orchard_subtrees: LruMap::new("orchard_subtrees", SUBTREE_CACHE_BYTES),
             ironwood_subtrees: LruMap::new("ironwood_subtrees", SUBTREE_CACHE_BYTES),
@@ -429,12 +436,63 @@ trait FromNodeBytes: ZcashDeserialize + Send + 'static {
     }
 }
 
-impl FromNodeBytes for Block {
-    const WHAT: &'static str = "block";
+/// A note commitment tree that `z_gettreestate` prints, and the type of its root.
+trait RpcTree: FromRpc {
+    type Root: FromRpc + PartialEq;
+
+    fn tree_root(&self) -> Self::Root;
 }
 
-impl FromNodeBytes for Transaction {
-    const WHAT: &'static str = "transaction";
+impl RpcTree for sapling::tree::NoteCommitmentTree {
+    type Root = sapling::tree::Root;
+
+    fn tree_root(&self) -> Self::Root {
+        self.root()
+    }
+}
+
+impl RpcTree for orchard::tree::NoteCommitmentTree {
+    type Root = orchard::tree::Root;
+
+    fn tree_root(&self) -> Self::Root {
+        self.root()
+    }
+}
+
+/// Parses `finalState` of one pool. `None` when the node leaves it out, which it does before the
+/// pool activates. When the node also gives `finalRoot`, the root of the tree must be equal to it.
+fn parse_tree<T: RpcTree>(
+    pool: &str,
+    treestate: &Treestate,
+) -> Result<Option<Arc<T>>, BackendError> {
+    let commitments = treestate.commitments();
+    let Some(state) = commitments.final_state() else {
+        return Ok(None);
+    };
+    let bad =
+        |error| BackendError::Unexpected(format!("remote zakura sent a bad {pool} tree: {error}"));
+    let tree = T::from_rpc_bytes(state).map_err(bad)?;
+    let root = commitments.final_root().as_deref().map(T::Root::from_rpc_bytes).transpose();
+    if root.map_err(bad)?.is_some_and(|root| root != tree.tree_root()) {
+        return Err(BackendError::Unexpected(format!(
+            "remote zakura sent a {pool} tree that does not match its root"
+        )));
+    }
+    Ok(Some(Arc::new(tree)))
+}
+
+/// Deserializes node bytes on a blocking thread, because a large block takes milliseconds.
+async fn decode<T>(bytes: Vec<u8>, what: &'static str) -> Result<T, BackendError>
+where
+    T: ZcashDeserialize + Send + 'static,
+{
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || span.in_scope(|| bytes.zcash_deserialize_into::<T>()))
+        .await
+        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
+        .map_err(|error| {
+            BackendError::Unexpected(format!("remote zakura sent a bad {what}: {error}"))
+        })
 }
 
 /// Turns the node's not-found answer into `None`.
@@ -716,12 +774,28 @@ impl StateBackend for RemoteBackend {
         Ok(Some(MinedTransaction { transaction, height }))
     }
 
-    async fn tree_state(&self, _hash: block::Hash) -> Result<TreeState, BackendError> {
-        Err(BackendError::Unavailable(
-            "RemoteBackend does not serve tree states yet; it needs the z_gettreestate parser of \
-             cypherpunktech/ztreamer#114"
-                .into(),
-        ))
+    async fn tree_state(&self, hash: block::Hash) -> Result<TreeState, BackendError> {
+        if let Some(trees) = self.tree_states.get(&hash) {
+            return Ok(trees);
+        }
+        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
+        if response.hash() != hash {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura sent the tree state of {} for {hash}",
+                response.hash()
+            )));
+        }
+        let trees = tokio::task::spawn_blocking(move || {
+            Ok::<_, BackendError>(TreeState {
+                sapling: parse_tree("Sapling", response.sapling())?,
+                orchard: parse_tree("Orchard", response.orchard())?,
+                ironwood: parse_tree("Ironwood", response.ironwood())?,
+            })
+        })
+        .await
+        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))??;
+        self.tree_states.insert(hash, trees.clone());
+        Ok(trees)
     }
 
     async fn sapling_subtrees(
@@ -877,7 +951,10 @@ mod tests {
 
     use super::*;
     use serde_json::{Value, json};
-    use zakura_rpc::client::{GetBlockchainInfoResponse, HexData, TransactionObject, Utxo};
+    use zakura_rpc::client::{
+        Commitments, GetBlockchainInfoResponse, GetTreestateResponse, HexData, TransactionObject,
+        Utxo,
+    };
     use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES};
     use ztreamer_remote::{
         RpcClient,
@@ -1167,14 +1244,54 @@ mod tests {
         assert_eq!(subtree_requests[0].body["params"], json!(["orchard", 1]));
     }
 
+    fn tree_state_answer(hash: block::Hash, orchard_root: Option<Vec<u8>>) -> Value {
+        let sapling: sapling::tree::NoteCommitmentTree = (1..=3u8)
+            .map(|i| {
+                sapling::tree::NoteCommitmentUpdate::from_bytes(&[i; 32].map(|b| b & 0x0f)).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let orchard: orchard::tree::NoteCommitmentTree =
+            (1..=5).map(orchard::tree::NoteCommitmentUpdate::from).collect::<Vec<_>>().into();
+        let orchard_root = orchard_root.unwrap_or(orchard.root().bytes_in_display_order().to_vec());
+        let commitments =
+            |root: Vec<u8>, tree| Treestate::new(Commitments::new(Some(root), Some(tree)));
+        serde_json::to_value(GetTreestateResponse::new(
+            hash,
+            block::Height(1),
+            0,
+            None,
+            commitments(sapling.root().bytes_in_display_order().to_vec(), sapling.to_rpc_bytes()),
+            commitments(orchard_root, orchard.to_rpc_bytes()),
+            Treestate::default(),
+        ))
+        .unwrap()
+    }
+
     #[tokio::test]
-    async fn tree_state_is_unavailable_without_a_request() {
-        let mock = mainnet(1, |_, _| Reply::Close).await;
+    async fn tree_state_parses_once_per_hash() {
+        let (good, bad_root) = (block::Hash([1; 32]), block::Hash([2; 32]));
+        let mock = mainnet(1, move |_, params| match params[0].as_str().unwrap() {
+            hash if hash == good.to_string() => Reply::Result(tree_state_answer(good, None)),
+            hash if hash == bad_root.to_string() => {
+                Reply::Result(tree_state_answer(bad_root, Some(vec![0; 32])))
+            }
+            _ => Reply::Result(tree_state_answer(good, None)),
+        })
+        .await;
         let backend = backend(&mock).await;
+        let trees = backend.tree_state(good).await.unwrap();
+        assert_eq!(trees.sapling.unwrap().count(), 3);
+        assert_eq!(trees.orchard.unwrap().count(), 5);
+        assert!(trees.ironwood.is_none());
         let requests = calls(&mock).len();
-        let error = backend.tree_state(block::Hash([0; 32])).await.unwrap_err();
-        assert!(matches!(&error, BackendError::Unavailable(message) if message.contains("#114")));
+        assert_eq!(backend.tree_state(good).await.unwrap().orchard.unwrap().count(), 5);
         assert_eq!(calls(&mock).len(), requests);
+
+        for hash in [bad_root, block::Hash([3; 32])] {
+            let error = backend.tree_state(hash).await.unwrap_err();
+            assert!(matches!(error, BackendError::Unexpected(_)), "{error}");
+        }
     }
 
     const ADDRESS: &str = "t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak";
