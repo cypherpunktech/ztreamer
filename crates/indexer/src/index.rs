@@ -110,7 +110,10 @@ use std::{fs, io, path::Path, time::Instant};
 use heed::{Env, EnvOpenOptions, RoTxn};
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 
-use crate::codec::{CodecError, CompactBlockRecord, StoredBlock, TreeSizes, decode_range_record};
+use crate::codec::{
+    CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, StoredBlock, TreeSizes,
+    decode_range_record,
+};
 use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod metadata;
@@ -191,6 +194,20 @@ impl IndexState {
     pub const fn tree_sizes(&self) -> TreeSizes {
         self.tree_sizes
     }
+
+    /// Returns the first height of the next range to seal: `sealed_through + 1`, or 0 if no range
+    /// is sealed.
+    pub(crate) fn next_range_start(&self) -> Result<u32, IndexError> {
+        self.sealed_through
+            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
+    }
+
+    /// Returns `true` if the index has mutable rows. The mutable rows cover the heights above
+    /// `sealed_through` to the durable tip. Thus they exist only if the tip is above
+    /// `sealed_through`.
+    pub(crate) fn has_mutable_rows(&self) -> bool {
+        self.durable_tip.map(|tip| tip.height) != self.sealed_through
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -229,8 +246,10 @@ pub enum IndexError {
     RangeStart { height: u32 },
     #[error("sealed range at {start} is not the next range; the next range starts at {next}")]
     RangeOrder { start: u32, next: u32 },
-    #[error("range blob is not the range at {start}, or it does not link to the block below it")]
-    RangeBlob { start: u32 },
+    #[error("range blob does not continue the chain at height {height}")]
+    RangeBlob { height: u32 },
+    #[error("block hash at height {height} is in the index already")]
+    DuplicateHash { height: u32 },
     #[error("index has mutable rows; an install needs an index with no mutable rows")]
     MutableRows,
 }
@@ -321,10 +340,15 @@ impl Index {
     /// - The index has no mutable rows.
     /// - `start` is `sealed_through + 1`, or 0 on an empty index. Thus ranges install in height
     ///   order, with no gaps.
-    /// - The blob decodes. Its first block links to the tip, or to the genesis previous hash for
-    ///   range 0.
-    /// - `meta.entry` gives the heights, the end hash and the end tree sizes of the blob.
+    /// - Each record of the blob decodes and links to the block below it. The first record links
+    ///   to the tip, or to the genesis previous hash for range 0.
+    /// - The tree sizes do not decrease from the tip to the last record.
+    /// - No block hash of the blob is in the index already, and no hash occurs two times.
+    /// - `meta.entry` gives the range format version, the heights, the end hash and the end tree
+    ///   sizes of the blob.
     /// - `meta.state` is not [`VerifyState::Rejected`].
+    ///
+    /// The method does the checks on the state before it decodes the blob.
     ///
     /// The write adds the blob, its hash entries and `meta`. It moves the tip and
     /// `sealed_through` to the range end. A [`VerifyState::Verified`] range advances
@@ -336,26 +360,22 @@ impl Index {
         blob: &[u8],
         meta: &RangeMeta,
     ) -> Result<IndexState, IndexError> {
-        let records = SealedRange::new(start, blob)?.records()?;
-        let (first, last) = (&records[0], &records[records.len() - 1]);
         let mut writer = IndexWriter::start_latest(&self.env, self.tables)?;
         let state = writer.state();
-        let next = state
-            .sealed_through
-            .map_or(Ok(0), |sealed| sealed.checked_add(1).ok_or(IndexError::Overflow))?;
+        let next = state.next_range_start()?;
         if start != next {
             return Err(IndexError::RangeOrder { start, next });
         }
-        if writer.has_mutable_rows()? {
+        if state.has_mutable_rows() {
             return Err(IndexError::MutableRows);
         }
         // The index has no mutable rows. Thus the tip is the last block of the sealed ranges.
         let parent = state.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
-        if first.height != start || first.previous_hash != parent {
-            return Err(IndexError::RangeBlob { start });
-        }
+        let chain = SealedRange::new(start, blob)?.check_chain(parent, state.tree_sizes)?;
+        let last = &chain.last;
         let entry = &meta.entry;
-        if entry.start_height != start
+        if entry.range_version != RANGE_FORMAT_VERSION
+            || entry.start_height != start
             || entry.end_height != last.height
             || entry.end_hash != last.hash
             || entry.end_tree_sizes != last.end_tree_sizes
@@ -364,7 +384,7 @@ impl Index {
             return Err(IndexError::RangeMeta { start });
         }
 
-        writer.put_hashes(records.iter().map(|record| BlockId::new(record.height, record.hash)))?;
+        writer.put_new_hashes(&chain.ids)?;
         writer.put_sealed_range(start, blob, meta)?;
         writer.set_tip(BlockId::new(last.height, last.hash), last.end_tree_sizes);
         writer.commit()
@@ -612,7 +632,7 @@ impl Index {
         }
 
         writer.start_timer();
-        writer.put_hashes(blocks.iter().map(|block| BlockId::new(block.height, block.hash)))?;
+        writer.put_hashes(&blocks)?;
         let last = blocks.last().expect("the batch is non-empty");
         writer.set_tip(BlockId::new(last.height, last.hash), end_tree_sizes);
         let mut blocks = blocks.into_iter().peekable();
@@ -940,44 +960,95 @@ mod tests {
             install(&index, 0, VerifyState::Verified),
             Err(IndexError::RangeOrder { start: 0, next: 1_000 })
         ));
+        // The order check occurs before the decode. Thus an empty blob gets the same error.
+        let meta = snapshot_range(2_000, VerifyState::Verified).1;
+        assert!(matches!(
+            index.install_sealed_range(2_000, &[], &meta),
+            Err(IndexError::RangeOrder { start: 2_000, next: 1_000 })
+        ));
         assert_eq!(index.state().unwrap(), state);
         assert_eq!(index.read_sealed_range_bytes(2_000).unwrap(), None);
     }
 
     #[test]
-    fn install_refuses_a_blob_that_does_not_link() {
+    fn install_refuses_a_blob_that_does_not_continue_the_chain() {
         let dir = tempfile::tempdir().unwrap();
         let index =
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
-        let unlinked = |start| {
+        let changed = |start, change: fn(&mut [CompactBlockRecord])| {
             let mut records = range_records(start);
-            records[0].previous_hash = block::Hash([9; 32]);
+            change(&mut records);
             encode_range(&records).unwrap()
         };
-        let refused = |start, blob: &[u8]| {
+        let refused_at = |start, blob: &[u8], height| {
             let meta = snapshot_range(start, VerifyState::Verified).1;
-            matches!(index.install_sealed_range(start, blob, &meta), Err(IndexError::RangeBlob { start: s }) if s == start)
+            matches!(index.install_sealed_range(start, blob, &meta), Err(IndexError::RangeBlob { height: h }) if h == height)
+        };
+        let unlinked = |records: &mut [CompactBlockRecord]| {
+            records[0].previous_hash = block::Hash([9; 32]);
         };
         // Range 0 must link to the genesis previous hash. A blob must hold the range at `start`.
-        assert!(refused(0, &unlinked(0)));
-        assert!(refused(0, &snapshot_range(1_000, VerifyState::Verified).0));
+        assert!(refused_at(0, &changed(0, unlinked), 0));
+        assert!(refused_at(0, &snapshot_range(1_000, VerifyState::Verified).0, 0));
         install(&index, 0, VerifyState::Verified).unwrap();
-        assert!(refused(1_000, &unlinked(1_000)));
+        assert!(refused_at(1_000, &changed(1_000, unlinked), 1_000));
+
+        // The tree sizes must not decrease from the tip, or inside the range.
+        let smaller_than_tip = |records: &mut [CompactBlockRecord]| {
+            records[0].end_tree_sizes = TreeSizes::default();
+        };
+        assert!(refused_at(1_000, &changed(1_000, smaller_than_tip), 1_000));
+        let smaller_inside = |records: &mut [CompactBlockRecord]| {
+            records[500].end_tree_sizes.orchard = 0;
+        };
+        assert!(refused_at(1_000, &changed(1_000, smaller_inside), 1_500));
 
         // A record in the blob does not link to the record below it. The encoder refuses this
-        // range. Thus change the bytes of one record after the encode.
+        // range. Thus change the bytes of one record after the encode. The bytes keep their length.
         let (mut blob, meta) = snapshot_range(1_000, VerifyState::Verified);
-        let good = range_records(1_000)[500].encode().unwrap();
-        let bad =
-            CompactBlockRecord { previous_hash: block::Hash([9; 32]), ..record(1_500, Vec::new()) };
-        let bad = CompactBlockRecord { end_tree_sizes: tree_sizes(1_500), ..bad }.encode().unwrap();
+        let mut bad = range_records(1_000)[500].clone();
+        let good = bad.encode().unwrap();
+        bad.previous_hash = block::Hash([9; 32]);
         let at = blob.windows(good.len()).position(|bytes| bytes == good).unwrap();
-        blob[at..at + bad.len()].copy_from_slice(&bad);
+        blob[at..at + good.len()].copy_from_slice(&bad.encode().unwrap());
         assert!(matches!(
             index.install_sealed_range(1_000, &blob, &meta),
-            Err(IndexError::Codec(CodecError::InvalidRange))
+            Err(IndexError::RangeBlob { height: 1_500 })
         ));
         assert_eq!(index.state().unwrap().sealed_through(), Some(999));
+    }
+
+    #[test]
+    fn install_refuses_a_block_hash_that_is_in_the_index_already() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let state = install(&index, 0, VerifyState::Verified).unwrap();
+        let meta = snapshot_range(1_000, VerifyState::Verified).1;
+        // The block at 1,500 gets the hash `duplicate`. The block at 1,501 links to it.
+        let blob = |duplicate| {
+            let mut records = range_records(1_000);
+            records[500].hash = duplicate;
+            records[501].previous_hash = duplicate;
+            encode_range(&records).unwrap()
+        };
+
+        // The hash of block 5 is in range 0.
+        assert!(matches!(
+            index.install_sealed_range(1_000, &blob(hash(5)), &meta),
+            Err(IndexError::DuplicateHash { height: 1_500 })
+        ));
+        // The hash of block 1,600 occurs at 1,500 and at 1,600 in the same blob.
+        assert!(matches!(
+            index.install_sealed_range(1_000, &blob(hash(1_600)), &meta),
+            Err(IndexError::DuplicateHash { height: 1_600 })
+        ));
+        assert_eq!(index.state().unwrap(), state);
+        assert_eq!(
+            index.read_block_by_hash(state.generation(), hash(5)).unwrap().unwrap().height,
+            5
+        );
+        index.verify_continuity().unwrap();
     }
 
     #[test]
@@ -986,7 +1057,8 @@ mod tests {
         let index =
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let (blob, meta) = snapshot_range(0, VerifyState::Verified);
-        let changes: [fn(&mut RangeMeta); 5] = [
+        let changes: [fn(&mut RangeMeta); 6] = [
+            |meta| meta.entry.range_version = 2,
             |meta| meta.entry.start_height = 1_000,
             |meta| meta.entry.end_height = 1_000,
             |meta| meta.entry.end_hash = hash(1_000),
@@ -1018,6 +1090,13 @@ mod tests {
             Err(IndexError::MutableRows)
         ));
         assert_eq!(index.state().unwrap(), state);
+
+        // An index with mutable rows and no sealed range.
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        index.write(batch(&index, 0..=10, 20)).unwrap();
+        assert!(matches!(install(&index, 0, VerifyState::Verified), Err(IndexError::MutableRows)));
     }
 
     #[test]

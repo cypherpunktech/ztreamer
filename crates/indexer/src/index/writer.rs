@@ -31,7 +31,7 @@ pub(crate) type BatchRows = Peekable<std::vec::IntoIter<EncodedBlock>>;
 ///   ancestor, so a delete after a put can delete a canonical hash.
 /// - Appends use [`IndexWriter::put_hashes`] for the whole batch first, then seal and append
 ///   the rows. A batch row that goes into a sealed range is never written as a mutable row.
-/// - Installs use [`IndexWriter::put_hashes`] for the blocks of one packed range, then
+/// - Installs use [`IndexWriter::put_new_hashes`] for the blocks of one packed range, then
 ///   [`IndexWriter::put_sealed_range`]. An install writes no mutable row.
 ///
 /// Dropping a writer without [`IndexWriter::commit`] aborts the transaction.
@@ -104,17 +104,20 @@ impl<'env> IndexWriter<'env> {
         self.delete_block(&old)
     }
 
-    /// Returns `true` if this transaction sees a mutable row.
-    pub(crate) fn has_mutable_rows(&self) -> Result<bool, IndexError> {
-        Ok(!self.tables.mutable_blocks.is_empty(&self.txn)?)
+    /// Writes the hash entry of each block in an installed range. Refuses a hash that the index
+    /// holds already, also a hash that occurs two times in `blocks`.
+    pub(crate) fn put_new_hashes(&mut self, blocks: &[BlockId]) -> Result<(), IndexError> {
+        blocks.iter().try_for_each(|block| {
+            if self.tables.hash_to_height.get(&self.txn, &block.hash)?.is_some() {
+                return Err(IndexError::DuplicateHash { height: block.height });
+            }
+            self.tables.hash_to_height.put(&mut self.txn, &block.hash, block.height)
+        })
     }
 
-    /// Writes the hash entry of each block in an appended batch or in an installed range.
-    pub(crate) fn put_hashes(
-        &mut self,
-        blocks: impl IntoIterator<Item = BlockId>,
-    ) -> Result<(), IndexError> {
-        blocks.into_iter().try_for_each(|block| {
+    /// Writes the hash entry of every block in an appended batch.
+    pub(crate) fn put_hashes(&mut self, blocks: &[EncodedBlock]) -> Result<(), IndexError> {
+        blocks.iter().try_for_each(|block| {
             self.tables.hash_to_height.put(&mut self.txn, &block.hash, block.height)
         })?;
         self.with_timer(|timer| timer.lap(WriteStage::HashIndex));
@@ -155,7 +158,7 @@ impl<'env> IndexWriter<'env> {
 
     /// Writes a packed range from a snapshot and its metadata. Moves `sealed_through` to the
     /// range end. A [`VerifyState::Verified`] range advances `verified_through` if the old value
-    /// is `start - 1`. The caller must check that `start` is `sealed_through + 1`.
+    /// is `start - 1`. The caller must check that `start` is [`IndexState::next_range_start`].
     pub(crate) fn put_sealed_range(
         &mut self,
         start: u32,
@@ -185,10 +188,7 @@ impl<'env> IndexWriter<'env> {
         let Some(seal_through) = seal_through else {
             return Ok(());
         };
-        let mut start = self
-            .state
-            .sealed_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))?;
+        let mut start = self.state.next_range_start()?;
 
         loop {
             let end = start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?;

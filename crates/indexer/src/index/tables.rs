@@ -11,8 +11,10 @@ use heed::{
 };
 use zakura_chain::block;
 
-use super::{IndexError, IndexState, RANGE_SIZE, metadata::Metadata, range_meta::RangeMetaTable};
-use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock};
+use super::{
+    BlockId, IndexError, IndexState, RANGE_SIZE, metadata::Metadata, range_meta::RangeMetaTable,
+};
+use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes};
 
 type HeightDb = Database<U32<BigEndian>, Bytes>;
 type HeightIter<'txn> = RoIter<'txn, U32<BigEndian>, Bytes>;
@@ -156,22 +158,48 @@ impl<'txn> SealedRange<'txn> {
         self.decoder.record_as(index as usize)
     }
 
-    /// Decodes all records in height order. It checks each record with the rules of
-    /// [`CompactBlockRecord::encode`]. It also checks the link of each record to the record below
-    /// it. The decoder checks the links at the two ends of the range only.
-    pub(crate) fn records(&self) -> Result<Vec<CompactBlockRecord>, CodecError> {
-        let records = (self.start()..=self.end())
-            .map(|height| {
-                let record: CompactBlockRecord = self.read(height)?;
-                record.check()?;
-                Ok(record)
-            })
-            .collect::<Result<Vec<_>, CodecError>>()?;
-        if records.windows(2).any(|pair| pair[1].previous_hash != pair[0].hash) {
-            return Err(CodecError::InvalidRange);
+    /// Checks the chain of the range on top of the block below it, which has the hash `parent`
+    /// and the tree sizes `tree_sizes`. The decoder checks the links at the two ends of the range
+    /// only. Thus this method decodes each record, in height order. Each record must:
+    ///
+    /// - obey the rules of [`CompactBlockRecord::encode`],
+    /// - have the height that its position gives,
+    /// - link to the block below it,
+    /// - have tree sizes that are not smaller than the tree sizes of the block below it.
+    ///
+    /// It keeps only the block ids and the last record. Thus a large range does not stay in
+    /// memory two times. It returns [`IndexError::RangeBlob`] at the first record that fails.
+    pub(crate) fn check_chain(
+        &self,
+        parent: block::Hash,
+        tree_sizes: TreeSizes,
+    ) -> Result<RangeChain, IndexError> {
+        let mut ids = Vec::with_capacity(RANGE_SIZE as usize);
+        let (mut previous_hash, mut previous_sizes) = (parent, tree_sizes);
+        let mut last = None;
+        for height in self.start()..=self.end() {
+            let record: CompactBlockRecord = self.read(height)?;
+            record.check()?;
+            if record.height != height
+                || record.previous_hash != previous_hash
+                || !record.end_tree_sizes.follows(previous_sizes)
+            {
+                return Err(IndexError::RangeBlob { height });
+            }
+            ids.push(BlockId::new(height, record.hash));
+            (previous_hash, previous_sizes) = (record.hash, record.end_tree_sizes);
+            last = Some(record);
         }
-        Ok(records)
+        let last = last.expect("a range holds RANGE_SIZE records");
+        Ok(RangeChain { ids, last })
     }
+}
+
+/// The result of [`SealedRange::check_chain`]: the id of each block in height order, and the
+/// last record.
+pub(crate) struct RangeChain {
+    pub(crate) ids: Vec<BlockId>,
+    pub(crate) last: CompactBlockRecord,
 }
 
 /// One encoded block for each height above the sealed ranges.
