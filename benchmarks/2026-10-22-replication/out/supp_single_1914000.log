@@ -1,0 +1,2 @@
+ranges=1 wall_s=3.0 sapling_leaves=399 sapling_s=0.0 (78.1 us/leaf) orchard_leaves=247417 orchard_s=2.9 (11.7 us/leaf) batch=false
+tree ms per range: p50=2930 p95=2930 max=2930

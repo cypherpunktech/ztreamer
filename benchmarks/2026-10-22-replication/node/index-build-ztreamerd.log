@@ -1,0 +1,186 @@
+2026-10-22T04:55:30.362672Z  INFO zakurad::components::metrics: Trying to open metrics endpoint at 127.0.0.1:9999...
+2026-10-22T04:55:30.363406Z  INFO zakurad::components::metrics: Opened metrics endpoint at 127.0.0.1:9999
+2026-10-22T04:55:30.363999Z  INFO ztreamerd: starting embedded Zakura network=Mainnet
+2026-10-22T04:55:30.364208Z  WARN zakurad::commands::start: TCP slow-start-after-idle is enabled, which resets TCP's congestion window between block requests and significantly reduces single-peer throughput for block propagation. Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation setting="net.ipv4.tcp_slow_start_after_idle"
+2026-10-22T04:55:30.364216Z  INFO zakurad::commands::start: initializing node state
+2026-10-22T04:55:30.368880Z  INFO zakurad::commands::start: opening database, this may take a few minutes
+2026-10-22T04:55:30.369131Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: trying to open current database format running_version=29.1.0+indexer
+2026-10-22T04:55:30.788209Z  INFO zakura_state::service::finalized_state::disk_db: Opened Zakura state cache at /home/evalir/sandblast-bench/zakura-cache/state/v29/mainnet
+2026-10-22T04:55:30.795399Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by a previous Zakura instance is current and valid running_version=29.1.0+indexer
+2026-10-22T04:55:30.795952Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: started checking/adding indexes for spending tx ids
+2026-10-22T04:57:24.717285Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: finished checking/adding indexes for spending tx ids
+2026-10-22T04:57:28.959869Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-22T04:57:28.959949Z  INFO zakura_state::service::finalized_state::vct: VCT: exact header auxiliary source enabled by default handoff_height=3490665
+2026-10-22T04:57:28.971706Z  INFO zakura_state::service: loaded historical frontier artifact source_path="embedded Mainnet historical frontier artifact" entries=2293 spacing=0
+2026-10-22T04:57:28.971758Z  INFO zakura_state::service::non_finalized_state: restoring non-finalized blocks from backup and spawning backup task backup_dir_path="/home/evalir/sandblast-bench/zakura-cache/non_finalized_state/mainnet"
+2026-10-22T04:57:30.710639Z  INFO zakura_state::service::non_finalized_state: restored blocks from non-finalized backup cache num_blocks_restored=1000
+2026-10-22T04:57:30.714971Z  INFO zakura_state::service: loaded Zakura state cache chain_tip=Some((block::Hash("000000000043bd8ef9fa8161740f3ead59f609a5b415a7a10d723039adcc22fc"), Height(3524946)))
+2026-10-22T04:57:30.770480Z  INFO zakura_state::service: starting legacy chain check
+2026-10-22T04:57:30.770531Z  INFO zakura_state::service: cached state consensus branch is valid: no legacy chain found
+2026-10-22T04:57:30.770543Z  INFO zakurad::commands::start: logging database metrics on startup
+2026-10-22T04:57:30.782876Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Disk Size: 282.9 GB
+2026-10-22T04:57:30.782900Z  INFO zakura_state::service::finalized_state::disk_db: Total Live Data Disk Size: 282.3 GB
+2026-10-22T04:57:30.782903Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Memory Size: 108.5 KB
+2026-10-22T04:57:30.782921Z  INFO zakurad::commands::start::zakura::coordinator: sync apply lifecycle changed apply_phase="native" apply_epoch=0
+2026-10-22T04:57:30.782926Z  INFO zakurad::commands::start: initializing network
+2026-10-22T04:57:30.782976Z  INFO open_listener{addr=0.0.0.0:18233}: zakura_network::peer_set::initialize: Trying to open Zcash protocol endpoint at 0.0.0.0:18233...
+2026-10-22T04:57:30.783015Z  INFO open_listener{addr=0.0.0.0:18233}: zakura_network::peer_set::initialize: Opened Zcash protocol endpoint at 0.0.0.0:18233
+2026-10-22T04:57:30.783094Z  INFO zakura_network::address_book_updater: starting the address book updater
+2026-10-22T04:57:30.949881Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="mainnet.seeder.zfnd.org:8233" remote_ip_count=25
+2026-10-22T04:57:30.973065Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="dnsseed.str4d.xyz:8233" remote_ip_count=3
+2026-10-22T04:57:31.044295Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="dnsseed.z.cash:8233" remote_ip_count=7
+2026-10-22T04:57:35.787258Z  INFO add_initial_peers: zakura_network::config: DNS timeout resolving peer IP addresses host="mainnet.seeder.shieldedinfra.net:8233" e=Elapsed(())
+2026-10-22T04:57:35.787282Z  INFO add_initial_peers: zakura_network::config: Seed peer DNS resolution failed, checking for addresses from other seed peers host="mainnet.seeder.shieldedinfra.net:8233" attempts=1
+2026-10-22T04:57:35.787470Z  INFO add_initial_peers: zakura_network::config: loaded cached peer IP addresses cached_ip_count=18 peer_cache_file="/home/evalir/.cache/zakura/network/mainnet.peers"
+2026-10-22T04:57:35.787525Z  INFO add_initial_peers: zakura_network::peer_set::initialize: connecting to initial peer set ipv4_peer_count=50 ipv6_peer_count=0
+2026-10-22T04:57:35.942187Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=1 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:36.066475Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=2 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.155854Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=3 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.284599Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=4 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.486718Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=5 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.615427Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=6 peer=v4redacted:8333 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.706952Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=7 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.803036Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=8 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:36.861021Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=9 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.184971Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=2 errors=10 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.268653Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=2 errors=11 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.399957Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=2 errors=12 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.477560Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=2 errors=13 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.652266Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=14 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.702455Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=15 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:37.822493Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=16 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:38.153164Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=17 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:38.219557Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=18 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:38.238091Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=19 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170140)
+2026-10-22T04:57:38.510257Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=20 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170150)
+2026-10-22T04:57:38.513006Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=21 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:38.634755Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=22 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:38.739780Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=23 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:38.911664Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=24 peer=v4redacted:8233 e=Connection refused (os error 111)
+2026-10-22T04:57:39.040776Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=25 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:39.317670Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=26 peer=v4redacted:8233 e=Peer closed connection
+2026-10-22T04:57:39.352568Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=27 peer=v4redacted:4003 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:39.371081Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=28 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:39.665976Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=29 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:39.890437Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=30 peer=v4redacted:8233 e=request timed out
+2026-10-22T04:57:39.893952Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=6 errors=31 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.075179Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=8 errors=32 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.271465Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=33 peer=v4redacted:8233 e=Connection refused (os error 111)
+2026-10-22T04:57:40.319359Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=34 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.379590Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=35 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.484216Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=36 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.620075Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=37 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:40.807005Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=38 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170140)
+2026-10-22T04:57:40.992924Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=39 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-22T04:57:42.589797Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=10 errors=40 peer=v4redacted:8233 e=request timed out
+2026-10-22T04:57:42.589817Z  INFO add_initial_peers: zakura_network::peer_set::initialize: finished connecting to initial seed and disk cache peers handshake_success_total=10 handshake_error_total=40 outbound_connections=7
+2026-10-22T04:57:42.589865Z  INFO zakura_network::peer_set::initialize: sending initial request for peers active_initial_peer_count=7
+2026-10-22T04:57:42.616492Z  INFO zakurad::commands::start: initializing verifiers
+2026-10-22T04:57:42.616503Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: starting the peer address crawler crawl_new_peer_interval=61s outbound_connections=7
+2026-10-22T04:57:42.616533Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: starting state checkpoint validation
+2026-10-22T04:57:42.616723Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: initializing block verifier router tip=Some((Height(3524946), block::Hash("000000000043bd8ef9fa8161740f3ead59f609a5b415a7a10d723039adcc22fc"))) max_checkpoint_height=Height(3490665)
+2026-10-22T04:57:42.616749Z  INFO zakurad::commands::start: initializing syncer
+2026-10-22T04:57:42.616763Z  INFO zakurad::commands::start: initializing mempool
+2026-10-22T04:57:42.616776Z  INFO zakurad::commands::start: fully initializing inbound peer request handler
+2026-10-22T04:57:42.616819Z  WARN zakurad::commands::start: configure an indexer_listen_addr to start the indexer RPC server
+2026-10-22T04:57:42.616824Z  INFO zakurad::commands::start: spawning block gossip task
+2026-10-22T04:57:42.616828Z  INFO zakurad::commands::start: spawning mempool queue checker task
+2026-10-22T04:57:42.616831Z  INFO zakurad::commands::start: spawning mempool transaction gossip task
+2026-10-22T04:57:42.616835Z  INFO zakurad::commands::start: spawning delete old databases task
+2026-10-22T04:57:42.616832Z  INFO zakurad::components::sync::gossip: initializing block gossip task
+2026-10-22T04:57:42.616836Z  INFO zakurad::components::mempool::queue_checker: initializing mempool queue checker task
+2026-10-22T04:57:42.616840Z  INFO zakurad::commands::start: spawning progress logging task
+2026-10-22T04:57:42.616846Z  INFO zakura_state::config: checking for old database versions db_kind="state"
+2026-10-22T04:57:42.616837Z  INFO zakurad::components::mempool::gossip: initializing transaction gossip task
+2026-10-22T04:57:42.616857Z  INFO zakurad::commands::start: initializing health endpoints
+2026-10-22T04:57:42.616869Z  INFO zakurad::commands::start: spawning end of support checking task
+2026-10-22T04:57:42.616871Z  WARN zakurad::components::sync::progress: chain tip metrics channel closed err=SendError { .. }
+2026-10-22T04:57:42.616874Z  INFO zakurad::commands::start: spawning mempool crawler task
+2026-10-22T04:57:42.616876Z  INFO zakurad::components::sync::end_of_support: Starting end of support task
+2026-10-22T04:57:42.616892Z  INFO zakurad::commands::start: spawning syncer task
+2026-10-22T04:57:42.616898Z  INFO zakurad::components::mempool::crawler: initializing mempool crawler task
+2026-10-22T04:57:42.616903Z  INFO zakurad::commands::start: spawned initial Zakura tasks
+2026-10-22T04:57:42.616916Z  INFO ztreamerd: waiting for Zakura to sync near the chain tip
+2026-10-22T04:57:42.617000Z  INFO zakura_state::config: finished old database version cleanup task
+2026-10-22T04:57:42.617078Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3524946))
+2026-10-22T04:57:42.910509Z  INFO sync:try_to_sync{header_runtime_status=None}:obtain_tips{checkpoint_bootstrap=false}: zakura_consensus::primitives::halo2: built Orchard Action verifying key and armed its prepared zero-check version=PostNu6_3 prepared=false
+2026-10-22T04:57:43.969190Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: finished state checkpoint validation
+2026-10-22T04:57:47.591360Z  INFO sync:try_to_sync{header_runtime_status=None}:sync_round{header_runtime_status=None}: zakurad::components::sync: transient sync block download failed, retrying required block hash=block::Hash("00000000002285c6fd217affa346b7570809eac0ca953f65a132b8bd1ea4299d") retry_attempt=1 retry_limit=3
+2026-10-22T04:57:47.591478Z  INFO sync:try_to_sync{header_runtime_status=None}:sync_round{header_runtime_status=None}: zakurad::components::sync: transient sync block download failed, retrying required block hash=block::Hash("00000000006130f6e376114723ab3592f76a672dd736479859ead091075148b9") retry_attempt=1 retry_limit=3
+2026-10-22T04:57:50.788891Z  INFO peer_cache_updater: zakura_network::config: updated cached peer IP addresses cached_ip_count=158 peer_cache_file="/home/evalir/.cache/zakura/network/mainnet.peers"
+2026-10-22T04:57:52.618183Z  INFO zakurad::components::sync::end_of_support: Checking if Zakura release is inside support range ...
+2026-10-22T04:57:52.618207Z  INFO zakurad::components::sync::end_of_support: Zakura release is supported until block 3532995, please report bugs at https://github.com/zakura-core/zakura/issues
+2026-10-22T04:57:57.239198Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:57:57.239232Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:58:01.420042Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=60 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=20
+2026-10-22T04:58:07.239862Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526314))
+2026-10-22T04:58:13.251728Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:58:13.251770Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:58:23.252830Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526314))
+2026-10-22T04:58:29.254959Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:58:29.254998Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:58:29.255027Z  INFO zakurad::components::sync::gossip: height=Height(3526314) request=AdvertiseBlock(block::Hash("000000000067ffc4d30e005c6d615a0d9cd8795ca5011ff7ce005d95949c3237"), None) log_msg="sending committed block broadcast"
+2026-10-22T04:58:29.255322Z  INFO ztreamerd: Zakura is near the chain tip tip=Some((Height(3526314), block::Hash("000000000067ffc4d30e005c6d615a0d9cd8795ca5011ff7ce005d95949c3237")))
+2026-10-22T04:58:29.255542Z  INFO ztreamerd: syncing historical compact index
+2026-10-22T04:58:29.268491Z  INFO zakurad::components::mempool: activating mempool tip_height=Height(3526314) reason="estimated close to the network tip"
+2026-10-22T04:58:29.463918Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:58:31.470864Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:58:39.256336Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526314))
+2026-10-22T04:58:42.629358Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3526314) network_upgrade=Nu6_3 remaining_sync_blocks=3 time_since_last_state_block=45s
+2026-10-22T04:58:45.258210Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:58:45.258448Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:58:45.365033Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=3 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=77
+2026-10-22T04:58:45.429314Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:58:48.365601Z  INFO crawl_and_dial{new_peer_interval=61s}:dial{peer=v4redacted:32028}: zakura_network::peer_set::initialize: failed to make outbound connection to peer error=Elapsed(()) peer=v4redacted:32028
+2026-10-22T04:58:51.161439Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:58:55.259926Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526314))
+2026-10-22T04:59:01.261000Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:59:01.261029Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:59:01.419462Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:59:11.261713Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526314))
+2026-10-22T04:59:17.263133Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:59:17.263165Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526314))
+2026-10-22T04:59:21.172899Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000021e11de8493ab2d9d8b4424f64a9ded6f973763a228bf49bef68c5 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3526315)
+2026-10-22T04:59:21.173965Z  INFO zakurad::components::sync::gossip: height=Height(3526315) request=AdvertiseBlock(block::Hash("000000000021e11de8493ab2d9d8b4424f64a9ded6f973763a228bf49bef68c5"), None) log_msg="sending committed block broadcast"
+2026-10-22T04:59:27.263831Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T04:59:33.264588Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:59:33.264623Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T04:59:33.504854Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:59:42.522850Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:59:42.642132Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3526315) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=20s
+2026-10-22T04:59:43.265786Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T04:59:44.700344Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=3 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=77
+2026-10-22T04:59:49.267157Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T04:59:49.267199Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T04:59:49.642130Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T04:59:59.267715Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T05:00:05.269201Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T05:00:05.269231Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T05:00:07.256015Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T05:00:14.840360Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-22T05:00:15.269936Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T05:00:21.271290Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T05:00:21.271336Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T05:00:24.496965Z  INFO ztreamer_indexer::pipeline: historical pipeline stage totals start_height=0 target_height=3525314 target_hash=000000000038d2e451223c399077a195397879b750ca559deedd46e96fd3aa8b fetch_read_seconds=676.793453882 fetch_header_read_seconds=29.821101884 fetch_transaction_read_seconds=637.61090925 fetch_txid_read_seconds=9.361442748 parse_seconds=10.018291202 worker_send_wait_seconds=215.035499113 processed_ranges=13771 processed_blocks=3525315 processed_bytes=276764880896 coordinator_receive_wait_seconds=90.005426503 batch_send_wait_seconds=22.918686788 write_seconds=100.585473032 write_batches=451 written_blocks=3525315
+2026-10-22T05:00:24.497945Z  INFO ztreamer_indexer::pipeline: historical pipeline stage totals start_height=3525315 target_height=3525315 target_hash=0000000000180aada34f1610eea529e4c43b7338f9b36d9a630fd3bf2929875b fetch_read_seconds=2.0957e-5 fetch_header_read_seconds=3.597e-6 fetch_transaction_read_seconds=1.4546e-5 fetch_txid_read_seconds=2.814e-6 parse_seconds=6.853e-6 worker_send_wait_seconds=2.344e-6 processed_ranges=1 processed_blocks=1 processed_bytes=39908 coordinator_receive_wait_seconds=0.000100626 batch_send_wait_seconds=2.434e-6 write_seconds=0.00023302 write_batches=1 written_blocks=1
+2026-10-22T05:00:24.498020Z  INFO ztreamerd: historical compact index complete height=3525315 elapsed_seconds=115.242470874
+2026-10-22T05:00:24.507210Z  INFO ztreamerd::lifecycle: shutting down node and application
+2026-10-22T05:00:24.507224Z  INFO zakurad::commands::start: exiting Zakura: asking other tasks to stop
+2026-10-22T05:00:24.507232Z  INFO zakurad::commands::start: exiting Zakura: all tasks have been asked to stop, waiting for remaining tasks to finish
+2026-10-22T05:00:24.507372Z  INFO zakura_state::service: dropping the state: logging database metrics
+2026-10-22T05:00:24.507630Z  INFO zakura_network::address_book_updater: stopping address book updater error=Err(AllAddressBookUpdaterSendersClosed)
+2026-10-22T05:00:24.507805Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-22T05:00:24.507819Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-22T05:00:24.518574Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Disk Size: 282.9 GB
+2026-10-22T05:00:24.518582Z  INFO zakura_state::service::finalized_state::disk_db: Total Live Data Disk Size: 282.3 GB
+2026-10-22T05:00:24.518585Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Memory Size: 74.4 MB
+2026-10-22T05:00:24.520395Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-22T05:00:24.520400Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-22T05:00:27.823247Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-22T05:00:27.823247Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-22T05:00:27.823271Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/home/evalir/sandblast-bench/zakura-cache/state/v29/mainnet"
+2026-10-22T05:00:27.823277Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/home/evalir/sandblast-bench/zakura-cache/state/v29/mainnet"
+2026-10-22T05:00:27.823778Z  INFO zakura_state::service: waiting for the block write task to finish
+2026-10-22T05:00:27.840581Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-22T05:00:27.840591Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-22T05:00:30.856611Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer

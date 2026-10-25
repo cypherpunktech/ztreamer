@@ -1,0 +1,19 @@
+# Standalone zakurad v1.5.1 (--features indexer) for the replication acceptance run.
+# Archive state = the frozen sandblast-bench snapshot; no peers so the fixture stays at its tip.
+[network]
+network = "Mainnet"
+listen_addr = "127.0.0.1:18233"
+initial_mainnet_peers = []
+cache_dir = false
+
+[state]
+cache_dir = "/home/evalir/sandblast-bench/zakura-cache"
+ephemeral = false
+
+[rpc]
+listen_addr = "127.0.0.1:18232"
+indexer_listen_addr = "127.0.0.1:8230"
+enable_cookie_auth = false
+
+[tracing]
+use_color = false

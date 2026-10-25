@@ -1,0 +1,3 @@
+durable_tip=Some(3525315) sealed_through=Some(3524999) generation=452 tree_sizes=TreeSizes { sapling: 73988057, orchard: 50477534, ironwood: 821593 }
+ranges=3525 sapling_outputs=73987964 orchard_actions=50477448 ironwood_actions=819988 encoded_bytes=18111549825
+commitments per range: p50=903 p95=247816 max=1059533 (range_start 1785000)

@@ -1,0 +1,47 @@
+{
+  "collected_at_utc": "2026-10-22T04:52:59.260091+00:00",
+  "collection_note": "Collected before the replication acceptance measurements on the same host.",
+  "cpu": {
+    "model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "sockets": 1,
+    "physical_cores": 12,
+    "logical_cpus": 24,
+    "architecture": "x86_64",
+    "l3_cache": "64 MiB (2 instances)"
+  },
+  "memory": {
+    "os_total_bytes": 67303931904,
+    "configured_swap_bytes": 33285984256
+  },
+  "benchmark_storage": {
+    "model": "MTFDKCC960TGP-1BK1DABYY + MTFDKCC960TGP-1BK1DABYY (mdadm RAID1)",
+    "device": "/dev/md3",
+    "members": [
+      "/dev/nvme0n1p3",
+      "/dev/nvme1n1p3"
+    ],
+    "capacity_bytes": 960197124096,
+    "transport": "nvme",
+    "rotational": false,
+    "partition": "/dev/md3",
+    "mount_point": "/",
+    "filesystem": "ext4",
+    "index_dir": "/home/evalir/sandblast-bench/replication/ztreamer-index",
+    "zakura_state_dir": "/home/evalir/sandblast-bench/zakura-cache",
+    "index_and_node_share_disk": true
+  },
+  "os": {
+    "distribution": "Ubuntu 26.04.1 LTS",
+    "kernel": "7.0.0-38-generic"
+  },
+  "sources": [
+    "lscpu -J",
+    "/proc/meminfo",
+    "findmnt -T",
+    "lsblk -J -b",
+    "/proc/mdstat",
+    "/etc/os-release",
+    "uname"
+  ],
+  "execution": "zakurad (archive, no peers) and all measurement clients ran on this host over loopback."
+}

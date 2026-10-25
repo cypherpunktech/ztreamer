@@ -1,0 +1,9 @@
+real sapling cmus: 7
+sapling sequential: 65536 leaves in 2.41 s = 36.7 us/leaf, root Root("b68f34a3f83bab680aedbe786347ef4791ae8af9e93b8f3e764279a469b5a913")
+sapling append_batch(64): 0.70 s = 10.6 us/leaf
+sapling append_batch(512): 0.29 s = 4.4 us/leaf
+sapling append_batch(4096): 0.20 s = 3.1 us/leaf
+orchard sequential: 65536 leaves in 0.79 s = 12.1 us/leaf, root Root("9a449f1567b30c7435b0cebcb26d0fb8f377734e6b8fd7bd2c11e514784dac34")
+orchard append_batch(64): 0.26 s = 4.0 us/leaf
+orchard append_batch(512): 0.11 s = 1.6 us/leaf
+orchard append_batch(4096): 0.07 s = 1.1 us/leaf

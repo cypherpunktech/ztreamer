@@ -1,0 +1,3 @@
+client: start=0 connections=2 streams=8 segment=256 blocks=200000 bytes=6210589712 wall_s=5.947 MiB/s=995.9 blocks/s=33628 client_cpu_s=4.65 client_cpu_per_GiB=0.80
+client: start=1750000 connections=2 streams=8 segment=256 blocks=20000 bytes=15806460704 wall_s=8.373 MiB/s=1800.3 blocks/s=2389 client_cpu_s=19.98 client_cpu_per_GiB=1.36
+client: start=1750000 connections=1 streams=1 segment=256 blocks=5000 bytes=3637032426 wall_s=2.814 MiB/s=1232.6 blocks/s=1777 client_cpu_s=1.33 client_cpu_per_GiB=0.39

@@ -1,0 +1,16 @@
+## range=1785000 mode=sequential
+ranges=1 wall_s=38.6 sapling_leaves=1030681 sapling_s=38.1 (37.0 us/leaf) orchard_leaves=28852 orchard_s=0.4 (12.4 us/leaf) batch=false
+tree ms per range: p50=38446 p95=38446 max=38446
+exit=0
+## range=1785000 mode=--batch
+ranges=1 wall_s=4.0 sapling_leaves=1030681 sapling_s=3.8 (3.6 us/leaf) orchard_leaves=28852 orchard_s=0.1 (3.1 us/leaf) batch=true
+tree ms per range: p50=3842 p95=3842 max=3842
+exit=0
+## range=1145000 mode=sequential
+ranges=1 wall_s=0.1 sapling_leaves=903 sapling_s=0.1 (55.6 us/leaf) orchard_leaves=0 orchard_s=0.0 (18949.4 us/leaf) batch=false
+tree ms per range: p50=69 p95=69 max=69
+exit=0
+## range=1145000 mode=--batch
+ranges=1 wall_s=0.1 sapling_leaves=903 sapling_s=0.1 (67.2 us/leaf) orchard_leaves=0 orchard_s=0.0 (19401.5 us/leaf) batch=true
+tree ms per range: p50=80 p95=80 max=80
+exit=0

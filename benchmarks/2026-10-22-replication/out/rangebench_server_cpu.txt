@@ -1,0 +1,4 @@
+zakurad_pid=3427151
+genesis-8x2 rc=0 server_ticks_before=56011 server_ticks_after=57989 server_cpu_s=19.78 wall_s=5.97
+sandblast-8x2 rc=0 server_ticks_before=57990 server_ticks_after=62346 server_cpu_s=43.56 wall_s=8.39
+sandblast-1x1 rc=0 server_ticks_before=62347 server_ticks_after=62672 server_cpu_s=3.25 wall_s=2.83

@@ -1,0 +1,120 @@
+Thank you for running a mainnet zakurad 1.5.1+gaf944f5194ef node!
+You're helping to strengthen the network and contributing to a social good :)
+2026-10-22T06:16:01.991089Z  INFO zakurad::components::tracing::component: started tracing component filter="info" TRACING_STATIC_MAX_LEVEL=LevelFilter::INFO LOG_STATIC_MAX_LEVEL=Info
+2026-10-22T06:16:01.991134Z  INFO zakurad::components::tracing::component: installed sentry tracing layer
+2026-10-22T06:16:01.991139Z  INFO zakurad::components::tracing::component: set 'tracing.progress_bar ="summary"' in zakura.toml to activate progress bars
+2026-10-22T06:16:01.991141Z  INFO zakurad::application: Diagnostic metadata:
+version: 1.5.1+gaf944f5194ef
+Zcash network: Mainnet
+running state version: 29.1.0+indexer
+initial disk state version: 29.1.0+indexer
+features: default,default_release_binaries,howudoin,indexer,indicatif,metrics_exporter_prometheus,opentelemetry,progress_bar,prometheus,release_max_level_info,sentry
+branch: main
+git commit: af944f5194ef2e9921bc96af017629450375013c
+commit timestamp: 2026-09-30T03:44:25+04:00
+target triple: x86_64-unknown-linux-gnu
+rust compiler: 1.99.1
+rust release date: 2026-10-13
+optimization level: 3
+debug checks: true
+2026-10-22T06:16:01.991146Z  INFO zakurad::application: Using config file at: "/home/evalir/sandblast-bench/replication/zakura-node.toml"
+2026-10-22T06:16:01.991148Z  INFO zakurad::application: ZakuradConfig { consensus: Config { checkpoint_sync: true, vct_fast_sync: None }, metrics: Config { endpoint_addr: None }, network: Config { listen_addr: 127.0.0.1:18233, external_addr: None, network: Mainnet, initial_mainnet_peers: {}, initial_testnet_peers: {"dnsseed.testnet.z.cash:18233", "testnet.seeder.zfnd.org:18233"}, cache_dir: IsEnabled(false), identity_dir: "/home/evalir/.zakura", zakura_node_secret_key: None, p2p_stack: Default, zakura: ZakuraConfig { bootstrap_peers: ["1398f62c6d1a457c51ba6a4b5f3dbd2f69fca93216218dc8997e416bd17d93ca@165.22.54.66:8234", "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618@104.131.184.123:8234", "9ec67ad6834bc2ca0d659c240e042d3446c37cabcc092b527d459c87d938b4a4@159.65.183.89:8234", "bd3dc5d2a3d44c6bf90e364bf446231dbf9737e38a562ccf9e91ea631ea59b22@143.244.184.176:8234", "14ab98fa0c4b07d40119e1dbc9f3c36d20c8f226ae5ba4216218a2034f148e57@159.203.38.10:8234", "681d21b18644cd82ec13256a97f92bec1fff815683ef6f65dc7c993f098a4fe5@64.227.44.93:8234", "058b3f20dc9bef7bb447f94d7663d793cfbc036720f97e52d7f13661b21818e1@161.35.156.226:8234", "291323d78eb7186c3fa225ef5e305e95363e0ef06d42dca91bd4ef0254aed1ae@139.59.64.115:8234", "85e425233a68697d4be91dd5d542305a8a327cd06d992d53c0913cef2fa75084@168.144.173.250:8234"], listen_addr: Some(0.0.0.0:8234), nat_traversal: false, max_connections: 256, max_connections_per_ip: 16, max_pending_handshakes: 32, stream_open_rate_per_second: 32, message_rate_per_second: 2048, trace_dir: None, header_sync: ZakuraHeaderSyncConfig { max_headers_per_response: 1000, status_refresh_interval: 30s, peer_limits: ServicePeerLimits { max_inbound_peers: 256, max_outbound_peers: 256, inbound_queue_depth: 128, outbound_queue_depth: 128, max_pending_escalations: 32 }, max_unproductive_header_requests: 3, unproductive_peer_cooldown: 60s, anchor_height: None, anchor_hash: None }, block_sync: ZakuraBlockSyncConfig { replace_legacy_syncer: false, max_blocks_per_response: 1, max_inflight_requests: 32000, initial_inflight_requests: 64, max_response_bytes: 33554432, max_inflight_block_bytes: 6442450944, max_reorder_lookahead_bytes: 1610612736, floor_peer_avoid_cooldown: 8s, max_submitted_block_applies: 401, request_timeout: 8s, floor_rescue_timeout: 2s, no_progress_peer_cooldown: 180s, initial_block_probe_requests: 1, max_requests_without_block_progress: 64, status_refresh_interval: 30s, size_deviation_tolerance: 200, bbr_cwnd_gain_percent: 300, bbr_probe_bw_gain_percent: 125, bbr_probe_rtt_interval: 10s, bbr_probe_rtt_duration: 200ms, bbr_rtprop_window: 10s, bbr_delivery_rate_window: 10s, bbr_startup_growth_percent: 200, bbr_min_cwnd: 4, bbr_min_cwnd_bytes: 2524288, bbr_delay_gradient_percent: 150, bbr_reliability_weight_percent: 100, bbr_cwnd_unit: Bytes, floor_bypass_slots: 2, peer_limits: ServicePeerLimits { max_inbound_peers: 256, max_outbound_peers: 256, inbound_queue_depth: 128, outbound_queue_depth: 128, max_pending_escalations: 32 } }, dev_network: None }, peerset_initial_target_size: 100, crawl_new_peer_interval: 61s, max_connections_per_ip: 1, expose_peer_addresses: false }, state: Config { cache_dir: "/home/evalir/sandblast-bench/zakura-cache", ephemeral: false, should_backup_non_finalized_state: true, repair_zakura_header_store_on_startup: false, enable_zakura_header_seed_from_committed_blocks: false, checkpoint_sync: true, vct_fast_sync: true, historical_frontier_artifact: None, delete_old_database: true, storage_mode: Archive, debug_stop_at_height: None, debug_validity_check_interval: None, debug_skip_non_finalized_state_backup_task: false }, tracing: Config { inner: InnerConfig { use_color: false, force_use_color: false, filter: None, buffer_limit: 128000, endpoint_addr: None, flamegraph: None, progress_bar: None, log_file: None, use_journald: false, opentelemetry_endpoint: None, opentelemetry_service_name: None, opentelemetry_sample_percent: None } }, sync: Config { download_concurrency_limit: 100, checkpoint_verify_concurrency_limit: 1000, full_verify_concurrency_limit: 20, zakura_block_apply_concurrency_limit: 32, parallel_cpu_threads: 0, debug_skip_regtest_genesis_self_seed: false, debug_blocksync_throughput_target_height: None }, mempool: Config { tx_cost_limit: 80000000, max_transaction_bytes: 250000, eviction_memory_time: 3600s, debug_enable_at_height: None, max_datacarrier_bytes: Some(83) }, rpc: Config { listen_addr: Some(127.0.0.1:18232), admin_listen_addr: None, indexer_listen_addr: Some(127.0.0.1:8230), indexer_tls: None, parallel_cpu_threads: 0, debug_force_finished_sync: false, cookie_dir: "/home/evalir/.cache/zakura", cookie_file_name: ".cookie", enable_cookie_auth: true, max_response_body_size: 52428800, tls: None }, mining: Config { miner_address: None, extra_coinbase_data: None, miner_memo: None, internal_miner: false, optimistic_block_inventory: true }, health: Config { listen_addr: None, min_connected_peers: 1, ready_max_blocks_behind: 2, enforce_on_test_networks: false, ready_max_tip_age: 300s }, zcashd_compat: Config { enabled: false, manage_zcashd: false, zcashd_source: Path, zcashd_path: None, zcashd_datadir: None, zcashd_extra_args: [], p2p_connect_addr: None, block_gossip_peer_ips: [], startup_delay: 1s, restart_backoff: 2s, restart_backoff_max: 300s, restart_reset_after: 3600s, shutdown_grace_period: 300s } }
+2026-10-22T06:16:01.991233Z  INFO {zakurad="af944f5194ef2e9921bc96af017629450375013c" net="Main"}: zakurad::application: initialized rayon thread pool for CPU-bound tasks num_threads=24
+2026-10-22T06:16:01.992000Z  INFO zakurad::commands::start: Starting zakurad
+2026-10-22T06:16:01.992113Z  WARN zakurad::commands::start: TCP slow-start-after-idle is enabled, which resets TCP's congestion window between block requests and significantly reduces single-peer throughput for block propagation. Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation setting="net.ipv4.tcp_slow_start_after_idle"
+2026-10-22T06:16:01.992127Z  INFO zakurad::commands::start: initializing node state
+2026-10-22T06:16:01.995733Z  INFO zakurad::commands::start: opening database, this may take a few minutes
+2026-10-22T06:16:01.995863Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: trying to open current database format running_version=29.1.0+indexer
+2026-10-22T06:16:02.391300Z  INFO zakura_state::service::finalized_state::disk_db: Opened Zakura state cache at /home/evalir/sandblast-bench/zakura-cache/state/v29/mainnet
+2026-10-22T06:16:02.397629Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by a previous Zakura instance is current and valid running_version=29.1.0+indexer
+2026-10-22T06:16:02.398100Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: started checking/adding indexes for spending tx ids
+2026-10-22T06:16:43.098880Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: finished checking/adding indexes for spending tx ids
+2026-10-22T06:16:46.070530Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-22T06:16:46.070596Z  INFO zakura_state::service::finalized_state::vct: VCT: exact header auxiliary source enabled by default handoff_height=3490665
+2026-10-22T06:16:46.080125Z  INFO zakura_state::service: loaded historical frontier artifact source_path="embedded Mainnet historical frontier artifact" entries=2293 spacing=0
+2026-10-22T06:16:46.080184Z  INFO zakura_state::service::non_finalized_state: restoring non-finalized blocks from backup and spawning backup task backup_dir_path="/home/evalir/sandblast-bench/zakura-cache/non_finalized_state/mainnet"
+2026-10-22T06:16:47.841036Z  INFO zakura_state::service::non_finalized_state: restored blocks from non-finalized backup cache num_blocks_restored=1000
+2026-10-22T06:16:47.844843Z  INFO zakura_state::service: loaded Zakura state cache chain_tip=Some((block::Hash("000000000021e11de8493ab2d9d8b4424f64a9ded6f973763a228bf49bef68c5"), Height(3526315)))
+2026-10-22T06:16:47.900041Z  INFO zakura_state::service: starting legacy chain check
+2026-10-22T06:16:47.900068Z  INFO zakura_state::service: cached state consensus branch is valid: no legacy chain found
+2026-10-22T06:16:47.900077Z  INFO zakurad::commands::start: logging database metrics on startup
+2026-10-22T06:16:47.906922Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Disk Size: 282.9 GB
+2026-10-22T06:16:47.906929Z  INFO zakura_state::service::finalized_state::disk_db: Total Live Data Disk Size: 282.3 GB
+2026-10-22T06:16:47.906931Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Memory Size: 108.5 KB
+2026-10-22T06:16:47.906942Z  INFO zakurad::commands::start::zakura::coordinator: sync apply lifecycle changed apply_phase="native" apply_epoch=0
+2026-10-22T06:16:47.906947Z  INFO zakurad::commands::start: initializing network
+2026-10-22T06:16:47.906987Z  INFO open_listener{addr=127.0.0.1:18233}: zakura_network::peer_set::initialize: Trying to open Zcash protocol endpoint at 127.0.0.1:18233...
+2026-10-22T06:16:47.907035Z  INFO open_listener{addr=127.0.0.1:18233}: zakura_network::peer_set::initialize: Opened Zcash protocol endpoint at 127.0.0.1:18233
+2026-10-22T06:16:47.907107Z  INFO zakura_network::address_book_updater: starting the address book updater
+2026-10-22T06:16:47.909735Z  WARN add_initial_peers: zakura_network::config: no initial peers in the network config. Hint: you must configure at least one peer IP or DNS seeder to run Zakura, give it some previously cached peer IP addresses on disk, or make sure Zakura's listener port gets inbound connections.
+2026-10-22T06:16:47.909762Z  INFO add_initial_peers: zakura_network::peer_set::initialize: connecting to initial peer set ipv4_peer_count=0 ipv6_peer_count=0
+2026-10-22T06:16:47.909773Z  INFO add_initial_peers: zakura_network::peer_set::initialize: finished connecting to initial seed and disk cache peers handshake_success_total=0 handshake_error_total=0 outbound_connections=0
+2026-10-22T06:16:47.909797Z  INFO zakura_network::peer_set::initialize: sending initial request for peers active_initial_peer_count=0
+2026-10-22T06:16:47.909815Z  INFO zakurad::commands::start: initializing verifiers
+2026-10-22T06:16:47.909831Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: starting the peer address crawler crawl_new_peer_interval=61s outbound_connections=0
+2026-10-22T06:16:47.909834Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: starting state checkpoint validation
+2026-10-22T06:16:47.910039Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: initializing block verifier router tip=Some((Height(3526315), block::Hash("000000000021e11de8493ab2d9d8b4424f64a9ded6f973763a228bf49bef68c5"))) max_checkpoint_height=Height(3490665)
+2026-10-22T06:16:47.910051Z  INFO zakurad::commands::start: initializing syncer
+2026-10-22T06:16:47.910057Z  INFO zakurad::commands::start: initializing mempool
+2026-10-22T06:16:47.910067Z  INFO zakurad::commands::start: fully initializing inbound peer request handler
+2026-10-22T06:16:47.910649Z  INFO zakura_rpc::server::cookie: RPC auth cookie written to disk
+2026-10-22T06:16:47.910671Z  INFO zakura_rpc::server: Opened RPC endpoint at 127.0.0.1:18232
+2026-10-22T06:16:47.910679Z  INFO zakurad::commands::start: spawning indexer RPC server
+2026-10-22T06:16:47.910751Z  INFO init: zakura_rpc::indexer::server: Trying to open indexer RPC endpoint at 127.0.0.1:8230...
+2026-10-22T06:16:47.910767Z  INFO init: zakura_rpc::indexer::server: Opened RPC endpoint at 127.0.0.1:8230
+2026-10-22T06:16:47.910774Z  INFO zakurad::commands::start: spawning block gossip task
+2026-10-22T06:16:47.910777Z  INFO zakurad::commands::start: spawning mempool queue checker task
+2026-10-22T06:16:47.910779Z  INFO zakurad::commands::start: spawning mempool transaction gossip task
+2026-10-22T06:16:47.910784Z  INFO zakurad::commands::start: spawning delete old databases task
+2026-10-22T06:16:47.910787Z  INFO zakurad::commands::start: spawning progress logging task
+2026-10-22T06:16:47.910785Z  INFO zakurad::components::mempool::queue_checker: initializing mempool queue checker task
+2026-10-22T06:16:47.910789Z  INFO zakurad::commands::start: initializing health endpoints
+2026-10-22T06:16:47.910784Z  INFO zakurad::components::sync::gossip: initializing block gossip task
+2026-10-22T06:16:47.910792Z  INFO zakurad::commands::start: spawning end of support checking task
+2026-10-22T06:16:47.910792Z  INFO zakurad::components::mempool::gossip: initializing transaction gossip task
+2026-10-22T06:16:47.910790Z  INFO zakura_state::config: checking for old database versions db_kind="state"
+2026-10-22T06:16:47.910796Z  INFO zakurad::commands::start: spawning mempool crawler task
+2026-10-22T06:16:47.910799Z  INFO zakurad::commands::start: spawning syncer task
+2026-10-22T06:16:47.910802Z  INFO zakurad::commands::start: spawned initial Zakura tasks
+2026-10-22T06:16:47.910807Z  INFO zakurad::components::mempool::crawler: initializing mempool crawler task
+2026-10-22T06:16:47.910814Z  WARN zakurad::components::sync::progress: chain tip metrics channel closed err=SendError { .. }
+2026-10-22T06:16:47.910806Z  INFO zakurad::components::sync::end_of_support: Starting end of support task
+2026-10-22T06:16:47.910855Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=50 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=30
+2026-10-22T06:16:47.910897Z  INFO zakura_state::config: finished old database version cleanup task
+2026-10-22T06:16:47.910980Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:16:49.179368Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: finished state checkpoint validation
+2026-10-22T06:16:53.912324Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-22T06:16:53.912344Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T06:16:53.912371Z  INFO zakurad::components::sync::gossip: height=Height(3526315) request=AdvertiseBlock(block::Hash("000000000021e11de8493ab2d9d8b4424f64a9ded6f973763a228bf49bef68c5"), None) log_msg="sending committed block broadcast"
+2026-10-22T06:16:57.911423Z  INFO zakurad::components::sync::end_of_support: Checking if Zakura release is inside support range ...
+2026-10-22T06:16:57.911439Z  INFO zakurad::components::sync::end_of_support: Zakura release is supported until block 3532995, please report bugs at https://github.com/zakura-core/zakura/issues
+2026-10-22T06:16:57.912523Z  INFO zakurad::components::mempool: activating mempool tip_height=Height(3526315) reason="estimated close to the network tip"
+2026-10-22T06:17:03.913764Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:17:47.925143Z  INFO zakurad::components::sync::progress: initial sync is very slow, or estimated tip is wrong. Hint: check your network connection, and your computer clock and time zone sync_percent=99.998% current_height=Height(3526315) network_upgrade=Nu6_3 remaining_sync_blocks=63 after_checkpoint_height=Height(3491675) time_since_last_state_block=1m
+2026-10-22T06:17:48.913226Z  INFO crawl_and_dial{new_peer_interval=61s}:crawl: zakura_network::peer_set::candidate_set: timeout waiting for peer service readiness or peer responses
+2026-10-22T06:17:48.913264Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=0 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=80
+2026-10-22T06:17:48.915251Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: deadline has elapsed
+2026-10-22T06:17:48.915272Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T06:17:58.915736Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:18:06.914148Z  INFO zakurad::components::mempool::crawler: mempool crawl timed out: Elapsed(())
+2026-10-22T06:18:43.917143Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: deadline has elapsed
+2026-10-22T06:18:43.917175Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T06:18:47.937833Z  INFO zakurad::components::sync::progress: initial sync is very slow, or estimated tip is wrong. Hint: check your network connection, and your computer clock and time zone sync_percent=99.998% current_height=Height(3526315) network_upgrade=Nu6_3 remaining_sync_blocks=63 after_checkpoint_height=Height(3491675) time_since_last_state_block=2m
+2026-10-22T06:18:53.918366Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:18:57.911856Z  INFO crawl_and_dial{new_peer_interval=61s}:crawl: zakura_network::peer_set::candidate_set: timeout waiting for peer service readiness or peer responses
+2026-10-22T06:18:57.911893Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=0 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=80
+2026-10-22T06:19:38.919423Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: deadline has elapsed
+2026-10-22T06:19:38.919458Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T06:19:47.949545Z  INFO zakurad::components::sync::progress: initial sync is very slow, or estimated tip is wrong. Hint: check your network connection, and your computer clock and time zone sync_percent=99.998% current_height=Height(3526315) network_upgrade=Nu6_3 remaining_sync_blocks=64 after_checkpoint_height=Height(3491675) time_since_last_state_block=3m
+2026-10-22T06:19:48.920666Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:19:58.912395Z  INFO crawl_and_dial{new_peer_interval=61s}:crawl: zakura_network::peer_set::candidate_set: timeout waiting for peer service readiness or peer responses
+2026-10-22T06:19:58.912427Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=0 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=80
+2026-10-22T06:20:32.916123Z  INFO zakurad::components::mempool::crawler: mempool crawl timed out: Elapsed(())
+2026-10-22T06:20:33.922317Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: deadline has elapsed
+2026-10-22T06:20:33.922347Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))
+2026-10-22T06:20:43.924275Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3526315))
+2026-10-22T06:20:47.961544Z  INFO zakurad::components::sync::progress: initial sync is very slow, or estimated tip is wrong. Hint: check your network connection, and your computer clock and time zone sync_percent=99.998% current_height=Height(3526315) network_upgrade=Nu6_3 remaining_sync_blocks=65 after_checkpoint_height=Height(3491675) time_since_last_state_block=4m
+2026-10-22T06:20:59.914169Z  INFO crawl_and_dial{new_peer_interval=61s}:crawl: zakura_network::peer_set::candidate_set: timeout waiting for peer service readiness or peer responses
+2026-10-22T06:20:59.914202Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=0 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=80
+2026-10-22T06:21:28.925323Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: deadline has elapsed
+2026-10-22T06:21:28.925368Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3526315))

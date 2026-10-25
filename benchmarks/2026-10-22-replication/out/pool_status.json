@@ -1,0 +1,35 @@
+{
+  "sapling": {
+    "counts": {
+      "absent": 419,
+      "match-reversed": 3106
+    },
+    "first_end_height": {
+      "absent": 999,
+      "match-reversed": 419999
+    }
+  },
+  "orchard": {
+    "counts": {
+      "absent": 1687,
+      "match": 1838
+    },
+    "first_end_height": {
+      "absent": 999,
+      "match": 1687999
+    }
+  },
+  "ironwood": {
+    "counts": {
+      "absent": 3428,
+      "not-computed": 97
+    },
+    "first_end_height": {
+      "absent": 999,
+      "not-computed": 3428999
+    }
+  },
+  "response_keys": {
+    "hash,height,ironwood,orchard,sapling,time": 3525
+  }
+}

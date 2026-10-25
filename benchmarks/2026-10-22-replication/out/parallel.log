@@ -1,0 +1,48 @@
+ranges=1 wall_s=0.0 sapling_leaves=0 sapling_s=0.0 (16971.5 us/leaf) orchard_leaves=0 orchard_s=0.0 (20050.6 us/leaf) batch=false
+tree ms per range: p50=37 p95=37 max=37
+ranges=1 wall_s=0.0 sapling_leaves=0 sapling_s=0.0 (16908.2 us/leaf) orchard_leaves=0 orchard_s=0.0 (20259.3 us/leaf) batch=false
+tree ms per range: p50=37 p95=37 max=37
+ranges=1 wall_s=0.0 sapling_leaves=188 sapling_s=0.0 (137.3 us/leaf) orchard_leaves=0 orchard_s=0.0 (20170.5 us/leaf) batch=false
+tree ms per range: p50=46 p95=46 max=46
+ranges=1 wall_s=0.1 sapling_leaves=381 sapling_s=0.0 (87.7 us/leaf) orchard_leaves=0 orchard_s=0.0 (20086.1 us/leaf) batch=false
+tree ms per range: p50=54 p95=54 max=54
+ranges=1 wall_s=0.1 sapling_leaves=604 sapling_s=0.0 (70.2 us/leaf) orchard_leaves=0 orchard_s=0.0 (20056.3 us/leaf) batch=false
+tree ms per range: p50=62 p95=62 max=62
+ranges=1 wall_s=0.1 sapling_leaves=559 sapling_s=0.0 (86.1 us/leaf) orchard_leaves=0 orchard_s=0.0 (20153.6 us/leaf) batch=false
+tree ms per range: p50=68 p95=68 max=68
+ranges=1 wall_s=0.1 sapling_leaves=917 sapling_s=0.1 (61.2 us/leaf) orchard_leaves=0 orchard_s=0.0 (20201.3 us/leaf) batch=false
+tree ms per range: p50=76 p95=76 max=76
+ranges=1 wall_s=0.1 sapling_leaves=1096 sapling_s=0.1 (56.2 us/leaf) orchard_leaves=0 orchard_s=0.0 (20226.7 us/leaf) batch=false
+tree ms per range: p50=82 p95=82 max=82
+ranges=1 wall_s=0.1 sapling_leaves=1224 sapling_s=0.1 (54.6 us/leaf) orchard_leaves=0 orchard_s=0.0 (20164.4 us/leaf) batch=false
+tree ms per range: p50=87 p95=87 max=87
+ranges=1 wall_s=0.1 sapling_leaves=1160 sapling_s=0.1 (55.6 us/leaf) orchard_leaves=0 orchard_s=0.0 (20131.9 us/leaf) batch=false
+tree ms per range: p50=85 p95=85 max=85
+ranges=1 wall_s=0.2 sapling_leaves=3901 sapling_s=0.2 (44.7 us/leaf) orchard_leaves=0 orchard_s=0.0 (19992.7 us/leaf) batch=false
+tree ms per range: p50=195 p95=195 max=195
+ranges=1 wall_s=0.1 sapling_leaves=463 sapling_s=0.0 (80.7 us/leaf) orchard_leaves=213 orchard_s=0.0 (110.4 us/leaf) batch=false
+tree ms per range: p50=61 p95=61 max=61
+ranges=1 wall_s=0.1 sapling_leaves=327 sapling_s=0.0 (97.7 us/leaf) orchard_leaves=517 orchard_s=0.0 (55.4 us/leaf) batch=false
+tree ms per range: p50=61 p95=61 max=61
+ranges=1 wall_s=0.1 sapling_leaves=223 sapling_s=0.0 (121.9 us/leaf) orchard_leaves=540 orchard_s=0.0 (52.4 us/leaf) batch=false
+tree ms per range: p50=55 p95=55 max=55
+ranges=1 wall_s=0.1 sapling_leaves=178 sapling_s=0.0 (142.4 us/leaf) orchard_leaves=728 orchard_s=0.0 (42.7 us/leaf) batch=false
+tree ms per range: p50=56 p95=56 max=56
+ranges=1 wall_s=0.1 sapling_leaves=321 sapling_s=0.0 (96.5 us/leaf) orchard_leaves=716 orchard_s=0.0 (44.2 us/leaf) batch=false
+tree ms per range: p50=63 p95=63 max=63
+ranges=1 wall_s=0.1 sapling_leaves=2125 sapling_s=0.1 (48.2 us/leaf) orchard_leaves=269 orchard_s=0.0 (90.2 us/leaf) batch=false
+tree ms per range: p50=127 p95=127 max=127
+ranges=1 wall_s=0.1 sapling_leaves=392 sapling_s=0.0 (86.5 us/leaf) orchard_leaves=2361 orchard_s=0.1 (22.7 us/leaf) batch=false
+tree ms per range: p50=87 p95=87 max=87
+ranges=1 wall_s=0.1 sapling_leaves=2115 sapling_s=0.1 (47.9 us/leaf) orchard_leaves=244 orchard_s=0.0 (96.6 us/leaf) batch=false
+tree ms per range: p50=125 p95=125 max=125
+ranges=1 wall_s=0.1 sapling_leaves=349 sapling_s=0.0 (88.4 us/leaf) orchard_leaves=424 orchard_s=0.0 (59.5 us/leaf) batch=false
+tree ms per range: p50=56 p95=56 max=56
+ranges=1 wall_s=0.1 sapling_leaves=295 sapling_s=0.0 (101.1 us/leaf) orchard_leaves=2940 orchard_s=0.1 (20.4 us/leaf) batch=false
+tree ms per range: p50=90 p95=90 max=90
+ranges=1 wall_s=0.4 sapling_leaves=760 sapling_s=0.0 (64.3 us/leaf) orchard_leaves=26463 orchard_s=0.3 (13.2 us/leaf) batch=false
+tree ms per range: p50=398 p95=398 max=398
+ranges=1 wall_s=1.4 sapling_leaves=1086 sapling_s=0.1 (56.6 us/leaf) orchard_leaves=105720 orchard_s=1.3 (12.1 us/leaf) batch=false
+tree ms per range: p50=1341 p95=1341 max=1341
+ranges=1 wall_s=21.7 sapling_leaves=587316 sapling_s=21.6 (36.8 us/leaf) orchard_leaves=0 orchard_s=0.0 (18824.4 us/leaf) batch=false
+tree ms per range: p50=21654 p95=21654 max=21654

@@ -1,0 +1,9 @@
+[network]
+network = "Mainnet"
+listen_addr = "0.0.0.0:18233"
+
+[sync]
+parallel_cpu_threads = 8
+
+[tracing]
+use_color = false

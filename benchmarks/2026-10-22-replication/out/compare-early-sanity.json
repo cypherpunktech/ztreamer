@@ -1,0 +1,11 @@
+{
+  "ranges_checked": 480,
+  "mismatching_ranges": 0,
+  "sapling": "match-reversed",
+  "orchard": "absent",
+  "ironwood": "absent",
+  "rpc_p50_ms": 82.6,
+  "rpc_p95_ms": 171.8,
+  "total_s": 42.7,
+  "concurrency": 1
+}

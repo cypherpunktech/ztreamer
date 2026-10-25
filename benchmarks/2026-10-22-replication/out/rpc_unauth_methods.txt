@@ -1,0 +1,6 @@
+getblockhash {"jsonrpc":"2.0","id":1,"result":"000000000049de56536e801e2f2bcbbb3807091415b2de888b5f6c7f83eba472"} HTTP 200
+z_gettreestate {"jsonrpc":"2.0","id":1,"result":{"hash":"000000000049de56536e801e2f2bcbbb3807091415b2de888b5f6c7f83eba472","height":3524999,"time":1792546131,"sapling":{"commi
+z_getsubtreesbyindex {"jsonrpc":"2.0","id":1,"result":{"pool":"sapling","start_index":1000,"subtrees":[{"root":"4b2f5c4333117058848b94fbf9ff824cb24a01243a1329c74fab74145ee63722","en
+getpeerinfo {"jsonrpc":"2.0","id":1,"result":[]} HTTP 200
+stop {"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}} HTTP 200
+getinfo {"jsonrpc":"2.0","id":1,"result":{"version":1050100,"build":"v1.5.1+gaf944f5194ef","subversion":"/Zakura:1.5.1/","protocolversion":170190,"blocks":3526315,"conn
