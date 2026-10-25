@@ -1,0 +1,449 @@
+//! The snapshot manifest: the JSON document that lists every sealed range of a snapshot.
+//!
+//! ```json
+//! {
+//!   "network": "Mainnet",
+//!   "genesis_hash": "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
+//!   "sealed_through": 1785999,
+//!   "manifest_version": 1,
+//!   "entries": [{
+//!     "range_version": 1,
+//!     "start_height": 1785000, "end_height": 1785999,
+//!     "end_hash": "<32 bytes hex, display order>",
+//!     "end_tree_sizes": { "sapling": 61231877, "orchard": 0, "ironwood": 0 },
+//!     "sapling_frontier": "<hex>", "orchard_frontier": "<hex>", "ironwood_frontier": "<hex>",
+//!     "subtree_roots": [{ "pool": "sapling", "index": 934, "root": "<32 bytes hex>" }],
+//!     "blob_digest": "<BLAKE3 hex>", "blob_len": 121034512,
+//!     "epoch_end": true
+//!   }]
+//! }
+//! ```
+//!
+//! Block hashes are hex in display order, as the node prints them. A frontier is the hex of the
+//! `zcashd` RPC tree encoding; an empty string means that the pool was not active. A subtree root
+//! is the hex of the pool's byte order, as `z_getsubtreesbyindex` prints it.
+//!
+//! The entries convert to [`ManifestEntry`], so that the indexer stays free of serde.
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as};
+use zakura_chain::{block, ironwood, orchard, subtree::NoteCommitmentSubtreeIndex};
+use ztreamer_indexer::{
+    codec::TreeSizes,
+    index::{
+        RANGE_SIZE,
+        range_meta::{BlobDigest, Frontiers, ManifestEntry, SubtreeNode, SubtreeRoot},
+    },
+};
+
+use crate::epoch::{Epoch, epochs};
+
+/// A snapshot manifest.
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Manifest {
+    /// The network name, for example `Mainnet`.
+    pub network: String,
+    /// The hash of the genesis block.
+    #[serde_as(as = "DisplayFromStr")]
+    pub genesis_hash: block::Hash,
+    /// The last height of the last sealed range.
+    pub sealed_through: u32,
+    /// The manifest format version.
+    pub manifest_version: u32,
+    /// One entry per sealed range, in height order from genesis.
+    #[serde_as(as = "Vec<EntryJson>")]
+    pub entries: Vec<ManifestEntry>,
+}
+
+/// A manifest that does not parse or does not obey the rules in [`Manifest::validate`].
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestError {
+    /// The JSON does not parse into a manifest.
+    #[error("manifest JSON is not valid")]
+    Json(#[from] serde_json::Error),
+    /// The entry does not start one height after the previous entry, or at genesis.
+    #[error("entry {index} starts at {start_height}, not after the previous entry")]
+    Discontiguous {
+        /// The position of the entry in the manifest.
+        index: usize,
+        /// The start height of the entry.
+        start_height: u32,
+    },
+    /// The entry is not one aligned range.
+    #[error("entry {index} does not hold {RANGE_SIZE} blocks")]
+    RangeLength {
+        /// The position of the entry in the manifest.
+        index: usize,
+    },
+    /// A tree size of the entry is smaller than in the previous entry.
+    #[error("entry {index} has a smaller tree than the previous entry")]
+    TreeSizes {
+        /// The position of the entry in the manifest.
+        index: usize,
+    },
+    /// The `epoch_end` flag of the entry does not agree with the epoch rule.
+    #[error("entry {index} has the wrong epoch_end flag; the epoch rule gives {expected}")]
+    EpochEnd {
+        /// The position of the entry in the manifest.
+        index: usize,
+        /// The flag that the epoch rule gives.
+        expected: bool,
+    },
+}
+
+impl Manifest {
+    /// Parses a manifest and validates it.
+    pub fn from_json(json: &str) -> Result<Self, ManifestError> {
+        let manifest: Self = serde_json::from_str(json)?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Checks that the entries are one aligned range each, contiguous from genesis, with tree
+    /// sizes that do not decrease, and that `epoch_end` agrees with [`epochs`].
+    pub fn validate(&self) -> Result<(), ManifestError> {
+        self.entries.iter().enumerate().try_fold(None, |previous, (index, entry)| {
+            check_link(index, previous, entry).map(|()| Some(entry))
+        })?;
+        epochs(&self.entries)
+            .iter()
+            .flat_map(|epoch| {
+                let last = epoch.entries().len() - 1;
+                epoch.entries().iter().enumerate().map(move |(at, entry)| (entry, at == last))
+            })
+            .enumerate()
+            .find(|(_, (entry, expected))| entry.epoch_end != *expected)
+            .map_or(Ok(()), |(index, (_, expected))| {
+                Err(ManifestError::EpochEnd { index, expected })
+            })
+    }
+
+    /// The verification epochs of the manifest.
+    pub fn epochs(&self) -> Vec<Epoch<'_>> {
+        epochs(&self.entries)
+    }
+}
+
+/// Checks that `entry` follows `previous`, or starts at genesis when there is no previous entry.
+fn check_link(
+    index: usize,
+    previous: Option<&ManifestEntry>,
+    entry: &ManifestEntry,
+) -> Result<(), ManifestError> {
+    let expected_start = previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
+    if expected_start != Some(entry.start_height) {
+        return Err(ManifestError::Discontiguous { index, start_height: entry.start_height });
+    }
+    if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
+        return Err(ManifestError::RangeLength { index });
+    }
+    let (before, after) =
+        (previous.map_or_else(TreeSizes::default, |p| p.end_tree_sizes), entry.end_tree_sizes);
+    if after.sapling < before.sapling
+        || after.orchard < before.orchard
+        || after.ironwood < before.ironwood
+    {
+        return Err(ManifestError::TreeSizes { index });
+    }
+    Ok(())
+}
+
+/// The JSON form of a [`ManifestEntry`].
+#[serde_as]
+#[derive(Deserialize, Serialize)]
+struct EntryJson {
+    range_version: u8,
+    start_height: u32,
+    end_height: u32,
+    #[serde_as(as = "DisplayFromStr")]
+    end_hash: block::Hash,
+    #[serde(with = "TreeSizesJson")]
+    end_tree_sizes: TreeSizes,
+    #[serde_as(as = "Hex")]
+    sapling_frontier: Vec<u8>,
+    #[serde_as(as = "Hex")]
+    orchard_frontier: Vec<u8>,
+    #[serde_as(as = "Hex")]
+    ironwood_frontier: Vec<u8>,
+    subtree_roots: Vec<SubtreeRootJson>,
+    #[serde_as(as = "Hex")]
+    blob_digest: [u8; 32],
+    blob_len: u64,
+    epoch_end: bool,
+}
+
+/// The JSON form of [`TreeSizes`].
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "TreeSizes")]
+struct TreeSizesJson {
+    sapling: u32,
+    orchard: u32,
+    ironwood: u32,
+}
+
+/// A note commitment pool.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Pool {
+    Sapling,
+    Orchard,
+    Ironwood,
+}
+
+/// The JSON form of a [`SubtreeRoot`].
+#[serde_as]
+#[derive(Deserialize, Serialize)]
+struct SubtreeRootJson {
+    pool: Pool,
+    index: u16,
+    #[serde_as(as = "Hex")]
+    root: [u8; 32],
+}
+
+/// The root bytes are not a field element of the pool.
+#[derive(Debug, thiserror::Error)]
+#[error("{pool:?} subtree root {index} is not a field element")]
+struct InvalidSubtreeRoot {
+    pool: Pool,
+    index: u16,
+}
+
+impl From<&ManifestEntry> for EntryJson {
+    fn from(entry: &ManifestEntry) -> Self {
+        Self {
+            range_version: entry.range_version,
+            start_height: entry.start_height,
+            end_height: entry.end_height,
+            end_hash: entry.end_hash,
+            end_tree_sizes: entry.end_tree_sizes,
+            sapling_frontier: entry.frontiers.sapling.clone(),
+            orchard_frontier: entry.frontiers.orchard.clone(),
+            ironwood_frontier: entry.frontiers.ironwood.clone(),
+            subtree_roots: entry.subtree_roots.iter().map(SubtreeRootJson::from).collect(),
+            blob_digest: entry.blob_digest.0,
+            blob_len: entry.blob_len,
+            epoch_end: entry.epoch_end,
+        }
+    }
+}
+
+impl TryFrom<EntryJson> for ManifestEntry {
+    type Error = InvalidSubtreeRoot;
+
+    fn try_from(json: EntryJson) -> Result<Self, Self::Error> {
+        Ok(Self {
+            range_version: json.range_version,
+            start_height: json.start_height,
+            end_height: json.end_height,
+            end_hash: json.end_hash,
+            end_tree_sizes: json.end_tree_sizes,
+            frontiers: Frontiers {
+                sapling: json.sapling_frontier,
+                orchard: json.orchard_frontier,
+                ironwood: json.ironwood_frontier,
+            },
+            subtree_roots: json
+                .subtree_roots
+                .into_iter()
+                .map(SubtreeRoot::try_from)
+                .collect::<Result<_, _>>()?,
+            blob_digest: BlobDigest(json.blob_digest),
+            blob_len: json.blob_len,
+            epoch_end: json.epoch_end,
+        })
+    }
+}
+
+impl SerializeAs<ManifestEntry> for EntryJson {
+    fn serialize_as<S: Serializer>(
+        entry: &ManifestEntry,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        Self::from(entry).serialize(serializer)
+    }
+}
+
+impl<'de> DeserializeAs<'de, ManifestEntry> for EntryJson {
+    fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<ManifestEntry, D::Error> {
+        Self::deserialize(deserializer)?.try_into().map_err(D::Error::custom)
+    }
+}
+
+impl From<&SubtreeRoot> for SubtreeRootJson {
+    fn from(root: &SubtreeRoot) -> Self {
+        let (pool, bytes) = match root.root {
+            SubtreeNode::Sapling(node) => (Pool::Sapling, node.to_bytes()),
+            SubtreeNode::Orchard(node) => (Pool::Orchard, node.to_repr()),
+            SubtreeNode::Ironwood(node) => (Pool::Ironwood, node.to_repr()),
+        };
+        Self { pool, index: root.index.0, root: bytes }
+    }
+}
+
+impl TryFrom<SubtreeRootJson> for SubtreeRoot {
+    type Error = InvalidSubtreeRoot;
+
+    fn try_from(json: SubtreeRootJson) -> Result<Self, Self::Error> {
+        let SubtreeRootJson { pool, index, root } = json;
+        match pool {
+            Pool::Sapling => {
+                Option::from(sapling_crypto::Node::from_bytes(root)).map(SubtreeNode::Sapling)
+            }
+            Pool::Orchard => orchard::tree::Node::try_from(root).ok().map(SubtreeNode::Orchard),
+            Pool::Ironwood => ironwood::tree::Node::try_from(root).ok().map(SubtreeNode::Ironwood),
+        }
+        .map(|root| Self { index: NoteCommitmentSubtreeIndex(index), root })
+        .ok_or(InvalidSubtreeRoot { pool, index })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+    use ztreamer_indexer::test_utils::hash;
+
+    use super::*;
+    use crate::epoch::synthetic_entries;
+
+    /// A manifest with two entries. The first entry has frontiers and subtree roots in all three
+    /// pools.
+    fn two_entry_manifest() -> Manifest {
+        let add = TreeSizes { sapling: 70_000, orchard: 3, ironwood: 0 };
+        let mut entries = synthetic_entries(&[add, add]);
+        entries[0].frontiers = Frontiers {
+            sapling: vec![0x01, 0xab, 0x00],
+            orchard: vec![0xcd; 40],
+            ironwood: Vec::new(),
+        };
+        entries[0].subtree_roots = vec![
+            SubtreeRoot {
+                index: NoteCommitmentSubtreeIndex(0),
+                root: SubtreeNode::Sapling(sapling_crypto::Node::from_bytes([1; 32]).unwrap()),
+            },
+            SubtreeRoot {
+                index: NoteCommitmentSubtreeIndex(1),
+                root: SubtreeNode::Orchard(orchard::tree::Node::try_from([2; 32]).unwrap()),
+            },
+            SubtreeRoot {
+                index: NoteCommitmentSubtreeIndex(2),
+                root: SubtreeNode::Ironwood(ironwood::tree::Node::try_from([3; 32]).unwrap()),
+            },
+        ];
+        entries[0].blob_digest = BlobDigest([7; 32]);
+        entries[0].blob_len = 121_034_512;
+        Manifest {
+            network: "Mainnet".to_owned(),
+            genesis_hash: hash(0),
+            sealed_through: 1_999,
+            manifest_version: 1,
+            entries,
+        }
+    }
+
+    #[test]
+    fn manifest_round_trips_through_json() {
+        let manifest = two_entry_manifest();
+        let json = serde_json::to_string(&manifest).unwrap();
+
+        assert_eq!(Manifest::from_json(&json).unwrap(), manifest);
+    }
+
+    #[test]
+    fn json_uses_the_field_names_and_encodings_of_the_plan() {
+        let manifest = two_entry_manifest();
+        let json: Value = serde_json::to_value(&manifest).unwrap();
+        let entry = &json["entries"][0];
+
+        assert_eq!(json["genesis_hash"], manifest.genesis_hash.to_string());
+        assert_eq!(entry["end_hash"], manifest.entries[0].end_hash.to_string());
+        assert_eq!(entry["end_tree_sizes"]["sapling"], 70_000);
+        assert_eq!(entry["end_tree_sizes"]["orchard"], 3);
+        assert_eq!(entry["end_tree_sizes"]["ironwood"], 0);
+        assert_eq!(entry["sapling_frontier"], "01ab00");
+        assert_eq!(entry["ironwood_frontier"], "");
+        assert_eq!(entry["subtree_roots"][0]["pool"], "sapling");
+        assert_eq!(entry["subtree_roots"][2]["pool"], "ironwood");
+        assert_eq!(entry["subtree_roots"][1]["index"], 1);
+        assert_eq!(entry["subtree_roots"][1]["root"], "02".repeat(32));
+        assert_eq!(entry["blob_digest"], "07".repeat(32));
+        assert_eq!(entry["blob_len"], 121_034_512);
+        assert_eq!(entry["epoch_end"], false);
+        assert_eq!(json["entries"][1]["epoch_end"], true);
+    }
+
+    #[test]
+    fn a_subtree_root_that_is_not_a_field_element_is_refused() {
+        let mut json = serde_json::to_value(two_entry_manifest()).unwrap();
+        json["entries"][0]["subtree_roots"][1]["root"] = Value::from("ff".repeat(32));
+
+        let error = Manifest::from_json(&json.to_string()).unwrap_err();
+
+        assert!(matches!(error, ManifestError::Json(_)), "{error:?}");
+    }
+
+    #[test]
+    fn entries_out_of_order_are_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.entries.swap(0, 1);
+
+        let error = manifest.validate().unwrap_err();
+
+        assert!(
+            matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_gap_is_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.entries = synthetic_entries(&[TreeSizes::default(); 3]);
+        manifest.entries.remove(1);
+
+        let error = manifest.validate().unwrap_err();
+
+        assert!(
+            matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_range_length_or_a_shrinking_tree_is_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.entries[1].end_height += 1;
+        let error = manifest.validate().unwrap_err();
+        assert!(matches!(error, ManifestError::RangeLength { index: 1 }), "{error:?}");
+
+        let mut manifest = two_entry_manifest();
+        manifest.entries[1].end_tree_sizes.orchard = 2;
+        let error = manifest.validate().unwrap_err();
+        assert!(matches!(error, ManifestError::TreeSizes { index: 1 }), "{error:?}");
+    }
+
+    #[test]
+    fn a_wrong_epoch_end_is_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.entries[0].epoch_end = true;
+        let error = manifest.validate().unwrap_err();
+        assert!(
+            matches!(error, ManifestError::EpochEnd { index: 0, expected: false }),
+            "{error:?}"
+        );
+
+        manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+        manifest.entries[9].epoch_end = false;
+        let error = manifest.validate().unwrap_err();
+        assert!(matches!(error, ManifestError::EpochEnd { index: 9, expected: true }), "{error:?}");
+
+        // The last entry of the manifest always closes an epoch.
+        manifest.entries[9].epoch_end = true;
+        manifest.entries[11].epoch_end = false;
+        let error = manifest.validate().unwrap_err();
+        assert!(
+            matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
+            "{error:?}"
+        );
+    }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "ztreamer-verify"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "Verification of imported ranges against a snapshot manifest"
+
+[lints]
+workspace = true
+
+[dependencies]
+sapling-crypto.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_with = { version = "3", features = ["hex"] }
+thiserror = "2"
+zakura-chain.workspace = true
+ztreamer-indexer = { path = "../indexer" }
+
+[dev-dependencies]
+ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }

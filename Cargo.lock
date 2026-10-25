@@ -8068,6 +8068,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-verify"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.21",
+ "zakura-chain",
+ "zakura-sapling-crypto",
+ "ztreamer-indexer",
+]
+
+[[package]]
 name = "ztreamerd"
 version = "0.1.0"
 dependencies = [
