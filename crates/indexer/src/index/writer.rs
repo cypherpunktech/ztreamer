@@ -9,6 +9,7 @@ use heed::{Env, RwTxn};
 
 use super::{
     BlockId, IndexError, IndexState, RANGE_SIZE,
+    range_meta::{RangeMeta, VerifyState},
     tables::Tables,
     telemetry::{WriteStage, WriteTimer, record_state_metrics},
 };
@@ -22,7 +23,7 @@ pub(crate) type BatchRows = Peekable<std::vec::IntoIter<EncodedBlock>>;
 
 /// An open write transaction and the [`IndexState`] it will commit.
 ///
-/// Rows change through one of two sets of methods:
+/// Rows change through one of three sets of methods:
 ///
 /// - Reorgs use [`IndexWriter::put_block`] and [`IndexWriter::delete_block`], which always
 ///   change a block row and its hash entry together. In one transaction, do all deletes before the
@@ -30,6 +31,8 @@ pub(crate) type BatchRows = Peekable<std::vec::IntoIter<EncodedBlock>>;
 ///   ancestor, so a delete after a put can delete a canonical hash.
 /// - Appends use [`IndexWriter::put_hashes`] for the whole batch first, then seal and append
 ///   the rows. A batch row that goes into a sealed range is never written as a mutable row.
+/// - Installs use [`IndexWriter::put_hashes`] for the blocks of one packed range, then
+///   [`IndexWriter::put_sealed_range`]. An install writes no mutable row.
 ///
 /// Dropping a writer without [`IndexWriter::commit`] aborts the transaction.
 pub(crate) struct IndexWriter<'env> {
@@ -46,11 +49,17 @@ impl<'env> IndexWriter<'env> {
         tables: Tables,
         base_generation: u64,
     ) -> Result<Self, IndexError> {
-        let txn = env.write_txn()?;
-        let state = tables.metadata.get_state(&txn)?;
-        if state.generation != base_generation {
+        let writer = Self::start_latest(env, tables)?;
+        if writer.state.generation != base_generation {
             return Err(IndexError::StaleBatch { batch_generation: base_generation });
         }
+        Ok(writer)
+    }
+
+    /// Starts a write transaction on the current generation. The caller checks the state.
+    pub(crate) fn start_latest(env: &'env Env, tables: Tables) -> Result<Self, IndexError> {
+        let txn = env.write_txn()?;
+        let state = tables.metadata.get_state(&txn)?;
         Ok(Self { txn, tables, state, timer: None })
     }
 
@@ -95,9 +104,17 @@ impl<'env> IndexWriter<'env> {
         self.delete_block(&old)
     }
 
-    /// Writes the hash entry of every block in an appended batch.
-    pub(crate) fn put_hashes(&mut self, blocks: &[EncodedBlock]) -> Result<(), IndexError> {
-        blocks.iter().try_for_each(|block| {
+    /// Returns whether this transaction sees a mutable row.
+    pub(crate) fn has_mutable_rows(&self) -> Result<bool, IndexError> {
+        Ok(!self.tables.mutable_blocks.is_empty(&self.txn)?)
+    }
+
+    /// Writes the hash entry of every block in an appended batch or an installed range.
+    pub(crate) fn put_hashes(
+        &mut self,
+        blocks: impl IntoIterator<Item = BlockId>,
+    ) -> Result<(), IndexError> {
+        blocks.into_iter().try_for_each(|block| {
             self.tables.hash_to_height.put(&mut self.txn, &block.hash, block.height)
         })?;
         self.with_timer(|timer| timer.lap(WriteStage::HashIndex));
@@ -133,6 +150,27 @@ impl<'env> IndexWriter<'env> {
         self.tables.range_meta.delete_from(&mut self.txn, start)?;
         self.state.sealed_through = start.checked_sub(1);
         self.state.verified_through = self.state.verified_through.min(self.state.sealed_through);
+        Ok(())
+    }
+
+    /// Writes a packed range from a snapshot and its metadata, and advances `sealed_through` to
+    /// the range end. A [`VerifyState::Verified`] range extends a verified prefix that ends just
+    /// below it. The caller checks that the range follows `sealed_through`.
+    pub(crate) fn put_sealed_range(
+        &mut self,
+        start: u32,
+        packed: &[u8],
+        meta: &RangeMeta,
+    ) -> Result<(), IndexError> {
+        self.tables.sealed_ranges.put(&mut self.txn, start, packed)?;
+        self.tables.range_meta.put(&mut self.txn, start, meta)?;
+        let end = meta.entry.end_height;
+        if meta.state == VerifyState::Verified
+            && self.state.verified_through == start.checked_sub(1)
+        {
+            self.state.verified_through = Some(end);
+        }
+        self.state.sealed_through = Some(end);
         Ok(())
     }
 

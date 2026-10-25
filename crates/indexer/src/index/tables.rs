@@ -93,7 +93,7 @@ impl SealedRanges {
         let Some(bytes) = self.get(txn, start)? else {
             return Ok(None);
         };
-        Ok(Some(SealedRange { start, decoder: RangeDecoder::new(bytes)? }))
+        Ok(Some(SealedRange::new(start, bytes)?))
     }
 
     pub(crate) fn get<'txn>(
@@ -136,7 +136,12 @@ pub(crate) struct SealedRange<'txn> {
     decoder: RangeDecoder<'txn>,
 }
 
-impl SealedRange<'_> {
+impl<'txn> SealedRange<'txn> {
+    /// Parses the envelope of the packed range `bytes`, stored under the key `start`.
+    pub(crate) fn new(start: u32, bytes: &'txn [u8]) -> Result<Self, CodecError> {
+        Ok(Self { start, decoder: RangeDecoder::new(bytes)? })
+    }
+
     pub(crate) const fn start(&self) -> u32 {
         self.start
     }
@@ -149,6 +154,23 @@ impl SealedRange<'_> {
     pub(crate) fn read<T: StoredBlock>(&self, height: u32) -> Result<T, CodecError> {
         let index = height.checked_sub(self.start).ok_or(CodecError::RangeIndex)?;
         self.decoder.record_as(index as usize)
+    }
+
+    /// Decodes every record in height order. It checks each record with the rules of
+    /// [`CompactBlockRecord::encode`], and the link of each record to the record below it. The
+    /// decoder checks only the links at the two ends of the range.
+    pub(crate) fn records(&self) -> Result<Vec<CompactBlockRecord>, CodecError> {
+        let records = (self.start()..=self.end())
+            .map(|height| {
+                let record: CompactBlockRecord = self.read(height)?;
+                record.check()?;
+                Ok(record)
+            })
+            .collect::<Result<Vec<_>, CodecError>>()?;
+        if records.windows(2).any(|pair| pair[1].previous_hash != pair[0].hash) {
+            return Err(CodecError::InvalidRange);
+        }
+        Ok(records)
     }
 }
 
