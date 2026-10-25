@@ -10,14 +10,19 @@ use crate::{
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
+use std::sync::Arc;
+
 use zakura_chain::{
     block::{self, Block},
+    fmt::HexDebug,
     parameters::GENESIS_PREVIOUS_BLOCK_HASH,
     serialization::ZcashDeserialize as _,
-    transaction,
+    transaction::{self, LockTime, Transaction},
+    transparent,
 };
 use zakura_test::vectors::{
-    BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687121_BYTES, BLOCK_TESTNET_1842421_BYTES,
+    BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687121_BYTES,
+    BLOCK_MAINNET_GENESIS_BYTES, BLOCK_TESTNET_1842421_BYTES,
 };
 
 /// A deterministic block hash: the big-endian height in the first four bytes, zeros after.
@@ -163,5 +168,38 @@ pub fn raw_block(height: u32) -> RawIndexBlock {
         hash: hash(height),
         bytes,
         txids: vec![transaction::Hash(hash(height).0)],
+    }
+}
+
+/// Extends `chain` with deserializable blocks until its tip is at `tip`.
+///
+/// An empty `chain` starts with the mainnet genesis block. Each new block has the header of
+/// mainnet block 1 with the hash of the block before it as parent, and one version 1 coinbase
+/// transaction for its height. `branch` goes into the header nonce: two chains that are
+/// extended from the same blocks with different values have different hashes from the first new
+/// block. Thus a test makes a reorg from a prefix of a chain.
+pub fn grow_chain(chain: &mut Vec<Block>, tip: u32, branch: u32) {
+    let template = Block::zcash_deserialize(BLOCK_MAINNET_1_BYTES.as_slice()).unwrap();
+    if chain.is_empty() {
+        chain.push(Block::zcash_deserialize(BLOCK_MAINNET_GENESIS_BYTES.as_slice()).unwrap());
+    }
+    while let Some(parent) = chain.last()
+        && parent.coinbase_height().unwrap().0 < tip
+    {
+        let height = block::Height(parent.coinbase_height().unwrap().0 + 1);
+        let mut header = *template.header;
+        header.previous_block_hash = parent.hash();
+        header.nonce = HexDebug([0; 32]);
+        header.nonce.0[..4].copy_from_slice(&branch.to_be_bytes());
+        let coinbase = Transaction::V1 {
+            inputs: vec![transparent::Input::Coinbase {
+                height,
+                data: b"ztreamer".to_vec(),
+                sequence: u32::MAX,
+            }],
+            outputs: Vec::new(),
+            lock_time: LockTime::unlocked(),
+        };
+        chain.push(Block { header: Arc::new(header), transactions: vec![Arc::new(coinbase)] });
     }
 }

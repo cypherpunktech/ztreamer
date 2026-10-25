@@ -1,5 +1,5 @@
 //! A mock zakura node for tests. It is an HTTP server in the test process. A script sets the
-//! reply to each request.
+//! reply to each request. [`MockChain`] is a script that serves a best chain of blocks.
 //!
 //! The tests of this crate use it. Tests in crates that use this crate can also use it. This
 //! module compiles for the tests of this crate and when the `test-utils` feature is on.
@@ -20,6 +20,13 @@ use hyper::{body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, sync::oneshot};
+use zakura_rpc::client::{
+    GetBlockHashResponse, HexData,
+    zakura_chain::{
+        block::{self, Block},
+        serialization::ZcashSerialize as _,
+    },
+};
 
 use crate::{RetryPolicy, RpcCode, RpcConfig};
 
@@ -186,4 +193,129 @@ fn json_response(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Full::new(Bytes::from(serde_json::to_vec(&body).unwrap())))
         .unwrap()
+}
+
+/// A best chain that a [`MockNode`] serves, with the answers and error codes of zakura.
+///
+/// [`Self::reply`] answers `getblockchaininfo`, `getbestblockhash`, `getblockhash` and
+/// `getblock` with verbosity 0. Other requests get "method not found". Clones share the chain,
+/// thus a test can change the chain while the node runs.
+///
+/// ```no_run
+/// use ztreamer_remote::test_utils::{MockChain, MockNode};
+/// # use zakura_rpc::client::zakura_chain::block::Block;
+///
+/// # async fn demo(blocks: Vec<Block>) {
+/// let chain = MockChain::new(&blocks);
+/// let node = MockNode::start({
+///     let chain = chain.clone();
+///     move |_, request| chain.reply(request)
+/// })
+/// .await;
+/// # let _ = node;
+/// # }
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct MockChain {
+    state: Arc<Mutex<ChainState>>,
+}
+
+#[derive(Debug, Default)]
+struct ChainState {
+    /// The hash and the serialized bytes of the block at each height, from genesis.
+    blocks: Vec<(block::Hash, Vec<u8>)>,
+    prune_height: Option<block::Height>,
+}
+
+impl MockChain {
+    /// A chain of `blocks`, in which the block at index `n` has height `n`.
+    pub fn new(blocks: &[Block]) -> Self {
+        let chain = Self::default();
+        chain.set_blocks(blocks);
+        chain
+    }
+
+    /// Replaces the best chain with `blocks`, as a reorg or new blocks do.
+    pub fn set_blocks(&self, blocks: &[Block]) {
+        self.state.lock().unwrap().blocks = blocks
+            .iter()
+            .map(|block| (block.hash(), block.zcash_serialize_to_vec().unwrap()))
+            .collect();
+    }
+
+    /// Sets the prune height that `getblockchaininfo` reports. `None` reports a node that does
+    /// not prune.
+    pub fn set_prune_height(&self, height: Option<block::Height>) {
+        self.state.lock().unwrap().prune_height = height;
+    }
+
+    /// The reply of zakura with this chain to `request`.
+    pub fn reply(&self, request: &Seen) -> Reply {
+        let state = self.state.lock().unwrap();
+        let params = &request.body["params"];
+        match request.body["method"].as_str() {
+            Some("getblockchaininfo") => state.blockchain_info(),
+            Some("getbestblockhash") => {
+                state.blocks.last().map_or(NO_TIP, |(hash, _)| hash_reply(*hash))
+            }
+            Some("getblockhash") => params[0]
+                .as_u64()
+                .and_then(|height| state.blocks.get(usize::try_from(height).ok()?))
+                .map_or(ABOVE_TIP, |(hash, _)| hash_reply(*hash)),
+            Some("getblock") if params[1] == 0 => params[0]
+                .as_str()
+                .and_then(|block| state.find(block))
+                .map_or(BLOCK_NOT_FOUND, |bytes| {
+                    Reply::Result(serde_json::to_value(HexData(bytes.clone())).unwrap())
+                }),
+            _ => Reply::Error { code: RpcCode::METHOD_NOT_FOUND, message: "Method not found" },
+        }
+    }
+}
+
+const NO_TIP: Reply =
+    Reply::Error { code: RpcCode::IN_WARMUP, message: "no chain tip available yet" };
+const ABOVE_TIP: Reply = Reply::Error {
+    code: RpcCode::INVALID_PARAMS,
+    message: "Provided index is greater than the current tip",
+};
+const BLOCK_NOT_FOUND: Reply =
+    Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "Block not found" };
+
+impl ChainState {
+    /// The bytes of the block that `block` names, as a height or a hash.
+    fn find(&self, block: &str) -> Option<&Vec<u8>> {
+        match block.parse::<usize>() {
+            Ok(height) => self.blocks.get(height),
+            Err(_) => {
+                let hash = block.parse::<block::Hash>().ok()?;
+                self.blocks.iter().find(|(candidate, _)| *candidate == hash)
+            }
+        }
+        .map(|(_, bytes)| bytes)
+    }
+
+    /// The `getblockchaininfo` answer of a mainnet zakura, with the tip and the prune fields of
+    /// this chain.
+    fn blockchain_info(&self) -> Reply {
+        let Some((hash, _)) = self.blocks.last() else {
+            return NO_TIP;
+        };
+        let tip = self.blocks.len() - 1;
+        let mut info: Value =
+            serde_json::from_str(include_str!("../tests/vectors/getblockchaininfo.json")).unwrap();
+        info["blocks"] = json!(tip);
+        info["headers"] = json!(tip);
+        info["estimatedheight"] = json!(tip);
+        info["bestblockhash"] = json!(hash.to_string());
+        info["pruned"] = json!(self.prune_height.is_some());
+        if let Some(height) = self.prune_height {
+            info["pruneheight"] = json!(height.0);
+        }
+        Reply::Result(info)
+    }
+}
+
+fn hash_reply(hash: block::Hash) -> Reply {
+    Reply::Result(serde_json::to_value(GetBlockHashResponse::new(hash)).unwrap())
 }

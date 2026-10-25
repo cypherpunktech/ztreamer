@@ -9,6 +9,7 @@ pub mod grpc;
 pub mod p2p;
 mod project;
 pub mod range_meta_fill;
+pub mod remote;
 mod service;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

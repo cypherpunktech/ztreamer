@@ -1,6 +1,10 @@
 //! Compact block and transaction types produced by the parser and stored by the index.
 
-use zakura_chain::{block, transaction};
+use zakura_chain::{
+    block::{self, Block},
+    serialization::{SerializationError, ZcashDeserialize as _},
+    transaction,
+};
 
 use crate::{Ciphertext, Digest, EphemeralKey};
 
@@ -10,6 +14,32 @@ pub struct RawIndexBlock {
     pub hash: block::Hash,
     pub bytes: Vec<u8>,
     pub txids: Vec<transaction::Hash>,
+}
+
+/// Why [`RawIndexBlock::from_bytes`] refused a serialized block.
+#[derive(Debug, thiserror::Error)]
+pub enum RawBlockError {
+    /// The bytes are not a Zcash block.
+    #[error("block could not be deserialized: {0}")]
+    Deserialize(#[from] SerializationError),
+    /// The block has no coinbase transaction with a height.
+    #[error("coinbase height is missing")]
+    CoinbaseHeight,
+}
+
+impl RawIndexBlock {
+    /// Decodes a serialized block, for example the result of `getblock` with verbosity 0 from a
+    /// remote node.
+    ///
+    /// The height comes from the coinbase input, the hash from the header and the transaction
+    /// ids from the transactions. `bytes` stays as it is. The compact parser examines it again
+    /// and refuses trailing bytes.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RawBlockError> {
+        let block = Block::zcash_deserialize(bytes.as_slice())?;
+        let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
+        let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
+        Ok(Self { height, hash: block.hash(), bytes, txids })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
