@@ -232,6 +232,21 @@ impl RemoteBackend {
         Ok(subtrees)
     }
 
+    /// The error for a `z_gettreestate` that did not find the block of `hash`.
+    ///
+    /// `z_gettreestate` of zakura reads the block body, also when the node keeps the trees. A
+    /// node that prunes thus has no tree state below its prune height. The error says so.
+    async fn no_tree_state(&self, hash: block::Hash, error: RpcError) -> BackendError {
+        match self.node.get_blockchain_info().await.map(|info| info.prune_height()) {
+            Ok(Some(prune_height)) => BackendError::Unavailable(format!(
+                "remote zakura has no tree state for {hash}: it prunes block bodies below height \
+                 {}, and z_gettreestate reads the block body",
+                prune_height.0
+            )),
+            _ => error.into(),
+        }
+    }
+
     /// The `getrawtransaction` answer for `id` with verbose 1. `None` when the node does not
     /// have the transaction.
     async fn fetch_transaction(
@@ -778,7 +793,13 @@ impl StateBackend for RemoteBackend {
         if let Some(trees) = self.tree_states.get(&hash) {
             return Ok(trees);
         }
-        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
+        let response = match self.node.z_get_treestate(HashOrHeight::Hash(hash)).await {
+            Ok(response) => response,
+            Err(error) if error.rpc_code() == Some(BLOCK_NOT_FOUND) => {
+                return Err(self.no_tree_state(hash, error).await);
+            }
+            Err(error) => return Err(error.into()),
+        };
         if response.hash() != hash {
             return Err(BackendError::Unexpected(format!(
                 "remote zakura sent the tree state of {} for {hash}",
@@ -1266,6 +1287,28 @@ mod tests {
             Treestate::default(),
         ))
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn tree_state_names_the_prune_height_of_a_pruned_node() {
+        let mock = MockNode::start(|_, seen| match seen.body["method"].as_str().unwrap() {
+            "getblockchaininfo" => {
+                let mut info = serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap();
+                info["pruned"] = json!(true);
+                info["pruneheight"] = json!(500);
+                Reply::Result(info)
+            }
+            "z_gettreestate" => {
+                Reply::Error { code: BLOCK_NOT_FOUND, message: "not in main chain" }
+            }
+            method => chain_reply(method, 1_000).unwrap(),
+        })
+        .await;
+        let error = backend(&mock).await.tree_state(block::Hash([1; 32])).await.unwrap_err();
+        assert!(
+            matches!(&error, BackendError::Unavailable(message) if message.contains("below height 500")),
+            "{error}"
+        );
     }
 
     #[tokio::test]
