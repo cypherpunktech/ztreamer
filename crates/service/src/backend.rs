@@ -32,6 +32,10 @@ use zakura_chain::{
 use zakura_state::{ChainTipChange, ReadRequest, ReadResponse, ReadStateService};
 use ztreamer_node::NodeClient;
 
+mod remote;
+
+pub use remote::{RemoteBackend, RemoteConnectError};
+
 /// Why a backend request failed. Each variant maps to one gRPC status code.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BackendError {

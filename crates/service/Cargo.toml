@@ -14,6 +14,7 @@ test-utils = ["dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer
 [dependencies]
 blake3.workspace = true
 hex = "0.4"
+lru = "0.18"
 metrics = "0.24"
 prost = "0.14.4"
 sapling-crypto.workspace = true
@@ -26,6 +27,7 @@ tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1"
 zakura-chain.workspace = true
 zakura-network.workspace = true
+zakura-rpc.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakurad.workspace = true
 ztreamer-indexer = { path = "../indexer" }

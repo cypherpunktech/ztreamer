@@ -14,7 +14,7 @@ mod service;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use backend::{BackendError, InProcessBackend, StateBackend};
+pub use backend::{BackendError, InProcessBackend, RemoteBackend, StateBackend};
 pub use range_meta_fill::RangeMetaFiller;
 pub use service::{
     CompactService, HeadFollowerConfig, HeadFollowerError, Readiness, ServingSnapshot,
