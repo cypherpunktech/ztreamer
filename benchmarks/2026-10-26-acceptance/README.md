@@ -5,6 +5,12 @@ on master `1c6c90b` (#153). Raw outputs are in `out/`, node configs and records 
 scripts and benchmark-only patches in `tools/`. The machine is the one in
 `../2026-10-22-replication/hardware.json`.
 
+**Status (2026-10-26).** These numbers are from master `1c6c90b` with two benchmark-only patches:
+the inactive-pool roots fix as a patch, and a throwaway signing key. Since this run, #173 (that
+fix) and #175 (peer back-pressure) are merged. A clean rerun on master follows the simplification
+PRs and the epoch-cap change, before the first public snapshot. The rig below stays on torvus for
+that rerun.
+
 **Result.** Eight gates are met. The serving gate is met at 10,000-block ranges and not at the other
 range sizes. The import gate is met over HTTP and not met over a peer. An empty replica serves a
 verified index 7.2 min after start; Zaino needed 3 h 43 min to serve from empty (see "Time to a
@@ -148,6 +154,35 @@ overlapped with the verification.
     master the filler starts only after the historical pass, so the gate checks that the pass
     did not slow down. The pass ran on the frozen snapshot with the 2026-10-22 pipeline flags.
 11. **tmux.** The session is `sandblast-run-7_4`: tmux replaces the dot of `sandblast-run-7.4`.
+
+## Reuse the rig
+
+The rig stays on torvus. Nothing of it runs. To rerun:
+
+1. **Node snapshot.** `/srv/accept-7.4/cache` is the hard-linked snapshot of the ztreamer.service
+   state (tip 3,531,614). The SST files are hard links to production files: never `chmod` or
+   `chown` them, because that changes the production files. Directories and the non-SST files
+   belong to user `ztreamer`. The snapshot grows slowly, as production compacts away the files
+   that it shares. `/home/evalir` is mode 0700, thus everything that user `ztreamer` reads stays
+   under `/srv/accept-7.4`.
+2. **Source S.** Build the new binary and copy it to `/srv/accept-7.4/bin/ztreamerd`. Then run
+   `tools/run-source.sh <log>`: embedded mode as user `ztreamer`, config `node/source-zakura.toml`
+   (no peers, zakura JSON-RPC on 127.0.0.1:28232, gRPC with Replicator on 127.0.0.1:29067). Its
+   index is `/srv/accept-7.4/index-src`, which already has all 3,531 `range_meta` rows. zakura
+   writes a new cookie at each start: copy `/srv/accept-7.4/cookie/.cookie` (with `sudo`) before
+   each replica run.
+3. **Snapshot.** `/srv/accept-7.4/snapshot` holds this run's export, signed with the test key. With
+   a new binary, export again (`tools/` has the command in `out/export.time`) and serve it with
+   `python3 -m http.server 28080 --bind 127.0.0.1 --directory /srv/accept-7.4/snapshot`.
+4. **Replica.** `tools/run-replica.sh <name> <source> <grpc port>` imports into an empty index under
+   `~/sandblast-bench/accept-7.4/`. `replica-http` is this run's HTTP replica (after the tail run).
+5. **Other gates.** `tools/attest_rpc.py`, `tools/rewind_index.rs` (copy to
+   `crates/indexer/examples/`), `tools/run-tail.sh`, `tools/run-embedded.sh` (empty indexes
+   `embedded-1`, `embedded-2` under `/srv/accept-7.4`; delete them first).
+6. **tmux.** Use a session name without a dot, and keep one window open, or the tmux server exits
+   with the last window.
+
+Disk: about 90 GB in real terms (indexes, export, the files that production compacted away).
 
 ## Files
 
