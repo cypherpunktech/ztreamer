@@ -2,7 +2,7 @@
 //!
 //! [`Epoch::verify`](crate::epoch::Epoch::verify) and [`Epoch::attest`](crate::epoch::Epoch::attest)
 //! prove the hash chain and the note commitment trees. They do not prove the fields that no root
-//! commits to, for example the ciphertexts. [`sample_epoch`] picks some heights of each range,
+//! commits to, for example the ciphertexts. [`Epoch::sample`] picks some heights of each range,
 //! asks the node for the full block at each height, parses it with the parser of the indexer, and
 //! compares the record byte for byte with the record in the blob.
 //!
@@ -13,8 +13,8 @@ use rand::{SeedableRng, rngs::StdRng, seq::index};
 use zakura_chain::block;
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, RangeDecoder, TreeSizes},
-    index::{RANGE_SIZE, range_meta::ManifestEntry},
+    codec::{RangeDecoder, TreeSizes},
+    index::RANGE_SIZE,
     parser::parse_block,
     types::RawIndexBlock,
 };
@@ -32,7 +32,7 @@ use crate::{
 ///
 /// Give the best-chain block at a height. Return `None` when the source does not store the body
 /// of the block, and an error when a call fails. [`Sampler::prune_height`] is the lowest height
-/// whose body the source stores: [`sample_epoch`] does not ask below it.
+/// whose body the source stores: [`Epoch::sample`] does not ask below it.
 #[async_trait]
 pub trait Sampler: Send + Sync {
     /// The full block at `height`, or `None` when the source does not store its body.
@@ -42,89 +42,108 @@ pub trait Sampler: Send + Sync {
     fn prune_height(&self) -> u32;
 }
 
-/// Compares the records at sampled heights of `epoch` with the full blocks of `sampler`.
+/// How [`Epoch::sample`] picks the heights to compare.
 ///
-/// `blobs` holds one blob per entry, in order; another count is [`Reject::BlobCount`]. For each
-/// range, the function picks `per_range` different heights with a choice that only `seed` and
-/// the range start control, and skips the heights below [`Sampler::prune_height`]. It parses
-/// each full block with [`parse_block`], adds the tree sizes before the block, and compares the
-/// encoded record with the record in the blob. It returns the compared heights in ascending
-/// order, for `sampled_heights` in `range_meta`.
-///
-/// Run it after [`Epoch::verify`](crate::epoch::Epoch::verify): it does not check the blob digests.
-pub async fn sample_epoch(
-    epoch: &Epoch<'_>,
-    blobs: &[impl AsRef<[u8]>],
-    sampler: &dyn Sampler,
-    per_range: usize,
-    seed: u64,
-) -> Result<Vec<u32>, EpochError> {
-    if blobs.len() != epoch.entries().len() {
-        return Err(Reject::BlobCount { entries: epoch.entries().len(), blobs: blobs.len() }.into());
+/// The seed must be random and secret for each replica. A snapshot source that knows the seed
+/// knows the sampled heights, and can change the records at all other heights.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SamplePlan {
+    /// The heights to compare in each range. A value above [`RANGE_SIZE`] compares each height.
+    pub per_range: usize,
+    /// The seed of the choice.
+    pub seed: u64,
+}
+
+impl SamplePlan {
+    /// The offsets in the range that starts at `start_height` to compare, in ascending order.
+    /// Only the seed and `start_height` control the choice.
+    fn offsets(self, start_height: u32) -> Vec<u32> {
+        let mut rng = StdRng::seed_from_u64(self.seed ^ u64::from(start_height));
+        let length = RANGE_SIZE as usize;
+        let mut offsets: Vec<_> = index::sample(&mut rng, length, self.per_range.min(length))
+            .into_iter()
+            // An offset is below `RANGE_SIZE`, which is a `u32`.
+            .map(|offset| offset as u32)
+            .collect();
+        offsets.sort_unstable();
+        offsets
     }
-    let prune_height = sampler.prune_height();
-    let mut before = epoch.previous().map_or_else(TreeSizes::default, |entry| entry.end_tree_sizes);
-    let mut sampled = Vec::new();
-    for (entry, blob) in epoch.entries().iter().zip(blobs) {
-        let start = entry.start_height;
-        let decoder = RangeDecoder::new(blob.as_ref()).map_err(|_| Check::Decode.at(start))?;
-        for offset in offsets(entry, per_range, seed) {
-            let height = start.saturating_add(offset);
-            if height < prune_height {
-                continue;
-            }
-            let decode = |offset| decoder.record(offset).map_err(|_| Check::Decode.at(height));
-            let record = decode(offset as usize)?;
-            let sizes = match offset {
-                0 => before,
-                _ => decode(offset as usize - 1)?.end_tree_sizes,
-            };
-            let node = |source| EpochError::Node { height, source };
-            let Some(block) = sampler.full_block(height).await.map_err(node)? else {
-                continue;
-            };
-            let expected = node_record(&block, sizes).map_err(node)?;
-            if record.encode().ok().as_ref() != Some(&expected) {
-                return Err(Check::SampledBlock.at(height).into());
-            }
-            sampled.push(height);
+}
+
+impl Epoch<'_> {
+    /// Compares the records at the heights that `plan` picks with the full blocks of `sampler`.
+    ///
+    /// `blobs` holds one blob per entry, in order; another count is [`Reject::BlobCount`]. The
+    /// method skips the heights below [`Sampler::prune_height`]. It parses each full block with
+    /// [`parse_block`], adds the tree sizes before the block, and compares the encoded record
+    /// with the record in the blob. It returns the compared heights in ascending order, for
+    /// `sampled_heights` in `range_meta`.
+    ///
+    /// Run it after [`Epoch::verify`]: it does not check the blob digests.
+    ///
+    /// ```
+    /// use ztreamer_verify::{
+    ///     attest::EpochError,
+    ///     epoch::Epoch,
+    ///     sample::{SamplePlan, Sampler},
+    /// };
+    ///
+    /// # async fn run(
+    /// #     epoch: Epoch<'_>,
+    /// #     blobs: Vec<Vec<u8>>,
+    /// #     node: &dyn Sampler,
+    /// #     seed: u64,
+    /// # ) -> Result<Vec<u32>, EpochError> {
+    /// epoch.sample(&blobs, node, SamplePlan { per_range: 5, seed }).await
+    /// # }
+    /// ```
+    pub async fn sample(
+        &self,
+        blobs: &[impl AsRef<[u8]>],
+        sampler: &dyn Sampler,
+        plan: SamplePlan,
+    ) -> Result<Vec<u32>, EpochError> {
+        if blobs.len() != self.entries().len() {
+            let (entries, blobs) = (self.entries().len(), blobs.len());
+            return Err(Reject::BlobCount { entries, blobs }.into());
         }
-        before = entry.end_tree_sizes;
+        let prune_height = sampler.prune_height();
+        let mut before =
+            self.previous().map_or_else(TreeSizes::default, |entry| entry.end_tree_sizes);
+        let mut sampled = Vec::new();
+        for (entry, blob) in self.entries().iter().zip(blobs) {
+            let start = entry.start_height;
+            let decoder = RangeDecoder::new(blob.as_ref()).map_err(|_| Check::Decode.at(start))?;
+            for offset in plan.offsets(start) {
+                let height = start.saturating_add(offset);
+                if height < prune_height {
+                    continue;
+                }
+                let decode = |offset| decoder.record(offset).map_err(|_| Check::Decode.at(height));
+                let record = decode(offset as usize)?;
+                let sizes = match offset {
+                    0 => before,
+                    _ => decode(offset as usize - 1)?.end_tree_sizes,
+                };
+                let node = |source| EpochError::Node { height, source };
+                let Some(block) = sampler.full_block(height).await.map_err(node)? else {
+                    continue;
+                };
+                let expected = parse_block(&block)
+                    .map_err(|source| node(source.into()))?
+                    .into_record(sizes)
+                    .ok_or(Check::SampledBlock.at(height))?
+                    .encode()
+                    .map_err(|source| node(source.into()))?;
+                if !record.encode().is_ok_and(|bytes| bytes == expected) {
+                    return Err(Check::SampledBlock.at(height).into());
+                }
+                sampled.push(height);
+            }
+            before = entry.end_tree_sizes;
+        }
+        Ok(sampled)
     }
-    Ok(sampled)
-}
-
-/// The offsets in the range of `entry` to sample, in ascending order.
-fn offsets(entry: &ManifestEntry, per_range: usize, seed: u64) -> Vec<u32> {
-    let mut rng = StdRng::seed_from_u64(seed ^ u64::from(entry.start_height));
-    let length = RANGE_SIZE as usize;
-    let mut offsets: Vec<_> = index::sample(&mut rng, length, per_range.min(length))
-        .into_iter()
-        // An offset is below `RANGE_SIZE`, which is a `u32`.
-        .map(|offset| offset as u32)
-        .collect();
-    offsets.sort_unstable();
-    offsets
-}
-
-/// The encoded record of `block`, with the tree sizes `before` the block. A tree size that
-/// overflows saturates, and thus does not match the blob.
-fn node_record(block: &RawIndexBlock, before: TreeSizes) -> Result<Vec<u8>, NodeError> {
-    let parsed = parse_block(block)?;
-    let end_tree_sizes = TreeSizes {
-        sapling: before.sapling.saturating_add(parsed.sapling_additions),
-        orchard: before.orchard.saturating_add(parsed.orchard_additions),
-        ironwood: before.ironwood.saturating_add(parsed.ironwood_additions),
-    };
-    Ok(CompactBlockRecord {
-        height: parsed.height,
-        hash: parsed.hash,
-        previous_hash: parsed.previous_hash,
-        time: parsed.time,
-        transactions: parsed.transactions,
-        end_tree_sizes,
-    }
-    .encode()?)
 }
 
 /// A [`Sampler`] that asks a zakura node over JSON-RPC.
@@ -186,7 +205,7 @@ mod tests {
     use zakura_rpc::client::GetBlockchainInfoResponse;
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
     use ztreamer_indexer::{
-        codec::encode_range,
+        codec::{CompactBlockRecord, encode_range},
         test_utils::{hash, raw_block},
     };
     use ztreamer_remote::{
@@ -243,20 +262,9 @@ mod tests {
         blocks()
             .values()
             .map(|block| {
-                let parsed = parse_block(block).unwrap();
-                sizes = TreeSizes {
-                    sapling: sizes.sapling + parsed.sapling_additions,
-                    orchard: sizes.orchard + parsed.orchard_additions,
-                    ironwood: sizes.ironwood + parsed.ironwood_additions,
-                };
-                CompactBlockRecord {
-                    height: parsed.height,
-                    hash: parsed.hash,
-                    previous_hash: parsed.previous_hash,
-                    time: parsed.time,
-                    transactions: parsed.transactions,
-                    end_tree_sizes: sizes,
-                }
+                let record = parse_block(block).unwrap().into_record(sizes).unwrap();
+                sizes = record.end_tree_sizes;
+                record
             })
             .collect()
     }
@@ -271,8 +279,8 @@ mod tests {
         let blob = encode_range(records).unwrap();
         let entries = [entry_for(records, &blob)];
         let sampler = FakeSampler { blocks: blocks(), prune_height };
-        sample_epoch(&Epochs::new(&entries).next().unwrap(), &[blob], &sampler, per_range, seed)
-            .await
+        let plan = SamplePlan { per_range, seed };
+        Epochs::new(&entries).next().unwrap().sample(&[blob], &sampler, plan).await
     }
 
     #[tokio::test]
@@ -323,10 +331,10 @@ mod tests {
         let records = records();
         let entries = [entry_for(&records, &encode_range(&records).unwrap())];
         let sampler = FakeSampler { blocks: blocks(), prune_height: 0 };
+        let plan = SamplePlan { per_range: 5, seed: 7 };
 
         let result =
-            sample_epoch(&Epochs::new(&entries).next().unwrap(), &[] as &[Vec<u8>], &sampler, 5, 7)
-                .await;
+            Epochs::new(&entries).next().unwrap().sample(&[] as &[Vec<u8>], &sampler, plan).await;
 
         assert!(
             matches!(result, Err(EpochError::Reject(Reject::BlobCount { entries: 1, blobs: 0 }))),

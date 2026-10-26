@@ -94,7 +94,7 @@ pub enum NodeError {
     Encode(#[from] CodecError),
 }
 
-/// Why [`Epoch::attest`] or [`sample_epoch`](crate::sample::sample_epoch) did not accept an
+/// Why [`Epoch::attest`] or [`Epoch::sample`](crate::epoch::Epoch::sample) did not accept an
 /// epoch.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochError {

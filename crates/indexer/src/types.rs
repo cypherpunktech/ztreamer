@@ -6,7 +6,10 @@ use zakura_chain::{
     transaction,
 };
 
-use crate::{Ciphertext, Digest, EphemeralKey};
+use crate::{
+    Ciphertext, Digest, EphemeralKey,
+    codec::{CompactBlockRecord, TreeSizes},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RawIndexBlock {
@@ -79,4 +82,49 @@ pub struct ParsedCompactBlock {
     pub sapling_additions: u32,
     pub orchard_additions: u32,
     pub ironwood_additions: u32,
+}
+
+impl ParsedCompactBlock {
+    /// The record that the index stores for this block, after the tree sizes `before` the block.
+    /// Returns `None` if a tree size overflows.
+    pub fn into_record(self, before: TreeSizes) -> Option<CompactBlockRecord> {
+        let additions = TreeSizes {
+            sapling: self.sapling_additions,
+            orchard: self.orchard_additions,
+            ironwood: self.ironwood_additions,
+        };
+        Some(CompactBlockRecord {
+            height: self.height,
+            hash: self.hash,
+            previous_hash: self.previous_hash,
+            time: self.time,
+            transactions: self.transactions,
+            end_tree_sizes: before.checked_add(additions)?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{mixed_records, parsed};
+
+    #[test]
+    fn a_parsed_block_becomes_its_record() {
+        let records = mixed_records(10);
+        let before = records[8].end_tree_sizes;
+
+        let record = parsed(records[9].clone()).into_record(before).unwrap();
+
+        assert_eq!(record, records[9]);
+    }
+
+    #[test]
+    fn a_tree_size_overflow_gives_no_record() {
+        let record = mixed_records(10).swap_remove(9);
+        assert!(record.additions().sapling > 0);
+        let before = TreeSizes { sapling: u32::MAX, ..TreeSizes::default() };
+
+        assert!(parsed(record).into_record(before).is_none());
+    }
 }
