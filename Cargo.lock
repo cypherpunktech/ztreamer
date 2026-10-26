@@ -8099,10 +8099,16 @@ dependencies = [
 name = "ztreamerd"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "chrono",
  "clap",
+ "ed25519-dalek",
  "eyre",
+ "hex",
  "http",
+ "serde",
  "serde_json",
+ "serde_with",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -8120,4 +8126,5 @@ dependencies = [
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",
+ "ztreamer-verify",
 ]

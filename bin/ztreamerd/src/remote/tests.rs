@@ -15,6 +15,7 @@ use ztreamer_protocol::proto::{
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
 
 use super::*;
+use crate::Cli;
 
 /// The durable tip of the index before the daemon starts.
 const INDEX_TIP: u32 = 20;
@@ -47,15 +48,15 @@ fn free_addr() -> SocketAddr {
 }
 
 /// The flags of a daemon on the node at `url` with the index in `dir`, then `extra`.
-fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> Cli {
+fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> DaemonArgs {
     let dir = dir.path().to_str().unwrap();
     let flags = ["--index-dir", dir, "--index-map-size", "67108864", "--remote-rpc", url];
     let flags = ["--fetch-workers", "2", "--source-segment-blocks", "16"].into_iter().chain(flags);
-    Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied()))
+    Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
 }
 
 /// Runs the daemon with no signal, until it stops by itself.
-async fn run(cli: Cli) -> Result<()> {
+async fn run(cli: DaemonArgs) -> Result<()> {
     let node = cli.remote.node().unwrap().unwrap();
     let daemon = node.run_until(cli, Server::builder(), future::pending());
     timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
@@ -214,7 +215,9 @@ async fn waits_for_an_unreachable_node_until_the_signal() {
 
 #[test]
 fn the_flags_keep_the_two_modes_apart_and_hide_the_password() {
-    let parse = |flags: &[&str]| Cli::try_parse_from(["ztreamerd"].iter().chain(flags));
+    let parse = |flags: &[&str]| {
+        Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
+    };
     let url = "http://127.0.0.1:8232";
     assert!(parse(&["--remote-rpc", url, "--zakura-config", "zakura.toml"]).is_err());
     assert!(parse(&["--remote-rpc", url, "--fill-range-meta"]).is_err());

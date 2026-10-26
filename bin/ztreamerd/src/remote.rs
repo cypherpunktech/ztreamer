@@ -20,7 +20,7 @@ use ztreamer_indexer::{
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource};
 
-use crate::{Cli, NodeSources, Readiness, lifecycle, run_application};
+use crate::{DaemonArgs, NodeSources, Readiness, lifecycle, run_application};
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -104,7 +104,7 @@ impl RemoteNode {
     /// the Prometheus endpoint, then calls [`Self::run_until`].
     pub(crate) async fn run(
         self,
-        cli: Cli,
+        cli: DaemonArgs,
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
@@ -121,7 +121,7 @@ impl RemoteNode {
     /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
     async fn run_until(
         self,
-        cli: Cli,
+        cli: DaemonArgs,
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
@@ -145,7 +145,7 @@ impl RemoteNode {
     /// Makes the sources when the node is ready, then runs the daemon on them until shutdown.
     async fn application(
         self,
-        cli: Cli,
+        cli: DaemonArgs,
         grpc_server: Server,
         index: Arc<Index>,
         shutdown: CancellationToken,
