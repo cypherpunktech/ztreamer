@@ -20,7 +20,10 @@ use ztreamer_indexer::{
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource};
 
-use crate::{DaemonArgs, NodeSources, Readiness, lifecycle, run_application};
+use crate::{
+    DaemonArgs, NodeSources, Readiness, ServiceHooks, lifecycle, replicate::Replica,
+    run_application,
+};
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -92,12 +95,19 @@ impl RemoteArgs {
 pub(crate) struct RemoteNode {
     client: ZakuraClient,
     network: Network,
+    replica: Option<Replica>,
 }
 
 impl RemoteNode {
     /// The node behind `client`, which must run `network`.
     pub(crate) const fn new(client: ZakuraClient, network: Network) -> Self {
-        Self { client, network }
+        Self { client, network, replica: None }
+    }
+
+    /// Runs `replica`, the import of `--replicate-from`, before the tail.
+    pub(crate) fn with_replica(mut self, replica: Option<Replica>) -> Self {
+        self.replica = replica;
+        self
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
@@ -119,7 +129,7 @@ impl RemoteNode {
     ///
     /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
     /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
-    async fn run_until(
+    pub(crate) async fn run_until(
         self,
         cli: DaemonArgs,
         grpc_server: Server,
@@ -142,7 +152,8 @@ impl RemoteNode {
         lifecycle::supervise(node, application, shutdown, signal).await
     }
 
-    /// Makes the sources when the node is ready, then runs the daemon on them until shutdown.
+    /// Runs the import of `--replicate-from`, if there is one. Then makes the sources when the
+    /// node is ready, and runs the daemon on them until shutdown.
     async fn application(
         self,
         cli: DaemonArgs,
@@ -150,10 +161,17 @@ impl RemoteNode {
         index: Arc<Index>,
         shutdown: CancellationToken,
     ) -> Result<()> {
+        let status = self.replica.as_ref().map(Replica::new_status);
+        if let Some(replica) = &self.replica
+            && replica.import(&self.client, &self.network, &index, &shutdown).await?.is_break()
+        {
+            return Ok(());
+        }
         let ControlFlow::Continue(sources) = self.sources(&index, &shutdown).await? else {
             return Ok(());
         };
-        run_application(cli, grpc_server, index, &self.network, None, sources, shutdown).await
+        let hooks = ServiceHooks { p2p: None, replica: status };
+        run_application(cli, grpc_server, index, &self.network, hooks, sources, shutdown).await
     }
 
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.

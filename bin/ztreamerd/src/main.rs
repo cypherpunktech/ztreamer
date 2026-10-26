@@ -35,12 +35,15 @@ use ztreamer_protocol::{
 };
 use ztreamer_service::{
     CompactService, HeadFollowerConfig, InProcessBackend, RangeMetaFiller, ReplicatorService,
-    StateBackend, p2p::P2pCompactService,
+    StateBackend,
+    p2p::P2pCompactService,
+    replica::{ImportState, ReplicaStatus},
 };
 
 mod export;
 mod lifecycle;
 mod remote;
+mod replicate;
 
 /// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
@@ -135,6 +138,9 @@ struct DaemonArgs {
 
     #[command(flatten)]
     remote: remote::RemoteArgs,
+
+    #[command(flatten)]
+    replicate: replicate::ReplicateArgs,
 }
 
 impl DaemonArgs {
@@ -188,7 +194,9 @@ fn main() -> Result<()> {
 async fn run_daemon(cli: DaemonArgs) -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
+    let replica = cli.replicate.replica()?;
     if let Some(node) = cli.remote.node()? {
+        let node = node.with_replica(replica);
         return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
     }
 
@@ -226,8 +234,8 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        let p2p = Some(p2p.clone());
-        run_application(cli, grpc_server, index, &network, p2p, sources, shutdown.clone()).await
+        let hooks = ServiceHooks { p2p: Some(p2p.clone()), replica: None };
+        run_application(cli, grpc_server, index, &network, hooks, sources, shutdown.clone()).await
     };
 
     lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
@@ -273,14 +281,30 @@ impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
     }
 }
 
-/// Indexes, then serves until shutdown. `p2p` gets the compact service when a node runs in this
-/// process.
+/// What a node mode adds to the compact service.
+struct ServiceHooks {
+    /// Gets the compact service when a node runs in this process.
+    p2p: Option<Arc<P2pCompactService>>,
+    /// The readiness of a replica, with `--replicate-from`.
+    replica: Option<ReplicaStatus>,
+}
+
+impl ServiceHooks {
+    /// Sets the import state of the replica, if there is one.
+    fn import_state(&self, state: ImportState) {
+        if let Some(replica) = &self.replica {
+            replica.update(|progress| progress.import_state = state);
+        }
+    }
+}
+
+/// Indexes, then serves until shutdown. The service gets the `hooks` of the node mode.
 async fn run_application<T, H, B>(
     cli: DaemonArgs,
     grpc_server: Server,
     index: Arc<Index>,
     network: &Network,
-    p2p: Option<Arc<P2pCompactService>>,
+    hooks: ServiceHooks,
     sources: NodeSources<T, H, B>,
     shutdown: CancellationToken,
 ) -> Result<()>
@@ -296,6 +320,7 @@ where
     let NodeSources { tail, head, backend } = sources;
 
     let pipeline = PipelineConfig::from(&cli);
+    hooks.import_state(ImportState::Tail);
     let ControlFlow::Continue(state) =
         sync_historical(tail, &index, pipeline, cli.index_only, &shutdown).await?
     else {
@@ -309,12 +334,17 @@ where
     let replicate_index = cli.replicate_listen.map(|_| Arc::clone(&index));
     let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
         .with_ping_enabled(cli.ping_very_insecure);
+    let compact = match hooks.replica.clone() {
+        Some(status) => compact.with_replica_status(status),
+        None => compact,
+    };
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
-    if let Some(p2p) = p2p {
+    if let Some(p2p) = &hooks.p2p {
         p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     }
+    hooks.import_state(ImportState::Following);
 
     let extras = Extras {
         filler: filler_index.map(|index| {
