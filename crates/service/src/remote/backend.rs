@@ -159,7 +159,7 @@ impl RemoteBackend {
             self.node.z_get_subtrees_by_index(P::NAME, next, remaining),
             self.tip_height(),
         );
-        let fetched = parse_subtrees::<P>(response?, next)?;
+        let fetched = P::parse_subtrees(response?, next)?;
         // The tip only decides what goes in the cache. Without it, the answer is still good, and
         // nothing goes in the cache.
         let tip = tip
@@ -184,63 +184,37 @@ impl RemoteBackend {
     }
 }
 
-/// Parses a `z_getsubtreesbyindex` answer that must start at `start`.
-///
-/// The node prints each subtree root in the stored byte order, for all pools. This is different
-/// from the Sapling tree root (`finalRoot` of `z_gettreestate`), which the node prints reversed.
-fn parse_subtrees<P: Pool>(
-    response: GetSubtreesByIndexResponse,
-    start: NoteCommitmentSubtreeIndex,
-) -> Result<Subtrees<P::Node>, BackendError> {
-    if response.pool() != P::NAME || response.start_index() != start {
-        return Err(BackendError::Unexpected(format!(
-            "remote zakura answered {} subtrees from {}, not {} from {}",
-            response.pool(),
-            response.start_index().0,
-            P::NAME,
-            start.0,
-        )));
-    }
-    let bad_root = |root: &str| {
-        BackendError::Unexpected(format!(
-            "remote zakura sent a bad {} subtree root {root:?}",
-            P::NAME
-        ))
-    };
-    response
-        .subtrees()
-        .iter()
-        .zip(u32::from(start.0)..)
-        .map(|(subtree, index)| {
-            let index = u16::try_from(index).map_err(|_| {
+/// A value that the node sends in the Zcash serialization: a block or a transaction.
+trait FromNodeBytes: ZcashDeserialize + Send + 'static {
+    /// The name of the value in errors.
+    const WHAT: &'static str;
+
+    /// Deserializes `bytes` on a blocking thread, because a large block takes milliseconds. The
+    /// thread runs in the tracing span of the caller.
+    fn from_node_bytes(bytes: Vec<u8>) -> impl Future<Output = Result<Self, BackendError>> + Send {
+        let span = tracing::Span::current();
+        async move {
+            tokio::task::spawn_blocking(move || {
+                span.in_scope(|| bytes.zcash_deserialize_into::<Self>())
+            })
+            .await
+            .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
+            .map_err(|error| {
                 BackendError::Unexpected(format!(
-                    "remote zakura sent {} subtrees past index 65535",
-                    P::NAME
+                    "remote zakura sent a bad {}: {error}",
+                    Self::WHAT
                 ))
-            })?;
-            let root = hex::decode(&subtree.root)
-                .ok()
-                .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
-                .and_then(P::root)
-                .ok_or_else(|| bad_root(&subtree.root))?;
-            let data = NoteCommitmentSubtreeData::new(subtree.end_height, root);
-            Ok((NoteCommitmentSubtreeIndex(index), data))
-        })
-        .collect()
+            })
+        }
+    }
 }
 
-/// Deserializes node bytes on a blocking thread, because a large block takes milliseconds.
-async fn decode<T>(bytes: Vec<u8>, what: &'static str) -> Result<T, BackendError>
-where
-    T: ZcashDeserialize + Send + 'static,
-{
-    let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || span.in_scope(|| bytes.zcash_deserialize_into::<T>()))
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
-        .map_err(|error| {
-            BackendError::Unexpected(format!("remote zakura sent a bad {what}: {error}"))
-        })
+impl FromNodeBytes for Block {
+    const WHAT: &'static str = "block";
+}
+
+impl FromNodeBytes for Transaction {
+    const WHAT: &'static str = "transaction";
 }
 
 /// Turns the node's not-found answer into `None`.
@@ -265,6 +239,52 @@ trait Pool {
 
     fn root(bytes: [u8; 32]) -> Option<Self::Node>;
     fn cache(backend: &RemoteBackend) -> &SubtreeCache<Self::Node>;
+
+    /// Parses a `z_getsubtreesbyindex` answer that must start at `start`.
+    ///
+    /// The node prints each subtree root in the stored byte order, for all pools. This is
+    /// different from the Sapling tree root (`finalRoot` of `z_gettreestate`), which the node
+    /// prints reversed.
+    fn parse_subtrees(
+        response: GetSubtreesByIndexResponse,
+        start: NoteCommitmentSubtreeIndex,
+    ) -> Result<Subtrees<Self::Node>, BackendError> {
+        if response.pool() != Self::NAME || response.start_index() != start {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura answered {} subtrees from {}, not {} from {}",
+                response.pool(),
+                response.start_index().0,
+                Self::NAME,
+                start.0,
+            )));
+        }
+        let bad_root = |root: &str| {
+            BackendError::Unexpected(format!(
+                "remote zakura sent a bad {} subtree root {root:?}",
+                Self::NAME
+            ))
+        };
+        response
+            .subtrees()
+            .iter()
+            .zip(u32::from(start.0)..)
+            .map(|(subtree, index)| {
+                let index = u16::try_from(index).map_err(|_| {
+                    BackendError::Unexpected(format!(
+                        "remote zakura sent {} subtrees past index 65535",
+                        Self::NAME
+                    ))
+                })?;
+                let root = hex::decode(&subtree.root)
+                    .ok()
+                    .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+                    .and_then(Self::root)
+                    .ok_or_else(|| bad_root(&subtree.root))?;
+                let data = NoteCommitmentSubtreeData::new(subtree.end_height, root);
+                Ok((NoteCommitmentSubtreeIndex(index), data))
+            })
+            .collect()
+    }
 }
 
 enum SaplingPool {}
@@ -425,7 +445,7 @@ impl StateBackend for RemoteBackend {
         let Some(raw) = request.or_not_found(RpcCode::INVALID_PARAMETER)? else {
             return Ok(None);
         };
-        let block: Block = decode(raw.0, "block").await?;
+        let block = Block::from_node_bytes(raw.0).await?;
         if block.hash() != hash {
             return Err(BackendError::Unexpected(format!(
                 "remote zakura sent block {} for {hash}",
@@ -452,8 +472,7 @@ impl StateBackend for RemoteBackend {
         let Some(height) = object.height().and_then(|height| u32::try_from(height).ok()) else {
             return Ok(None);
         };
-        let transaction: Transaction =
-            decode(object.hex().as_ref().to_vec(), "transaction").await?;
+        let transaction = Transaction::from_node_bytes(object.hex().as_ref().to_vec()).await?;
         if transaction.hash() != hash {
             return Err(BackendError::Unexpected(format!(
                 "remote zakura sent transaction {} for {hash}",
