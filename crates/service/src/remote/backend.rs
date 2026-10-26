@@ -660,6 +660,23 @@ impl<Node> HeapBytes for NoteCommitmentSubtreeData<Node> {
     }
 }
 
+impl HeapBytes for TreeState {
+    /// The trees and their `Arc`s. A tree keeps one 32-byte node for each 1 bit of its note
+    /// count, so it holds at most 32 of them.
+    fn heap_bytes(&self) -> usize {
+        fn tree<T>(count: Option<u64>) -> usize {
+            count.map_or(0, |count| size_of::<T>() + 16 + 32 * count.count_ones() as usize)
+        }
+        tree::<sapling::tree::NoteCommitmentTree>(self.sapling.as_ref().map(|tree| tree.count()))
+            + tree::<orchard::tree::NoteCommitmentTree>(
+                self.orchard.as_ref().map(|tree| tree.count()),
+            )
+            + tree::<ironwood::tree::NoteCommitmentTree>(
+                self.ironwood.as_ref().map(|tree| tree.count()),
+            )
+    }
+}
+
 impl HeapBytes for UnminedTx {
     /// Two times the serialized size: the decoded transaction keeps the proofs and the
     /// signatures as bytes, and adds its own structure.
@@ -1330,6 +1347,8 @@ mod tests {
         assert_eq!(trees.sapling.unwrap().count(), 3);
         assert_eq!(trees.orchard.unwrap().count(), 5);
         assert!(trees.ironwood.is_none());
+        let cached = backend.tree_states.lock().bytes;
+        assert!(cached > 0 && cached <= TREE_CACHE_BYTES, "{cached}");
         let requests = calls(&mock).len();
         assert_eq!(backend.tree_state(good).await.unwrap().orchard.unwrap().count(), 5);
         assert_eq!(calls(&mock).len(), requests);
