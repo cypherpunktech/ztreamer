@@ -96,11 +96,6 @@ pub struct ImportConfig {
 }
 
 impl ImportConfig {
-    /// A configuration with [`ImportConfig::default_import_workers`].
-    pub fn new(network: Network, verify_sample: SamplePlan) -> Self {
-        Self { network, verify_sample, import_workers: Self::default_import_workers() }
-    }
-
     /// The available cores minus two, for the writer and the runtime. At least one.
     pub fn default_import_workers() -> NonZeroUsize {
         thread::available_parallelism()
@@ -386,14 +381,7 @@ impl<S: RangeSource + 'static> Importer<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        sync::{
-            Mutex,
-            atomic::{AtomicUsize, Ordering},
-        },
-        time::Duration,
-    };
+    use std::{collections::BTreeMap, sync::Mutex, time::Duration};
 
     use async_trait::async_trait;
     use ed25519_dalek::SigningKey;
@@ -409,7 +397,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        fetch::{BlobStream, ExportInfo, HttpSource},
+        fetch::HttpSource,
         manifest::Pool,
         range::Check,
         test_utils::{FileServer, SEED, Snapshot, SourceIndex},
@@ -480,39 +468,12 @@ mod tests {
         }
     }
 
-    /// A source that counts its [`RangeSource::fetch_blob`] calls.
-    struct CountedSource {
-        source: Source,
-        fetches: Arc<AtomicUsize>,
-    }
-
-    #[async_trait]
-    impl RangeSource for CountedSource {
-        async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-            self.source.export_info().await
-        }
-
-        async fn manifest(&self) -> Result<Manifest, FetchError> {
-            self.source.manifest().await
-        }
-
-        async fn fetch_blob(
-            &self,
-            entry: &ManifestEntry,
-            offset: u64,
-        ) -> Result<BlobStream, FetchError> {
-            self.fetches.fetch_add(1, Ordering::SeqCst);
-            self.source.fetch_blob(entry, offset).await
-        }
-    }
-
     /// A source index, its signed snapshot over HTTP, and an empty target index.
     struct Import {
         source: SourceIndex,
         snapshot: Snapshot,
         server: FileServer,
         target: Arc<Index>,
-        fetches: Arc<AtomicUsize>,
         _dir: TempDir,
     }
 
@@ -523,8 +484,7 @@ mod tests {
             let server = FileServer::start(snapshot.dir.path()).await;
             let dir = tempfile::tempdir().unwrap();
             let target = Arc::new(SourceIndex::open(&dir));
-            let fetches = Arc::default();
-            Self { source, snapshot, server, target, fetches, _dir: dir }
+            Self { source, snapshot, server, target, _dir: dir }
         }
 
         fn attestor(&self, hold: Option<Hold>) -> Arc<FakeAttestor> {
@@ -536,11 +496,7 @@ mod tests {
             Arc::new(FakeAttestor { answers: answers.collect(), hold, released, answered })
         }
 
-        fn importer(
-            &self,
-            attestor: Arc<FakeAttestor>,
-            network: Network,
-        ) -> Importer<CountedSource> {
+        fn importer(&self, attestor: Arc<FakeAttestor>, network: Network) -> Importer {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
             let source = HttpSource::new(self.server.base.clone(), key).unwrap();
             let node = TrustedNode {
@@ -554,8 +510,7 @@ mod tests {
                 import_workers: NonZeroUsize::new(4).unwrap(),
             };
             let source = Source::Http(Box::new(source));
-            let fetcher =
-                Fetcher::new(CountedSource { source, fetches: Arc::clone(&self.fetches) });
+            let fetcher = Fetcher::new(source);
             Importer::new(fetcher, node, Arc::clone(&self.target), config)
         }
 
@@ -564,9 +519,10 @@ mod tests {
             self.importer(self.attestor(None), Network::Mainnet).run(shutdown).await
         }
 
-        /// Takes the count of `fetch_blob` calls, and starts a new count.
-        fn take_fetches(&self) -> usize {
-            self.fetches.swap(0, Ordering::SeqCst)
+        /// The blob requests that the snapshot server got.
+        fn fetches(&self) -> usize {
+            let requests = self.server.requests();
+            requests.iter().filter(|(path, _)| path.starts_with("ranges/")).count()
         }
 
         /// Checks that the target holds the blobs of the source, byte for byte, and is verified.
@@ -616,7 +572,7 @@ mod tests {
 
         assert_eq!((report.epochs, report.ranges), (12, 120));
         import.assert_same_ranges();
-        assert_eq!(import.take_fetches(), 120);
+        assert_eq!(import.fetches(), 120);
     }
 
     #[tokio::test]
@@ -654,10 +610,11 @@ mod tests {
         assert_eq!((report.epochs, report.ranges, report.stopped), (1, 10, true));
         assert_eq!(report.verified_through, Some(9_999));
         assert_eq!(import.target.range_meta(10_000).unwrap(), None);
-        assert!(import.take_fetches() >= 10);
+        let first = import.fetches();
+        assert!(first >= 10);
         let report = import.run().await.unwrap();
         assert_eq!((report.epochs, report.ranges), (2, 15));
-        assert_eq!(import.take_fetches(), 15);
+        assert_eq!(import.fetches() - first, 15);
         import.assert_same_ranges();
     }
 
@@ -683,7 +640,7 @@ mod tests {
         let report = import.run().await.unwrap();
 
         assert_eq!((report.epochs, report.ranges), (2, 15));
-        assert_eq!(import.take_fetches(), 15);
+        assert_eq!(import.fetches(), 15);
         import.assert_same_ranges();
         let meta = import.target.range_meta(3_000).unwrap().unwrap();
         assert_eq!(meta.state, VerifyState::Verified);

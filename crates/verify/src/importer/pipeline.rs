@@ -8,10 +8,11 @@ use std::{
 };
 
 use bytes::Bytes;
+use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_indexer::index::{
-    IndexState,
+    Index, IndexState,
     range_meta::{Frontiers, RangeMeta, VerifyState},
 };
 
@@ -39,8 +40,9 @@ pub(crate) struct Run<S> {
     first: usize,
     /// The start frontiers of the first epoch.
     start: Frontiers,
-    /// The sealed tip of the index before the import.
-    sealed: Option<u32>,
+    /// The position of the first epoch that the index does not have. The epochs from `first`
+    /// to this one have `ChainOk` rows.
+    fetched_from: usize,
     /// One permit for each run of [`Epoch::verify`]: `import_workers` permits.
     workers: Semaphore,
     metrics: ImportMetrics,
@@ -62,9 +64,13 @@ impl<S: RangeSource + 'static> Run<S> {
                 Some(first)
             })
             .collect();
+        let fetched_from = manifest
+            .epochs()
+            .take_while(|epoch| sealed.is_some_and(|sealed| epoch.end_height() <= sealed))
+            .count();
         let workers = Semaphore::new(importer.config.import_workers.get());
         let metrics = ImportMetrics::new();
-        Self { importer, manifest, offsets, first, start, sealed, workers, metrics }
+        Self { importer, manifest, offsets, first, start, fetched_from, workers, metrics }
     }
 
     /// The positions of the epochs to import: from the first epoch to the end of the manifest.
@@ -98,8 +104,8 @@ impl<S: RangeSource + 'static> Run<S> {
 
     /// Returns `true` if the epoch at `at` was installed before the import, with
     /// [`VerifyState::ChainOk`] rows.
-    pub(crate) fn is_installed(&self, at: usize) -> bool {
-        self.sealed.is_some_and(|sealed| self.epoch(at).end_height() <= sealed)
+    pub(crate) const fn is_installed(&self, at: usize) -> bool {
+        at < self.fetched_from
     }
 
     /// Fetches, rebuilds, attests and samples the epoch at `at`, and gives its
@@ -117,25 +123,27 @@ impl<S: RangeSource + 'static> Run<S> {
         let entries = self.epoch(at).entries();
         let blobs = if self.is_installed(at) {
             let starts: Vec<_> = entries.iter().map(|entry| entry.start_height).collect();
-            self.importer
-                .blocking(move |index| {
-                    let read =
-                        |start| index.read_sealed_range_bytes(start).map(|blob| (start, blob));
-                    starts.into_iter().map(read).collect::<Result<Vec<_>, _>>()
-                })
-                .await?
-                .into_iter()
-                .map(|(start, blob)| {
+            let read = move |index: &Index| {
+                starts.into_iter().map(|start| index.read_sealed_range_bytes(start)).collect()
+            };
+            let blobs: Vec<_> = self.importer.blocking(read).await?;
+            entries
+                .iter()
+                .zip(blobs)
+                .map(|(entry, blob)| {
+                    let start = entry.start_height;
                     blob.map(Bytes::from).ok_or(ImportError::MissingBlob { start })
                 })
                 .collect::<Result<_, _>>()?
         } else {
-            let mut blobs = Vec::with_capacity(entries.len());
-            for entry in entries {
-                blobs.push(self.importer.blob(entry).await?);
-                self.metrics.add_fetched_bytes(entry.blob_len);
-            }
-            blobs
+            stream::iter(entries)
+                .then(|entry| async move {
+                    let blob = self.importer.blob(entry).await?;
+                    self.metrics.add_fetched_bytes(entry.blob_len);
+                    Ok::<_, ImportError>(blob)
+                })
+                .try_collect()
+                .await?
         };
         self.metrics.record(Stage::Fetch, started);
         Ok(blobs)
