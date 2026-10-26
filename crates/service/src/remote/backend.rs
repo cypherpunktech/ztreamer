@@ -451,11 +451,43 @@ trait FromNodeBytes: ZcashDeserialize + Send + 'static {
     }
 }
 
+impl FromNodeBytes for Block {
+    const WHAT: &'static str = "block";
+}
+
+impl FromNodeBytes for Transaction {
+    const WHAT: &'static str = "transaction";
+}
+
 /// A note commitment tree that `z_gettreestate` prints, and the type of its root.
 trait RpcTree: FromRpc {
     type Root: FromRpc + PartialEq;
 
     fn tree_root(&self) -> Self::Root;
+
+    /// Reads the tree from `finalState` of one pool of a `z_gettreestate` answer. `None` when
+    /// the node leaves it out, which it does before the pool activates. When the node also gives
+    /// `finalRoot`, the root of the tree must be equal to it.
+    fn from_treestate(
+        pool: &str,
+        treestate: &Treestate,
+    ) -> Result<Option<Arc<Self>>, BackendError> {
+        let commitments = treestate.commitments();
+        let Some(state) = commitments.final_state() else {
+            return Ok(None);
+        };
+        let bad = |error| {
+            BackendError::Unexpected(format!("remote zakura sent a bad {pool} tree: {error}"))
+        };
+        let tree = Self::from_rpc_bytes(state).map_err(bad)?;
+        let root = commitments.final_root().as_deref().map(Self::Root::from_rpc_bytes).transpose();
+        if root.map_err(bad)?.is_some_and(|root| root != tree.tree_root()) {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura sent a {pool} tree that does not match its root"
+            )));
+        }
+        Ok(Some(Arc::new(tree)))
+    }
 }
 
 impl RpcTree for sapling::tree::NoteCommitmentTree {
@@ -472,42 +504,6 @@ impl RpcTree for orchard::tree::NoteCommitmentTree {
     fn tree_root(&self) -> Self::Root {
         self.root()
     }
-}
-
-/// Parses `finalState` of one pool. `None` when the node leaves it out, which it does before the
-/// pool activates. When the node also gives `finalRoot`, the root of the tree must be equal to it.
-fn parse_tree<T: RpcTree>(
-    pool: &str,
-    treestate: &Treestate,
-) -> Result<Option<Arc<T>>, BackendError> {
-    let commitments = treestate.commitments();
-    let Some(state) = commitments.final_state() else {
-        return Ok(None);
-    };
-    let bad =
-        |error| BackendError::Unexpected(format!("remote zakura sent a bad {pool} tree: {error}"));
-    let tree = T::from_rpc_bytes(state).map_err(bad)?;
-    let root = commitments.final_root().as_deref().map(T::Root::from_rpc_bytes).transpose();
-    if root.map_err(bad)?.is_some_and(|root| root != tree.tree_root()) {
-        return Err(BackendError::Unexpected(format!(
-            "remote zakura sent a {pool} tree that does not match its root"
-        )));
-    }
-    Ok(Some(Arc::new(tree)))
-}
-
-/// Deserializes node bytes on a blocking thread, because a large block takes milliseconds.
-async fn decode<T>(bytes: Vec<u8>, what: &'static str) -> Result<T, BackendError>
-where
-    T: ZcashDeserialize + Send + 'static,
-{
-    let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || span.in_scope(|| bytes.zcash_deserialize_into::<T>()))
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
-        .map_err(|error| {
-            BackendError::Unexpected(format!("remote zakura sent a bad {what}: {error}"))
-        })
 }
 
 /// Turns the node's not-found answer into `None`.
@@ -827,9 +823,9 @@ impl StateBackend for RemoteBackend {
         let trees = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
                 Ok::<_, BackendError>(TreeState {
-                    sapling: parse_tree("Sapling", response.sapling())?,
-                    orchard: parse_tree("Orchard", response.orchard())?,
-                    ironwood: parse_tree("Ironwood", response.ironwood())?,
+                    sapling: RpcTree::from_treestate("Sapling", response.sapling())?,
+                    orchard: RpcTree::from_treestate("Orchard", response.orchard())?,
+                    ironwood: RpcTree::from_treestate("Ironwood", response.ironwood())?,
                 })
             })
         })
