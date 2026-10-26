@@ -123,8 +123,10 @@
 //! # Shared parts
 //!
 //! - All three parts use the typed calls of [`ZakuraClient`] and the error codes on
-//!   [`RpcCode`]. A block that the node does not have is [`RpcCode::INVALID_PARAMETER`]. A
-//!   transaction that the node does not have is [`RpcCode::INVALID_ADDRESS_OR_KEY`].
+//!   [`RpcCode`]. A block that the node does not have is [`RpcCode::INVALID_PARAMETER`], or
+//!   for `getblockhash` above the tip [`RpcCode::MISC`] with a fixed message (see
+//!   [`RpcError::is_block_not_found`]). A transaction that the node does not have is
+//!   [`RpcCode::INVALID_ADDRESS_OR_KEY`].
 //! - The head follower and the [`TipPoller`] both poll the tip of the node: the first with
 //!   `getblockchaininfo`, the second with `getbestblockhash`. While a mempool stream is open,
 //!   the node thus gets two tip calls per second for the same tip. One shared tip watch could
@@ -140,6 +142,8 @@
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`RpcCode`]: ztreamer_remote::RpcCode
 //! [`RpcCode::INVALID_PARAMETER`]: ztreamer_remote::RpcCode::INVALID_PARAMETER
+//! [`RpcCode::MISC`]: ztreamer_remote::RpcCode::MISC
+//! [`RpcError::is_block_not_found`]: ztreamer_remote::RpcError::is_block_not_found
 //! [`RpcCode::INVALID_ADDRESS_OR_KEY`]: ztreamer_remote::RpcCode::INVALID_ADDRESS_OR_KEY
 //! [`RemoteTailSource`]: ztreamer_indexer::pipeline::RemoteTailSource
 //! [`HistoricalSource`]: ztreamer_indexer::pipeline::HistoricalSource

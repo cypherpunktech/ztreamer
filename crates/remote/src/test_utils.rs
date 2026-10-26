@@ -30,7 +30,7 @@ use zakura_rpc::client::{
 
 use zakura_state::HashOrHeight;
 
-use crate::{Method, RetryPolicy, RpcCode, RpcConfig};
+use crate::{Method, RetryPolicy, RpcCode, RpcConfig, RpcError};
 
 /// What the mock does with one request.
 #[derive(Debug)]
@@ -197,7 +197,7 @@ fn json_response(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-/// A best chain that a [`MockNode`] serves, with the answers and error codes of zakura.
+/// A best chain that a [`MockNode`] serves, with the answers and the wire error codes of zakura.
 ///
 /// [`Self::reply`] answers [`Method::GetBlockchainInfo`], [`Method::GetBestBlockHash`],
 /// [`Method::GetBlockHash`] and [`Method::GetBlock`] with verbosity 0. Params that do not decode
@@ -282,15 +282,14 @@ impl MockChain {
 
 const METHOD_NOT_FOUND: Reply =
     Reply::Error { code: RpcCode::METHOD_NOT_FOUND, message: "Method not found" };
-const INVALID_PARAMS: Reply =
-    Reply::Error { code: RpcCode::INVALID_PARAMS, message: "Invalid params" };
+/// zakura raises [`RpcCode::INVALID_PARAMS`] for params that do not decode, and its
+/// `rpc_call_compatibility` middleware sends [`RpcCode::MISC`] on the wire.
+const INVALID_PARAMS: Reply = Reply::Error { code: RpcCode::MISC, message: "Invalid params" };
 
 const NO_TIP: Reply =
     Reply::Error { code: RpcCode::IN_WARMUP, message: "no chain tip available yet" };
-const ABOVE_TIP: Reply = Reply::Error {
-    code: RpcCode::INVALID_PARAMS,
-    message: "Provided index is greater than the current tip",
-};
+/// As [`INVALID_PARAMS`], zakura raises [`RpcCode::INVALID_PARAMS`] and sends [`RpcCode::MISC`].
+const ABOVE_TIP: Reply = Reply::Error { code: RpcCode::MISC, message: RpcError::ABOVE_TIP_MESSAGE };
 const BLOCK_NOT_FOUND: Reply =
     Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "Block not found" };
 

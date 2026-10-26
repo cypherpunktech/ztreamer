@@ -21,9 +21,16 @@ impl RpcCode {
 
     /// JSON-RPC 2.0 "invalid params".
     ///
-    /// Of the block methods, only `getblockhash` uses this code for a missing block: for a
-    /// height above the tip of the node. `getblock` answers [`Self::INVALID_PARAMETER`].
+    /// zakura does not send this code on the wire. Its `rpc_call_compatibility` middleware
+    /// changes it to [`Self::MISC`] and keeps the message.
     pub const INVALID_PARAMS: Self = Self(-32602);
+
+    /// zcashd legacy code: a miscellaneous error.
+    ///
+    /// This is the generic error code of zakura. zakura also sends it for each error that it
+    /// raises as [`Self::INVALID_PARAMS`]: params that do not decode, and `getblockhash` for a
+    /// height above the tip. Thus this code alone does not identify the error.
+    pub const MISC: Self = Self(-1);
 
     /// zcashd legacy code: a parameter is not valid.
     ///
@@ -156,6 +163,9 @@ pub enum RpcError {
 }
 
 impl RpcError {
+    /// The message of zakura for a `getblockhash` height above its tip.
+    pub(crate) const ABOVE_TIP_MESSAGE: &str = "Provided index is greater than the current tip";
+
     /// Method the failed call was for, when the error is tied to a call.
     pub fn method(&self) -> Option<&str> {
         match self {
@@ -186,11 +196,24 @@ impl RpcError {
 
     /// True when the node has no block at the requested height or with the requested hash.
     ///
-    /// zakura answers `getblockhash` for a height above its tip with [`RpcCode::INVALID_PARAMS`].
-    /// It answers all other requests for a missing block, `getblock` included, with
-    /// [`RpcCode::INVALID_PARAMETER`].
-    pub const fn is_block_not_found(&self) -> bool {
-        matches!(self.rpc_code(), Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER))
+    /// zakura answers `getblockhash` for a height above its tip with [`RpcCode::MISC`] and the
+    /// message "Provided index is greater than the current tip". It answers all other requests
+    /// for a missing block, `getblock` included, with [`RpcCode::INVALID_PARAMETER`]. A
+    /// [`RpcCode::MISC`] error with a different message is not a missing block.
+    pub fn is_block_not_found(&self) -> bool {
+        self.rpc_code() == Some(RpcCode::INVALID_PARAMETER) || self.is_height_above_tip()
+    }
+
+    /// True when the node refused a height above its tip.
+    ///
+    /// zakura raises this error with [`RpcCode::INVALID_PARAMS`], and its middleware sends it
+    /// with [`RpcCode::MISC`] on the wire. Only the message makes it different from the other
+    /// [`RpcCode::MISC`] errors.
+    fn is_height_above_tip(&self) -> bool {
+        matches!(
+            self,
+            Self::Rpc { code: RpcCode::MISC, message, .. } if message == Self::ABOVE_TIP_MESSAGE
+        )
     }
 
     /// True when the request did not reach the node: the connection, the DNS lookup or the TLS
@@ -246,7 +269,11 @@ mod tests {
     }
 
     fn rpc(code: RpcCode) -> RpcError {
-        RpcError::from_object("m", RpcErrorObject { code, message: String::new(), data: None })
+        rpc_with_message(code, "")
+    }
+
+    fn rpc_with_message(code: RpcCode, message: &str) -> RpcError {
+        RpcError::from_object("m", RpcErrorObject { code, message: message.into(), data: None })
     }
 
     #[test]
@@ -259,8 +286,14 @@ mod tests {
         assert!(!rpc(RpcCode(-8)).is_retryable());
         assert!(!rpc(RpcCode::METHOD_NOT_FOUND).is_retryable());
         assert!(rpc(RpcCode::METHOD_NOT_FOUND).is_method_not_found());
-        assert!(rpc(RpcCode::INVALID_PARAMS).is_block_not_found());
         assert!(rpc(RpcCode::INVALID_PARAMETER).is_block_not_found());
+        assert!(rpc_with_message(RpcCode::MISC, RpcError::ABOVE_TIP_MESSAGE).is_block_not_found());
+        assert!(!rpc_with_message(RpcCode::MISC, "Invalid params").is_block_not_found());
+        assert!(!rpc(RpcCode::MISC).is_block_not_found());
+        assert!(
+            !rpc_with_message(RpcCode::INVALID_PARAMS, RpcError::ABOVE_TIP_MESSAGE)
+                .is_block_not_found()
+        );
         assert!(!rpc(RpcCode::IN_WARMUP).is_block_not_found());
         assert!(!http(StatusCode::NOT_FOUND).is_block_not_found());
         assert!(

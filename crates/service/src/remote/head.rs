@@ -90,7 +90,7 @@ mod tests {
         test_utils::grow_chain,
     };
     use ztreamer_remote::{
-        RpcClient,
+        RpcClient, RpcCode,
         test_utils::{MockChain, MockNode, Reply},
     };
 
@@ -146,6 +146,24 @@ mod tests {
         assert_eq!(block.bytes, blocks[3].zcash_serialize_to_vec().unwrap());
         assert_eq!(block.txids, [blocks[3].transactions[0].hash()]);
         assert!(source.block(6).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_height_above_the_tip_of_the_node_is_no_block() {
+        let blocks = chain(5);
+        let chain = MockChain::new(&blocks);
+        // A different error with the same code as the error for a height above the tip.
+        let mock = MockNode::start(move |_, request| match request.body["params"][0].as_u64() {
+            Some(7) => Reply::Error { code: RpcCode::MISC, message: "Invalid params" },
+            _ => chain.reply(request),
+        })
+        .await;
+        let mut source =
+            RemoteHeadSource::new(ZakuraClient::new(RpcClient::new(mock.config()).unwrap()));
+
+        assert!(source.block(5).await.unwrap().is_some());
+        assert!(source.block(6).await.unwrap().is_none());
+        assert!(matches!(source.block(7).await, Err(HeadError::Remote(_))));
     }
 
     #[tokio::test]
