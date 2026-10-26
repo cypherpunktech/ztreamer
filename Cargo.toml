@@ -38,6 +38,9 @@ sapling-crypto = { package = "zakura-sapling-crypto", version = "=2.1.0" }
 # tree node and frontier types different from the zakura-chain types, and the workspace stops
 # compiling. `legacy-api` supplies `CommitmentTree::to_frontier`.
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
+# zakura's own pin of this crate, through `zakura-halo2-proofs` at the tag above. A second version
+# makes `pallas::Base` a different type from the Orchard tree leaf, and the leaves stop compiling.
+pasta_curves = { package = "zakura-pasta-curves", version = "=2.1.0" }
 zcash_primitives = { package = "zakura-primitives", version = "=2.1.0" }
 
 [profile.ci-rust]

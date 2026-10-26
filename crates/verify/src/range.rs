@@ -56,7 +56,8 @@ impl From<&ManifestEntry> for RangeLink {
     }
 }
 
-/// A check that a range can fail after its digest matches.
+/// A check that a range can fail after its digest matches. The last four are the checks of
+/// [`Epoch::verify`](crate::epoch::Epoch::verify).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Check {
     /// The blob format version is not `range_version`.
@@ -75,6 +76,16 @@ pub enum Check {
     EndHash,
     /// The tree sizes after the last record are not `end_tree_sizes`.
     EndTreeSizes,
+    /// The start frontier of the epoch does not parse, or its tree sizes are not the end tree
+    /// sizes of the range before the epoch.
+    StartFrontier,
+    /// A note commitment is not a field element of its pool, or the tree is full.
+    Commitment,
+    /// A rebuilt frontier at the end of a range is not the frontier of the manifest entry.
+    Frontier,
+    /// The subtrees that the rebuild completed in a range are not the `subtree_roots` of the
+    /// manifest entry.
+    SubtreeRoots,
 }
 
 impl Check {
@@ -92,6 +103,14 @@ pub enum Reject {
     Refetch {
         /// The first height of the range.
         start_height: u32,
+    },
+    /// The caller passed a different number of blobs than the epoch has entries.
+    #[error("epoch has {entries} entries and {blobs} blobs")]
+    BlobCount {
+        /// The number of entries in the epoch.
+        entries: usize,
+        /// The number of blobs.
+        blobs: usize,
     },
     /// The blob is the one that the manifest describes, and a check failed.
     #[error("range check {check:?} failed at height {height}")]
