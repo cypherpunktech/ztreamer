@@ -117,14 +117,15 @@ struct Cli {
 }
 
 impl Cli {
-    /// Opens the index of `--index-dir` and refuses an index of another network.
-    fn open_index(&self, network: &Network) -> Result<Arc<Index>> {
-        let index = Index::open(
-            &self.index_dir,
-            self.index_map_size.get(),
-            &network.to_string(),
-            network.genesis_hash(),
-        )?;
+    /// Opens the index of `--index-dir` on a blocking thread and refuses an index of another
+    /// network.
+    async fn open_index(&self, network: &Network) -> Result<Arc<Index>> {
+        let (path, map_size) = (self.index_dir.clone(), self.index_map_size.get());
+        let (name, genesis_hash) = (network.to_string(), network.genesis_hash());
+        let index =
+            tokio::task::spawn_blocking(move || Index::open(path, map_size, &name, genesis_hash))
+                .await
+                .wrap_err("index open task panicked")??;
         Ok(Arc::new(index))
     }
 }
@@ -169,7 +170,7 @@ async fn main() -> Result<()> {
     config.metrics.endpoint_addr = Some(cli.metrics_listen);
     let _metrics = MetricsEndpoint::new(&config.metrics).wrap_err("start Prometheus endpoint")?;
     let network = config.network.network.clone();
-    let index = cli.open_index(&network)?;
+    let index = cli.open_index(&network).await?;
 
     let p2p = Arc::new(P2pCompactService::pending());
     info!(network = %network, "starting embedded Zakura");
@@ -217,22 +218,13 @@ struct NodeSources<T, H, B> {
 
 /// The wait until a node mode can serve the daemon.
 trait Readiness {
-    /// Waits until the node is ready for the historical index pass over `index`. Breaks on
-    /// shutdown.
-    async fn wait_ready(
-        &self,
-        index: &Arc<Index>,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<()>>;
+    /// Waits until the node is ready for the historical index pass. Breaks on shutdown.
+    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>>;
 }
 
 impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
     /// Waits until Zakura is near the chain tip and has a finalized block. Breaks on shutdown.
-    async fn wait_ready(
-        &self,
-        _index: &Arc<Index>,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<()>> {
+    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>> {
         let client = &self.head;
         info!("waiting for Zakura to sync near the chain tip");
         tokio::select! {
@@ -271,7 +263,7 @@ where
     H: CanonicalBlockSource + Clone + 'static,
     B: StateBackend,
 {
-    if sources.wait_ready(&index, &shutdown).await?.is_break() {
+    if sources.wait_ready(&shutdown).await?.is_break() {
         return Ok(());
     }
     let NodeSources { tail, head, backend } = sources;

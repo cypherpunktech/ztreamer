@@ -38,11 +38,6 @@ impl RemoteHeadSource {
     pub const fn new(node: ZakuraClient) -> Self {
         Self { node }
     }
-
-    /// The node that this source reads.
-    pub const fn node(&self) -> &ZakuraClient {
-        &self.node
-    }
 }
 
 #[tonic::async_trait]

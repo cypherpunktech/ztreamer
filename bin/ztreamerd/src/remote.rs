@@ -1,7 +1,7 @@
 //! The `--remote-rpc` mode: `ztreamerd` reads the chain from a remote zakura node over JSON-RPC
 //! and starts no embedded node.
 
-use std::{future, ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
+use std::{ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
@@ -9,11 +9,14 @@ use http::Uri;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
-use tracing::info;
+use tracing::{info, warn};
 use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use zakurad::components::metrics::{self, MetricsEndpoint};
-use ztreamer_indexer::{index::Index, pipeline::RemoteTailSource};
+use ztreamer_indexer::{
+    index::{BlockId, Index},
+    pipeline::RemoteTailSource,
+};
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource};
 
@@ -22,7 +25,8 @@ use crate::{Cli, NodeSources, Readiness, lifecycle, run_application};
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// The sources of the remote mode. All three read the same node.
+/// The sources of the remote mode. All three read the same node. Only
+/// [`RemoteNode`] makes them, when the node is ready for the index.
 type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBackend>;
 
 /// The command-line flags of the remote mode. All are off by default.
@@ -96,11 +100,8 @@ impl RemoteNode {
         Self { client, network }
     }
 
-    /// Runs the daemon on this node until `signal` or a failure. It starts the Prometheus
-    /// endpoint and opens the index as the embedded mode does.
-    ///
-    /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
-    /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
+    /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
+    /// the Prometheus endpoint, then calls [`Self::run_until`].
     pub(crate) async fn run(
         self,
         cli: Cli,
@@ -110,41 +111,85 @@ impl RemoteNode {
         // No zakurad runs, thus the metrics endpoint is the only part of its configuration.
         let metrics = metrics::Config { endpoint_addr: Some(cli.metrics_listen) };
         let _metrics = MetricsEndpoint::new(&metrics).wrap_err("start Prometheus endpoint")?;
-        let index = cli.open_index(&self.network)?;
+        self.run_until(cli, grpc_server, signal).await
+    }
+
+    /// Opens the index as the embedded mode does. Then runs the daemon on this node until
+    /// `signal`, the end of the work (`--index-only`), or a failure.
+    ///
+    /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
+    /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
+    async fn run_until(
+        self,
+        cli: Cli,
+        grpc_server: Server,
+        signal: impl Future<Output = Result<()>>,
+    ) -> Result<()> {
+        let index = cli.open_index(&self.network).await?;
         let url = self.client.rpc().url();
         info!(network = %self.network, host = url.host(), port = url.port_u16(), "using remote zakura");
         let shutdown = CancellationToken::new();
+        // No node runs in this process. Thus the node half of the lifecycle only waits for the
+        // shutdown, and `supervise` can drain it.
+        let node = {
+            let shutdown = shutdown.clone();
+            async move {
+                shutdown.cancelled().await;
+                Ok(())
+            }
+        };
         let application = self.application(cli, grpc_server, index, shutdown.clone());
-        // No node runs in this process, thus the node half of the lifecycle does not end.
-        lifecycle::supervise(future::pending(), application, shutdown, signal).await
+        lifecycle::supervise(node, application, shutdown, signal).await
     }
 
-    /// Connects to the node, then runs the daemon on the remote sources until shutdown.
-    pub(crate) async fn application(
+    /// Makes the sources when the node is ready, then runs the daemon on them until shutdown.
+    async fn application(
         self,
         cli: Cli,
         grpc_server: Server,
         index: Arc<Index>,
         shutdown: CancellationToken,
     ) -> Result<()> {
-        let ControlFlow::Continue(sources) = self.sources(&shutdown).await? else {
+        let ControlFlow::Continue(sources) = self.sources(&index, &shutdown).await? else {
             return Ok(());
         };
         run_application(cli, grpc_server, index, &self.network, None, sources, shutdown).await
     }
 
-    /// The sources over this node. Waits until the node is out of warm-up, then refuses a node
-    /// that does not run the network of the index. Breaks on shutdown.
+    /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.
+    ///
+    /// It waits while the node is out of reach or in warm-up. Then it refuses a node that does
+    /// not run the network of the index, and a node that pruned the next block that the index
+    /// needs. Last, it waits until the best block of the node is at or above the durable tip of
+    /// the index.
     async fn sources(
         &self,
+        index: &Arc<Index>,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), RemoteSources>> {
-        if self.client.blockchain_info_after_warmup(shutdown).await?.is_break() {
+        let ControlFlow::Continue(mut info) = self.blockchain_info_when_up(shutdown).await? else {
             return Ok(ControlFlow::Break(()));
-        }
+        };
         let (backend, poller) = RemoteBackend::connect(self.client.clone(), self.network.clone())
             .await
-            .wrap_err("check the network of the remote zakura node")?;
+            .wrap_err("connect to the remote zakura node")?;
+        let tip = IndexTip::read(index).await?;
+        while !tip.served_by(&info)? {
+            info!(
+                best = info.blocks().0,
+                index_tip = tip.0.map(|tip| tip.height),
+                "waiting for remote zakura to reach the index tip"
+            );
+            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
+            {
+                return Ok(ControlFlow::Break(()));
+            }
+            let ControlFlow::Continue(next) = self.blockchain_info_when_up(shutdown).await? else {
+                return Ok(ControlFlow::Break(()));
+            };
+            info = next;
+        }
+        info!(best = info.blocks().0, "remote zakura is ready");
         tokio::spawn(poller.run());
         Ok(ControlFlow::Continue(NodeSources {
             tail: RemoteTailSource::new(self.client.clone(), Handle::current()),
@@ -152,78 +197,25 @@ impl RemoteNode {
             backend,
         }))
     }
-}
 
-impl Readiness for RemoteSources {
-    /// Waits until the node is out of warm-up and its best block is at or above the durable tip
-    /// of the index. Breaks on shutdown.
-    ///
-    /// Refuses an index that needs a block body that the node pruned. The historical pass and the
-    /// head follower read the blocks above the durable tip, thus the first of them must be at or
-    /// above the prune height of the node.
-    async fn wait_ready(
-        &self,
-        index: &Arc<Index>,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<()>> {
-        let state_index = Arc::clone(index);
-        let durable_tip = tokio::task::spawn_blocking(move || state_index.state())
-            .await
-            .wrap_err("index state task panicked")??
-            .durable_tip();
-        let next = durable_tip.map_or(0, |tip| tip.height.saturating_add(1));
-        let node = self.head.node();
-        loop {
-            let ControlFlow::Continue(info) = node.blockchain_info_after_warmup(shutdown).await?
-            else {
-                return Ok(ControlFlow::Break(()));
-            };
-            let prune_height = info.prune_height().unwrap_or(Height::MIN).0;
-            if next < prune_height {
-                return Err(eyre!(
-                    "the index needs block {next}, but the remote zakura node keeps block bodies \
-                     only from height {prune_height}: use a node that keeps these blocks, or an \
-                     index with a tip at or above {}",
-                    prune_height - 1
-                ));
-            }
-            let best = info.blocks().0;
-            if durable_tip.is_none_or(|tip| best >= tip.height) {
-                info!(best, "remote zakura is ready");
-                return Ok(ControlFlow::Continue(()));
-            }
-            info!(best, index_tip = next - 1, "waiting for remote zakura to reach the index tip");
-            tokio::select! {
-                _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
-                () = tokio::time::sleep(READY_POLL_INTERVAL) => {}
-            }
-        }
-    }
-}
-
-/// The wait for the end of the warm-up of a zakura node.
-trait WarmUp {
-    /// `getblockchaininfo`, sent again after [`READY_POLL_INTERVAL`] while the node answers
-    /// [`RpcCode::IN_WARMUP`]. Breaks on shutdown.
-    async fn blockchain_info_after_warmup(
-        &self,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>>;
-}
-
-impl WarmUp for ZakuraClient {
-    async fn blockchain_info_after_warmup(
+    /// `getblockchaininfo`, sent again after [`READY_POLL_INTERVAL`] while the node is out of
+    /// reach or answers [`RpcCode::IN_WARMUP`]. Breaks on shutdown.
+    async fn blockchain_info_when_up(
         &self,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>> {
         loop {
-            let result = tokio::select! {
-                _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
-                result = self.get_blockchain_info() => result,
+            let Some(result) =
+                shutdown.run_until_cancelled(self.client.get_blockchain_info()).await
+            else {
+                return Ok(ControlFlow::Break(()));
             };
             match result {
                 Err(error) if error.rpc_code() == Some(RpcCode::IN_WARMUP) => {
                     info!(%error, "waiting for remote zakura to end its warm-up");
+                }
+                Err(error) if error.is_unsent() => {
+                    warn!(%error, "waiting for remote zakura to accept connections");
                 }
                 result => {
                     return result
@@ -231,11 +223,54 @@ impl WarmUp for ZakuraClient {
                         .wrap_err("read the chain of the remote zakura node");
                 }
             }
-            tokio::select! {
-                _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
-                () = tokio::time::sleep(READY_POLL_INTERVAL) => {}
+            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
+            {
+                return Ok(ControlFlow::Break(()));
             }
         }
+    }
+}
+
+impl Readiness for RemoteSources {
+    /// Ready at once: [`RemoteNode`] makes these sources only when the node is ready for the
+    /// index.
+    async fn wait_ready(&self, _shutdown: &CancellationToken) -> Result<ControlFlow<()>> {
+        Ok(ControlFlow::Continue(()))
+    }
+}
+
+/// The durable tip of the index. The remote node must serve the blocks above it before the first
+/// sync.
+#[derive(Clone, Copy, Debug)]
+struct IndexTip(Option<BlockId>);
+
+impl IndexTip {
+    /// Reads the durable tip of `index` on a blocking thread.
+    async fn read(index: &Arc<Index>) -> Result<Self> {
+        let index = Arc::clone(index);
+        let state = tokio::task::spawn_blocking(move || index.state())
+            .await
+            .wrap_err("index state task panicked")??;
+        Ok(Self(state.durable_tip()))
+    }
+
+    /// True when the node of `info` has the tip, false while the node is below the tip.
+    ///
+    /// Refuses a node that pruned the next block that the index needs. The historical pass and
+    /// the head follower read the blocks above the tip, thus the first of them must be at or
+    /// above the prune height of the node.
+    fn served_by(self, info: &GetBlockchainInfoResponse) -> Result<bool> {
+        let next = self.0.map_or(0, |tip| tip.height.saturating_add(1));
+        let prune_height = info.prune_height().unwrap_or(Height::MIN).0;
+        if next < prune_height {
+            return Err(eyre!(
+                "the index needs block {next}, but the remote zakura node keeps block bodies \
+                 only from height {prune_height}: use a node that keeps these blocks, or an \
+                 index with a tip at or above {}",
+                prune_height - 1
+            ));
+        }
+        Ok(self.0.is_none_or(|tip| info.blocks().0 >= tip.height))
     }
 }
 

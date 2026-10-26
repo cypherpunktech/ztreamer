@@ -1,4 +1,5 @@
 use std::{
+    future,
     net::{SocketAddr, TcpListener},
     time::Duration,
 };
@@ -40,50 +41,58 @@ async fn serve(chain: &MockChain) -> MockNode {
     MockNode::start(move |_, request| chain.reply(request)).await
 }
 
-/// The flags of a daemon on `mock` with the index in `dir`, then `extra`.
-fn cli(dir: &tempfile::TempDir, mock: &MockNode, extra: &[&str]) -> Cli {
+/// A local address with no listener.
+fn free_addr() -> SocketAddr {
+    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap()
+}
+
+/// The flags of a daemon on the node at `url` with the index in `dir`, then `extra`.
+fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> Cli {
     let dir = dir.path().to_str().unwrap();
-    let url = mock.url().to_string();
-    let flags = ["--index-dir", dir, "--index-map-size", "67108864", "--remote-rpc", &url];
+    let flags = ["--index-dir", dir, "--index-map-size", "67108864", "--remote-rpc", url];
     let flags = ["--fetch-workers", "2", "--source-segment-blocks", "16"].into_iter().chain(flags);
     Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied()))
 }
 
-/// Runs the daemon until it stops, with no shutdown.
-async fn run(cli: Cli, index: &Arc<Index>) -> Result<()> {
+/// Runs the daemon with no signal, until it stops by itself.
+async fn run(cli: Cli) -> Result<()> {
     let node = cli.remote.node().unwrap().unwrap();
-    let application =
-        node.application(cli, Server::builder(), Arc::clone(index), Default::default());
-    timeout(Duration::from_secs(30), application).await.unwrap()
+    let daemon = node.run_until(cli, Server::builder(), future::pending());
+    timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
 }
 
-/// Fills the index to [`INDEX_TIP`] from a mock over `blocks`, with `--index-only`.
-async fn index(dir: &tempfile::TempDir, blocks: &[Block]) -> Arc<Index> {
+/// The durable tip of the index in `dir`.
+async fn durable_tip(dir: &tempfile::TempDir) -> Option<u32> {
+    let index = cli(dir, "http://127.0.0.1:1", &[]).open_index(&Network::Mainnet).await.unwrap();
+    index.state().unwrap().durable_tip().map(|tip| tip.height)
+}
+
+/// Fills the index in `dir` to [`INDEX_TIP`] from a mock over `blocks`, with `--index-only`.
+async fn index(dir: &tempfile::TempDir, blocks: &[Block]) {
     let mock = serve(&MockChain::new(to(blocks, INDEX_TIP + SEAL_DEPTH))).await;
-    let cli = cli(dir, &mock, &["--index-only"]);
-    let index = cli.open_index(&Network::Mainnet).unwrap();
-    run(cli, &index).await.unwrap();
-    let tip = index.state().unwrap().durable_tip().unwrap();
-    assert_eq!(tip.height, INDEX_TIP);
-    index
+    run(cli(dir, &mock.url().to_string(), &["--index-only"])).await.unwrap();
+    assert_eq!(durable_tip(dir).await, Some(INDEX_TIP));
 }
 
-/// A daemon that serves gRPC on a free local port until [`Self::stop`].
+/// A daemon that serves gRPC on a free local port until [`Self::stop`] sends the signal.
 struct Daemon {
     grpc: SocketAddr,
-    shutdown: CancellationToken,
+    signal: CancellationToken,
     task: JoinHandle<Result<()>>,
 }
 
 impl Daemon {
-    fn start(dir: &tempfile::TempDir, mock: &MockNode, index: &Arc<Index>) -> Self {
-        let grpc = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
-        let cli = cli(dir, mock, &["--grpc-listen", &grpc.to_string()]);
+    fn start(dir: &tempfile::TempDir, url: &str) -> Self {
+        let grpc = free_addr();
+        let cli = cli(dir, url, &["--grpc-listen", &grpc.to_string()]);
         let node = cli.remote.node().unwrap().unwrap();
-        let shutdown = CancellationToken::new();
-        let application =
-            node.application(cli, Server::builder(), Arc::clone(index), shutdown.clone());
-        Self { grpc, shutdown, task: tokio::spawn(application) }
+        let signal = CancellationToken::new();
+        let received = signal.clone().cancelled_owned();
+        let daemon = node.run_until(cli, Server::builder(), async move {
+            received.await;
+            Ok(())
+        });
+        Self { grpc, signal, task: tokio::spawn(daemon) }
     }
 
     /// The answer to `GetLatestBlock`, when the daemon serves `height`.
@@ -103,9 +112,14 @@ impl Daemon {
         timeout(Duration::from_secs(30), poll).await.expect("the daemon serves the tip")
     }
 
+    /// Sends the signal. The daemon must stop without an error.
     async fn stop(self) {
-        self.shutdown.cancel();
-        self.task.await.unwrap().unwrap();
+        self.signal.cancel();
+        timeout(Duration::from_secs(10), self.task)
+            .await
+            .expect("the daemon stops after the signal")
+            .unwrap()
+            .unwrap();
     }
 }
 
@@ -115,10 +129,10 @@ async fn serves_an_index_behind_a_mock_chain() {
     // The tail pass writes 50 blocks, the head follower the last `SEAL_DEPTH` blocks.
     let tip = INDEX_TIP + 50 + SEAL_DEPTH;
     let blocks = chain(tip);
-    let index = index(&dir, &blocks).await;
+    index(&dir, &blocks).await;
     let mock = serve(&MockChain::new(&blocks)).await;
 
-    let daemon = Daemon::start(&dir, &mock, &index);
+    let daemon = Daemon::start(&dir, &mock.url().to_string());
     let latest = daemon.latest_block(tip).await;
     daemon.stop().await;
 
@@ -137,10 +151,8 @@ async fn refuses_a_node_of_another_chain_before_a_block_read() {
         reply => reply,
     })
     .await;
-    let cli = cli(&dir, &mock, &[]);
-    let index = cli.open_index(&Network::Mainnet).unwrap();
 
-    let error = run(cli, &index).await.unwrap_err();
+    let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
     let expected = r#"remote zakura runs chain "test", the index needs "main""#;
     assert!(error.chain().any(|cause| cause.to_string() == expected), "{error:?}");
@@ -151,20 +163,19 @@ async fn refuses_a_node_of_another_chain_before_a_block_read() {
 async fn refuses_an_index_tip_below_the_prune_height() {
     let dir = tempfile::tempdir().unwrap();
     let blocks = chain(INDEX_TIP + 50 + SEAL_DEPTH);
-    let index = index(&dir, &blocks).await;
+    index(&dir, &blocks).await;
     let chain = MockChain::new(&blocks);
     chain.set_prune_height(Some(Height(50)));
     let mock = serve(&chain).await;
 
-    let error = run(cli(&dir, &mock, &[]), &index).await.unwrap_err();
+    let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
     assert_eq!(
         error.to_string(),
         "the index needs block 21, but the remote zakura node keeps block bodies only from height \
          50: use a node that keeps these blocks, or an index with a tip at or above 49"
     );
-    let durable_tip = index.state().unwrap().durable_tip().unwrap();
-    assert_eq!(durable_tip.height, INDEX_TIP);
+    assert_eq!(durable_tip(&dir).await, Some(INDEX_TIP));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -179,14 +190,26 @@ async fn waits_for_the_end_of_the_warm_up_then_serves() {
         _ => chain.reply(request),
     })
     .await;
-    let index = cli(&dir, &mock, &[]).open_index(&Network::Mainnet).unwrap();
 
-    let daemon = Daemon::start(&dir, &mock, &index);
+    let daemon = Daemon::start(&dir, &mock.url().to_string());
     let latest = daemon.latest_block(10).await;
     daemon.stop().await;
 
     assert_eq!(latest.hash, blocks[10].hash().0);
     assert!(mock.seen().len() > WARMUP_REQUESTS);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn waits_for_an_unreachable_node_until_the_signal() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut daemon = Daemon::start(&dir, &format!("http://{}", free_addr()));
+
+    // The client gives up a call after about 1.4 s of retries. The daemon then waits and calls
+    // again, thus it is still running after 3 s.
+    assert!(timeout(Duration::from_secs(3), &mut daemon.task).await.is_err());
+    daemon.stop().await;
+
+    assert_eq!(durable_tip(&dir).await, None);
 }
 
 #[test]
