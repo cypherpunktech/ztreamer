@@ -31,6 +31,8 @@ pub enum Method {
     GetBlockchainInfo,
     /// `getbestblockhash`.
     GetBestBlockHash,
+    /// `getblockcount`.
+    GetBlockCount,
     /// `getblockhash`.
     GetBlockHash,
     /// `getblock`.
@@ -55,9 +57,10 @@ pub enum Method {
 
 impl Method {
     /// All the methods.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::GetBlockchainInfo,
         Self::GetBestBlockHash,
+        Self::GetBlockCount,
         Self::GetBlockHash,
         Self::GetBlock,
         Self::ZGetTreestate,
@@ -75,6 +78,7 @@ impl Method {
         match self {
             Self::GetBlockchainInfo => "getblockchaininfo",
             Self::GetBestBlockHash => "getbestblockhash",
+            Self::GetBlockCount => "getblockcount",
             Self::GetBlockHash => "getblockhash",
             Self::GetBlock => "getblock",
             Self::ZGetTreestate => "z_gettreestate",
@@ -173,7 +177,7 @@ impl ZakuraClient {
 
     /// `getblockcount`: the height of the tip. This is the cheapest call that gives the tip.
     pub async fn get_block_count(&self) -> Result<block::Height, RpcError> {
-        self.rpc.call("getblockcount", ()).await.map(block::Height)
+        self.call(Method::GetBlockCount, ()).await.map(block::Height)
     }
 
     /// `getblockhash`: the hash of the best-chain block at `height`.
@@ -291,7 +295,7 @@ mod tests {
         }
         assert_eq!(Method::GetBlockchainInfo.name(), "getblockchaininfo");
         assert_eq!(Method::ZGetSubtreesByIndex.name(), "z_getsubtreesbyindex");
-        assert_eq!(Method::from_name("getblockcount"), None);
+        assert_eq!(Method::from_name("getpeerinfo"), None);
     }
 
     #[test]
