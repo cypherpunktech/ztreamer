@@ -12,7 +12,8 @@
 //! ```
 //!
 //! The export starts at genesis and stops at the first sealed range without a `range_meta` row.
-//! It ends at the last range that closes an epoch, because a replica verifies whole epochs only.
+//! The last range of a manifest always closes an epoch, so the export sets `epoch_end` on the
+//! last entry. The row in the index keeps its flag.
 //! A range file that exists with the correct digest is not written again. Thus a daily export
 //! writes only the new ranges.
 
@@ -94,13 +95,11 @@ struct ExportReport {
     written: usize,
     /// The sealed ranges from the first range without a `range_meta` row to the sealed tip.
     missing_rows: u32,
-    /// The ranges with a row after the last range that closes an epoch.
-    open_epoch: usize,
 }
 
 impl ExportReport {
     fn log(&self) {
-        let Self { manifest, ranges, written, missing_rows, open_epoch } = self;
+        let Self { manifest, ranges, written, missing_rows } = self;
         info!(%manifest, ranges, written, "exported snapshot");
         if *missing_rows > 0 {
             warn!(
@@ -108,9 +107,6 @@ impl ExportReport {
                 "export stopped at the first sealed range without a range_meta row; \
                  run the daemon with --fill-range-meta"
             );
-        }
-        if *open_epoch > 0 {
-            info!(open_epoch, "ranges after the last closed epoch wait for a later export");
         }
     }
 }
@@ -135,15 +131,14 @@ impl SnapshotDir {
         now: DateTime<Utc>,
         signer: Option<&Signer>,
     ) -> Result<ExportReport> {
-        let Rows { entries, missing: missing_rows } = Rows::read(index)?;
-        let open_epoch = entries.iter().rev().take_while(|entry| !entry.epoch_end).count();
-        let entries = &entries[..entries.len() - open_epoch];
-        ensure!(
-            !entries.is_empty(),
-            "the index has no range_meta row from genesis to a range that closes an epoch"
-        );
+        let Rows { mut entries, missing: missing_rows } = Rows::read(index)?;
+        let last = entries
+            .last_mut()
+            .ok_or_else(|| eyre!("the index has no range_meta row for the range at genesis"))?;
+        // `ztreamer_verify::epoch::Epochs` closes an epoch at the last entry of a manifest.
+        last.epoch_end = true;
         let manifest = Manifest::builder(network.to_string(), network.genesis_hash())
-            .entries(entries.to_vec())
+            .entries(entries)
             .build()
             .wrap_err("the range_meta rows do not make a valid manifest")?;
 
@@ -174,7 +169,6 @@ impl SnapshotDir {
             ranges: manifest.entries().len(),
             written,
             missing_rows,
-            open_epoch,
         })
     }
 
@@ -334,9 +328,9 @@ mod tests {
     /// 2026-10-26T00:00:00Z.
     const NOW: i64 = 1_792_972_800;
 
-    /// An index with three sealed ranges and a `range_meta` row for each `(start, epoch_end)` in
-    /// `rows`. Returns the index and the entries of the rows.
-    fn indexed(dir: &TempDir, rows: &[(u32, bool)]) -> (Index, Vec<ManifestEntry>) {
+    /// An index with `ranges` sealed ranges and a `range_meta` row for each `(start, epoch_end)`
+    /// in `rows`. Returns the index and the entries of the rows.
+    fn indexed(dir: &TempDir, ranges: u32, rows: &[(u32, bool)]) -> (Index, Vec<ManifestEntry>) {
         let network = Network::Mainnet;
         let index = Index::open(
             dir.path(),
@@ -345,8 +339,9 @@ mod tests {
             network.genesis_hash(),
         )
         .unwrap();
-        let records: Vec<_> = (0..3_010).map(|height| record(height, Vec::new())).collect();
-        populate(&index, &records, Some(2_999));
+        let records: Vec<_> =
+            (0..ranges * RANGE_SIZE + 10).map(|height| record(height, Vec::new())).collect();
+        populate(&index, &records, Some(ranges * RANGE_SIZE - 1));
         let entries = rows
             .iter()
             .map(|&(start, epoch_end)| {
@@ -399,12 +394,20 @@ mod tests {
         Signer::from_file(&path).unwrap()
     }
 
-    const ALL_ROWS: [(u32, bool); 3] = [(0, false), (1_000, false), (2_000, true)];
+    /// The rows that the filler writes for three ranges with no commitments: no range closes an
+    /// epoch.
+    const ALL_ROWS: [(u32, bool); 3] = [(0, false), (1_000, false), (2_000, false)];
+
+    /// `entries` with `epoch_end` on the last entry, as the export writes them.
+    fn closed(mut entries: Vec<ManifestEntry>) -> Vec<ManifestEntry> {
+        entries.last_mut().unwrap().epoch_end = true;
+        entries
+    }
 
     #[test]
     fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, entries) = indexed(&dir, &ALL_ROWS);
+        let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
 
         let report = export(&index, &out, 0, None);
 
@@ -416,7 +419,6 @@ mod tests {
                 ranges: 3,
                 written: 3,
                 missing_rows: 0,
-                open_epoch: 0,
             }
         );
         for entry in &entries {
@@ -429,7 +431,7 @@ mod tests {
         let bytes = fs::read(out.path().join(manifest_path)).unwrap();
         let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
         let expected = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
-            .entries(entries.clone())
+            .entries(closed(entries.clone()))
             .build()
             .unwrap();
         assert_eq!(manifest, expected);
@@ -462,20 +464,20 @@ mod tests {
     #[test]
     fn the_written_manifest_passes_manifest_validation() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, entries) = indexed(&dir, &ALL_ROWS);
+        let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
 
         let report = export(&index, &out, 0, None);
 
         let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
         // `from_json` checks every rule of the manifest.
         let manifest = Manifest::from_json(&json).unwrap();
-        assert_eq!(manifest.entries(), entries);
+        assert_eq!(manifest.entries(), closed(entries));
     }
 
     #[test]
     fn a_second_export_writes_no_range_file_again() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, _) = indexed(&dir, &ALL_ROWS);
+        let (index, _) = indexed(&dir, 3, &ALL_ROWS);
         export(&index, &out, 0, None);
 
         let report = export(&index, &out, 1, None);
@@ -488,7 +490,7 @@ mod tests {
     #[test]
     fn signatures_verify_with_the_public_key_in_latest() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, _) = indexed(&dir, &ALL_ROWS);
+        let (index, _) = indexed(&dir, 3, &ALL_ROWS);
         let signer = signer(&dir);
 
         let report = export(&index, &out, 0, Some(&signer));
@@ -521,35 +523,48 @@ mod tests {
     #[test]
     fn export_stops_at_the_first_range_without_a_row() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, entries) = indexed(&dir, &[(0, true), (2_000, true)]);
+        let (index, entries) = indexed(&dir, 3, &[(0, false), (2_000, false)]);
 
         let report = export(&index, &out, 0, None);
 
-        assert_eq!((report.ranges, report.missing_rows, report.open_epoch), (1, 2, 0));
+        assert_eq!((report.ranges, report.missing_rows), (1, 2));
         let manifest: Manifest =
             serde_json::from_slice(&fs::read(out.path().join(&report.manifest)).unwrap()).unwrap();
-        assert_eq!(manifest.entries(), &entries[..1]);
+        assert_eq!(manifest.entries(), closed(entries[..1].to_vec()));
         assert_eq!(manifest.sealed_through(), 999);
     }
 
+    /// Twelve ranges with no commitments: the filler closes an epoch at range 9 only. The
+    /// export keeps ranges 10 and 11 and closes the second epoch at range 11.
     #[test]
-    fn export_ends_at_the_last_range_that_closes_an_epoch() {
+    fn export_closes_the_last_epoch_at_the_last_range() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, _) = indexed(&dir, &[(0, true), (1_000, false), (2_000, false)]);
+        let rows: Vec<_> = (0..12).map(|range| (range * RANGE_SIZE, range == 9)).collect();
+        let (index, entries) = indexed(&dir, 12, &rows);
 
         let report = export(&index, &out, 0, None);
 
-        assert_eq!((report.ranges, report.missing_rows, report.open_epoch), (1, 0, 2));
-        assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 1);
+        assert_eq!((report.ranges, report.missing_rows), (12, 0));
+        let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
+        let manifest = Manifest::from_json(&json).unwrap();
+        assert_eq!(manifest.entries(), closed(entries));
+        assert_eq!(manifest.sealed_through(), 11_999);
+        let epochs: Vec<_> = manifest.epochs().map(|epoch| epoch.end_height()).collect();
+        assert_eq!(epochs, [9_999, 11_999]);
+        assert!(!index.range_meta(11_000).unwrap().unwrap().entry.epoch_end);
+    }
 
-        // With no closed epoch, there is nothing to export.
+    #[test]
+    fn an_index_without_a_row_at_genesis_is_refused() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, _) = indexed(&dir, &[(0, false)]);
+        let (index, _) = indexed(&dir, 3, &[(1_000, false)]);
         let now = DateTime::from_timestamp(NOW, 0).unwrap();
+
         let error = SnapshotDir::new(out.path().to_owned())
             .export(&index, &Network::Mainnet, now, None)
             .unwrap_err();
-        assert!(error.to_string().contains("closes an epoch"), "{error}");
+
+        assert!(error.to_string().contains("no range_meta row"), "{error}");
         assert!(!out.path().join("latest.json").exists());
     }
 }
