@@ -251,7 +251,9 @@ impl ZakuraClient {
         transaction: &[u8],
     ) -> Result<SendRawTransactionResponse, RpcError> {
         let params = (HexData(transaction.to_vec()),);
-        self.rpc.call_with(Method::SendRawTransaction.name(), params, CallOptions::unsent_retries()).await
+        self.rpc
+            .call_with(Method::SendRawTransaction.name(), params, CallOptions::unsent_retries())
+            .await
     }
 
     /// `getaddresstxids`: the ids of the transactions that touch the addresses.

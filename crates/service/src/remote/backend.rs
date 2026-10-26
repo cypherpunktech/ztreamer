@@ -56,7 +56,7 @@ const MEMPOOL_FETCHES: usize = 16;
 /// The most mempool transactions that the cache keeps.
 const MEMPOOL_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(8_192).unwrap();
 
-/// The time between two `getbestblockhash` calls of the tip poller.
+/// The default time between two `getbestblockhash` calls of the tip poller.
 const TIP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Why [`RemoteBackend::connect`] refused the node.
@@ -157,7 +157,12 @@ impl RemoteBackend {
         }
         let best = info.best_block_hash();
         let tip = Arc::new(TipWatch::new(best));
-        let poller = TipPoller { node: node.clone(), watch: Arc::clone(&tip), last: best };
+        let poller = TipPoller {
+            node: node.clone(),
+            watch: Arc::clone(&tip),
+            last: best,
+            interval: TIP_POLL_INTERVAL,
+        };
         let backend = Self {
             node,
             network,
@@ -327,10 +332,18 @@ pub struct TipPoller {
     node: ZakuraClient,
     watch: Arc<TipWatch>,
     last: block::Hash,
+    interval: Duration,
 }
 
 impl TipPoller {
-    /// Calls `getbestblockhash` every second while at least one tip listener exists. It wakes
+    /// Sets the time between two `getbestblockhash` calls. The default is one second.
+    #[must_use]
+    pub const fn with_interval(mut self, interval: Duration) -> Self {
+        self.interval = interval;
+        self
+    }
+
+    /// Calls `getbestblockhash` once per interval while at least one tip listener exists. It wakes
     /// the listeners when the hash changes or a call fails. After a failure, a hash that is the
     /// same as before the failure wakes nobody. While no listener exists, it makes no calls. It
     /// returns when the backend is dropped and no listener is left.
@@ -339,7 +352,7 @@ impl TipPoller {
     /// wakes the new listeners, also for a change before they were made. A mempool stream then
     /// ends one block early, which is safe. A change after a listener is made always wakes it.
     pub async fn run(mut self) {
-        let mut interval = tokio::time::interval(TIP_POLL_INTERVAL);
+        let mut interval = tokio::time::interval(self.interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             if self.watch.sender.receiver_count() == 0 {
@@ -1267,8 +1280,10 @@ mod tests {
         .await;
         let node = ZakuraClient::new(RpcClient::new(mock.config()).unwrap());
         let (backend, poller) = RemoteBackend::connect(node, Network::Mainnet).await.unwrap();
-        let poller = tokio::spawn(poller.run());
-        let wait = TIP_POLL_INTERVAL + Duration::from_millis(500);
+        // A short interval keeps the test fast. Each wait covers several polls.
+        let interval = Duration::from_millis(10);
+        let poller = tokio::spawn(poller.with_interval(interval).run());
+        let wait = 20 * interval;
         let polls =
             || mock.seen().iter().filter(|seen| seen.body["method"] == "getbestblockhash").count();
 
