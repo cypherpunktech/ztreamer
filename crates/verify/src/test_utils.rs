@@ -125,17 +125,34 @@ impl Snapshot {
             let blob = source.index.read_sealed_range_bytes(entry.start_height).unwrap().unwrap();
             fs::write(snapshot.range_path(entry), blob).unwrap();
         }
-        snapshot.write_signed(Self::MANIFEST, &serde_json::to_vec(&snapshot.manifest).unwrap());
+        snapshot.write_manifest_and_latest();
+        snapshot
+    }
+
+    /// Keeps the first `ranges` entries of the manifest, and signs the new manifest and
+    /// `latest.json`, as a source that exported fewer ranges does. The last kept entry must close
+    /// an epoch.
+    pub(crate) fn keep_first_ranges(&mut self, ranges: usize) {
+        let entries = self.manifest.entries()[..ranges].to_vec();
+        self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
+            .entries(entries)
+            .build()
+            .unwrap();
+        self.write_manifest_and_latest();
+    }
+
+    /// Writes the signed manifest, and a signed `latest.json` that names it.
+    fn write_manifest_and_latest(&self) {
+        self.write_signed(Self::MANIFEST, &serde_json::to_vec(&self.manifest).unwrap());
         let latest = Latest {
             manifest: Self::MANIFEST.to_owned(),
-            sealed_through: snapshot.manifest.sealed_through(),
+            sealed_through: self.manifest.sealed_through(),
             published_at: "2026-10-26T00:00:00Z".to_owned(),
             // A source must not trust this key. Make it another key, so a test fails if it does.
             public_key: Some(SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes()),
         };
         let latest = latest.to_file(Some(&SigningKey::from_bytes(&SEED)));
-        fs::write(snapshot.dir.path().join(Latest::PATH), latest).unwrap();
-        snapshot
+        fs::write(self.dir.path().join(Latest::PATH), latest).unwrap();
     }
 
     /// Replaces the blob of the range at `start` and its entry, and signs the new manifest, as a

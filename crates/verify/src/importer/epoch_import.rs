@@ -130,7 +130,7 @@ impl<S: RangeSource + 'static> EpochImport<S> {
     }
 
     /// The blobs of the epoch at `at`: from the index for an installed epoch, else from the
-    /// source.
+    /// sources.
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
         let started = Instant::now();
         let entries = self.manifest_epoch(at).entries();
@@ -150,11 +150,7 @@ impl<S: RangeSource + 'static> EpochImport<S> {
                 .collect::<Result<_, _>>()?
         } else {
             stream::iter(entries)
-                .then(|entry| async move {
-                    let blob = self.importer.source.blob(entry).await?;
-                    self.metrics.add_fetched_bytes(entry.blob_len);
-                    Ok::<_, ImportError>(blob)
-                })
+                .then(|entry| self.importer.sources.fetch_blob(entry))
                 .try_collect()
                 .await?
         };

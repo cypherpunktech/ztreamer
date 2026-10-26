@@ -1,9 +1,9 @@
 //! The metrics of an import, below `ztreamer.replicate`: one histogram per stage of an epoch,
-//! the fetched bytes, and the gauges of the verify workers.
+//! and the gauges of the verify workers. `Sources` counts the fetched bytes of each source.
 
 use std::time::Instant;
 
-use metrics::{Counter, Gauge, Histogram};
+use metrics::{Gauge, Histogram};
 
 /// A stage of the work on one epoch, with a histogram of its duration.
 #[derive(Clone, Copy)]
@@ -19,7 +19,6 @@ pub(crate) struct ImportMetrics {
     verify: Histogram,
     attest: Histogram,
     sample: Histogram,
-    bytes_fetched: Counter,
     epochs_pending: Gauge,
     workers_busy: Gauge,
 }
@@ -31,10 +30,6 @@ impl ImportMetrics {
             verify: metrics::histogram!("ztreamer.replicate.verify_seconds"),
             attest: metrics::histogram!("ztreamer.replicate.attest_seconds"),
             sample: metrics::histogram!("ztreamer.replicate.sample_seconds"),
-            bytes_fetched: metrics::counter!(
-                "ztreamer.replicate.bytes_fetched_total",
-                "source" => "0"
-            ),
             epochs_pending: metrics::gauge!("ztreamer.replicate.epochs_pending"),
             workers_busy: metrics::gauge!("ztreamer.replicate.workers_busy"),
         }
@@ -49,10 +44,6 @@ impl ImportMetrics {
             EpochStage::Sample => &self.sample,
         };
         histogram.record(started.elapsed());
-    }
-
-    pub(crate) fn add_fetched_bytes(&self, bytes: u64) {
-        self.bytes_fetched.increment(bytes);
     }
 
     /// Counts an epoch in `epochs_pending` until the guard drops: the epoch waits for a verify
