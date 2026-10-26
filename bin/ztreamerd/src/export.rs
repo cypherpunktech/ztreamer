@@ -90,7 +90,7 @@ impl ExportReport {
             warn!(
                 missing_rows,
                 "export stopped at the first sealed range without a range_meta row; \
-                 run the daemon with --fill-range-meta"
+                 run the daemon in embedded mode to fill the rows"
             );
         }
     }

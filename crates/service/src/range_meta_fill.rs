@@ -1,9 +1,10 @@
 //! A background task that writes a `range_meta` row for each sealed range that has none.
 //!
 //! A ztreamer can be a snapshot source only when each sealed range has a [`RangeMeta`] row. The
-//! row holds the manifest entry of the range and the node's answers for the range end. Embedded
-//! mode seals ranges, but it does not write these rows. [`RangeMetaFiller`] writes them from the
-//! index and from the embedded node. It writes one range at a time, in ascending order.
+//! row holds the manifest entry of the range and the node's answers for the range end. The index
+//! writer seals ranges, but it does not write these rows. [`RangeMetaFiller`] writes them from the
+//! index and from the embedded node. It writes one range at a time, in ascending order. ztreamerd
+//! runs it in embedded mode.
 //!
 //! The filler does not write blocks and does not change the generation. It reads LMDB on a
 //! blocking thread and yields between ranges. The writer and the serving path do not wait for it.

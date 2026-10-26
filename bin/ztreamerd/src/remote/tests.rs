@@ -226,7 +226,6 @@ fn the_flags_keep_the_two_modes_apart() {
     };
     let url = "http://127.0.0.1:8232";
     assert!(parse(&["--remote-rpc", url, "--zakura-config", "zakura.toml"]).is_err());
-    assert!(parse(&["--remote-rpc", url, "--fill-range-meta"]).is_err());
     assert!(parse(&["--remote-rpc-cookie", ".cookie"]).is_err());
     assert!(parse(&["--network", "testnet"]).is_err());
     assert!(parse(&["--remote-rpc", "http://user@127.0.0.1:8232"]).is_err());

@@ -44,7 +44,7 @@ pub(crate) struct RemoteArgs {
     /// starts no embedded node. For HTTP basic auth, put the credentials in the URL:
     /// https://user:password@host:8232. Without credentials and without --remote-rpc-cookie, a
     /// loopback URL uses the default cookie file of zakura if it exists.
-    #[arg(long, value_name = "URL", conflicts_with_all = ["zakura_config", "fill_range_meta"])]
+    #[arg(long, value_name = "URL", conflicts_with = "zakura_config")]
     remote_rpc: Option<NodeUrl>,
 
     /// Cookie file of the --remote-rpc node.

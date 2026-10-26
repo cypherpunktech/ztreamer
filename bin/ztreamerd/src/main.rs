@@ -125,11 +125,6 @@ struct DaemonArgs {
     #[arg(long)]
     index_only: bool,
 
-    /// Write a `range_meta` row for each sealed range in the background. Then the index can be a
-    /// snapshot source.
-    #[arg(long)]
-    fill_range_meta: bool,
-
     #[command(flatten)]
     remote: remote::RemoteArgs,
 }
@@ -229,8 +224,9 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        let p2p = Some(p2p.clone());
-        run_application(cli, grpc_server, index, &network, p2p, sources, shutdown.clone()).await
+        let embedded = Some(Embedded { p2p: p2p.clone() });
+        run_application(cli, grpc_server, index, &network, embedded, sources, shutdown.clone())
+            .await
     };
 
     lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
@@ -276,14 +272,20 @@ impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
     }
 }
 
-/// Indexes, then serves until shutdown. `p2p` gets the compact service when a node runs in this
-/// process.
+/// What only the embedded mode gives the daemon.
+struct Embedded {
+    /// The Zakura p2p compact service. It gets the compact service after the head reconcile.
+    p2p: Arc<P2pCompactService>,
+}
+
+/// Indexes, then serves until shutdown. `embedded` is set when a node runs in this process. Then
+/// the p2p service gets the compact service, and the `range_meta` filler runs.
 async fn run_application<T, H, B>(
     cli: DaemonArgs,
     mut grpc_server: Server,
     index: Arc<Index>,
     network: &Network,
-    p2p: Option<Arc<P2pCompactService>>,
+    embedded: Option<Embedded>,
     sources: NodeSources<T, H, B>,
     shutdown: CancellationToken,
 ) -> Result<()>
@@ -308,19 +310,20 @@ where
         return Ok(());
     }
 
-    let filler_index = cli.fill_range_meta.then(|| Arc::clone(&index));
+    let filler_index = Arc::clone(&index);
     let replicate_index = Arc::clone(&index);
     let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
         .with_ping_enabled(cli.ping_very_insecure);
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
-    if let Some(p2p) = p2p {
-        p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
-    }
-
-    let filler = filler_index
-        .map(|index| RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe()));
+    let filler = embedded
+        .map(|Embedded { p2p }| -> Result<_> {
+            p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
+            let filler = RangeMetaFiller::embedded(filler_index, compact.backend());
+            Ok(filler.run(compact.subscribe()))
+        })
+        .transpose()?;
     let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact.clone()))
