@@ -10,6 +10,7 @@ pub mod p2p;
 mod project;
 pub mod range_meta_fill;
 pub mod remote;
+pub mod replica;
 pub mod replicate;
 mod service;
 #[cfg(any(test, feature = "test-utils"))]

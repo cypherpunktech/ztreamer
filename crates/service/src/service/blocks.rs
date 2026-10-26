@@ -272,6 +272,7 @@ mod tests {
                         tip: false,
                         recovering: false,
                         source_error: None,
+                        replica: None,
                     }
                 );
                 let descending = range(1_002, 998);

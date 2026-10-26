@@ -20,6 +20,7 @@ use ztreamer_node::NodeClient;
 
 use crate::{
     backend::{InProcessBackend, StateBackend},
+    replica::{ReplicaReadiness, ReplicaStatus},
     telemetry::ServiceMetrics,
 };
 
@@ -46,6 +47,10 @@ const MAX_RANGE_STREAMS: usize = 16;
 pub struct ServingSnapshot {
     pub generation: u64,
     pub durable_tip: Option<BlockId>,
+    /// The last sealed height of the index at this generation.
+    pub sealed_through: Option<u32>,
+    /// The last height of the verified prefix of the index at this generation.
+    pub verified_through: Option<u32>,
     pub visible_tip: Option<BlockId>,
     pub volatile_head: Arc<[CompactBlockRecord]>,
     pub ready: bool,
@@ -59,6 +64,8 @@ impl From<IndexState> for ServingSnapshot {
         Self {
             generation: state.generation(),
             durable_tip: state.durable_tip(),
+            sealed_through: state.sealed_through(),
+            verified_through: state.verified_through(),
             visible_tip: state.durable_tip(),
             volatile_head: Arc::default(),
             ready: true,
@@ -79,6 +86,8 @@ pub struct Readiness {
     pub tip: bool,
     pub recovering: bool,
     pub source_error: Option<Arc<str>>,
+    /// The readiness of the replica, when the service runs on a replica.
+    pub replica: Option<ReplicaReadiness>,
 }
 
 impl ServingSnapshot {
@@ -104,6 +113,8 @@ impl ServingSnapshot {
         Ok(Self {
             generation: state.generation(),
             durable_tip: state.durable_tip(),
+            sealed_through: state.sealed_through(),
+            verified_through: state.verified_through(),
             visible_tip,
             volatile_head: volatile_head.into(),
             ready: true,
@@ -131,6 +142,7 @@ pub struct CompactService {
     range_streams: Arc<Semaphore>,
     ping_enabled: bool,
     metrics: Arc<ServiceMetrics>,
+    replica: Option<ReplicaStatus>,
 }
 
 impl std::fmt::Debug for CompactService {
@@ -183,7 +195,17 @@ impl CompactService {
             range_streams: Arc::new(Semaphore::new(MAX_RANGE_STREAMS)),
             ping_enabled: false,
             metrics,
+            replica: None,
         }
+    }
+
+    /// Reports the readiness of a replica in [`Self::readiness`], in `GetLightdInfo` and in the
+    /// `ztreamer.replicate.*` gauges. Each serving snapshot gives the heights and the node state
+    /// to `status`.
+    pub fn with_replica_status(mut self, status: ReplicaStatus) -> Self {
+        status.observe(&self.snapshot.borrow());
+        self.replica = Some(status);
+        self
     }
 
     pub const fn with_ping_enabled(mut self, enabled: bool) -> Self {
@@ -202,7 +224,7 @@ impl CompactService {
     }
 
     pub fn publish(&self, state: IndexState) {
-        self.snapshot.send_replace(state.into());
+        self.send(state.into());
     }
 
     pub fn publish_head(
@@ -212,7 +234,7 @@ impl CompactService {
     ) -> Result<(), SnapshotError> {
         let snapshot = ServingSnapshot::with_head(state, volatile_head)?;
         self.metrics.snapshot(&snapshot);
-        self.snapshot.send_replace(snapshot);
+        self.send(snapshot);
         Ok(())
     }
 
@@ -222,7 +244,7 @@ impl CompactService {
         snapshot.ready = false;
         snapshot.tip_fresh = false;
         self.metrics.snapshot(&snapshot);
-        self.snapshot.send_replace(snapshot);
+        self.send(snapshot);
     }
 
     pub fn readiness(&self) -> Readiness {
@@ -231,6 +253,7 @@ impl CompactService {
             historical: snapshot.durable_tip.is_some(),
             tip: snapshot.ready && snapshot.tip_fresh,
             recovering: !snapshot.ready,
+            replica: self.replica.as_ref().map(|replica| replica.readiness(&snapshot)),
             source_error: snapshot.source_error,
         }
     }
@@ -241,6 +264,14 @@ impl CompactService {
             snapshot.last_source_success.is_some_and(|last| last.elapsed() < freshness_timeout);
         snapshot.source_error = Some(error.into());
         self.metrics.snapshot(&snapshot);
+        self.send(snapshot);
+    }
+
+    /// Publishes `snapshot`, and gives it to the replica status.
+    fn send(&self, snapshot: ServingSnapshot) {
+        if let Some(replica) = &self.replica {
+            replica.observe(&snapshot);
+        }
         self.snapshot.send_replace(snapshot);
     }
 
@@ -306,8 +337,13 @@ impl CompactService {
         Ok(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.0.to_vec() })
     }
 
+    /// The `GetLightdInfo` answer. On a replica, `build_user` holds the text of
+    /// [`ReplicaReadiness`]: the lightwalletd protocol has no field for it, and ztreamer has no
+    /// build user to give.
     pub(crate) fn lightd_info(&self) -> proto::LightdInfo {
-        let tip = self.snapshot().visible_tip;
+        let snapshot = self.snapshot();
+        let replica = self.replica.as_ref().map(|replica| replica.readiness(&snapshot));
+        let tip = snapshot.visible_tip;
         let tip_height = tip.map_or(0, |tip| tip.height);
         let network = self.backend.network();
         let next_upgrade =
@@ -330,6 +366,7 @@ impl CompactService {
             upgrade_name: next_upgrade.map_or_else(String::new, |(_, upgrade)| upgrade.to_string()),
             upgrade_height: next_upgrade.map_or(0, |(height, _)| u64::from(height.0)),
             lightwallet_protocol_version: "v0.5.0".to_owned(),
+            build_user: replica.map(|replica| replica.to_string()).unwrap_or_default(),
             ..Default::default()
         }
     }
@@ -423,6 +460,7 @@ fn index_status(error: IndexError) -> Status {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replica::{ImportSource, ImportState};
     use zakura_chain::{block, parameters::Network};
     use zakura_state::Config;
 
@@ -448,5 +486,33 @@ mod tests {
                 proto::PingResponse { entry: 1, exit: 0 }
             );
         });
+    }
+
+    #[tokio::test]
+    async fn lightd_info_gives_the_replica_readiness_only_on_a_replica() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Arc::new(
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+        );
+        let (_state_service, read_service, _tip, _change) =
+            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+                .await
+                .expect("ephemeral state initializes");
+        let service = CompactService::new(index, IndexState::default(), "main", read_service);
+        assert_eq!(service.lightd_info().build_user, "");
+        assert_eq!(service.readiness().replica, None);
+
+        let source = ImportSource { name: "https://a.example".to_owned(), strikes: 0 };
+        let status = ReplicaStatus::new(vec![source]);
+        let service = service.with_replica_status(status.clone());
+        status.update(|progress| progress.import_state = ImportState::Tail);
+
+        assert_eq!(
+            service.lightd_info().build_user,
+            "sealed_through=none verified_through=none chain_ok_through=none import_state=tail \
+             node_state=stale import_sources=https://a.example:0"
+        );
+        let replica = service.readiness().replica.unwrap();
+        assert_eq!(replica.progress.import_state, ImportState::Tail);
     }
 }
