@@ -138,6 +138,13 @@ impl<'a> Epochs<'a> {
     pub const fn new(entries: &'a [ManifestEntry]) -> Self {
         Self { entries, start: 0 }
     }
+
+    /// Groups `entries` into epochs, from the entry at `start`. `start` must be the first entry
+    /// of an epoch of [`Epochs::new`]. Then the epochs are the epochs of [`Epochs::new`] from
+    /// that epoch.
+    pub(crate) const fn starting_at(entries: &'a [ManifestEntry], start: usize) -> Self {
+        Self { entries, start }
+    }
 }
 
 impl<'a> Iterator for Epochs<'a> {
