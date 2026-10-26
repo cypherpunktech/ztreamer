@@ -150,6 +150,14 @@ impl<'a> RangeBlob<'a> {
         self.entry
     }
 
+    /// Returns `true` if the length and the BLAKE3 digest of the blob are `blob_len` and
+    /// `blob_digest` of the entry: step 1 of the module docs.
+    pub fn matches_digest(&self) -> bool {
+        // Compare the length first: it is free, and the digest reads the whole blob.
+        u64::try_from(self.bytes.len()) == Ok(self.entry.blob_len)
+            && BlobDigest(*blake3::hash(self.bytes).as_bytes()) == self.entry.blob_digest
+    }
+
     /// Runs the checks in the module docs.
     ///
     /// `previous` is the end of the range before: [`RangeLink::GENESIS`] for the range at
@@ -165,10 +173,7 @@ impl<'a> RangeBlob<'a> {
         mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), Reject>,
     ) -> Result<RangeLink, Reject> {
         let entry = self.entry;
-        // Compare the length first: it is free, and the digest reads the whole blob.
-        if u64::try_from(self.bytes.len()) != Ok(entry.blob_len)
-            || BlobDigest(*blake3::hash(self.bytes).as_bytes()) != entry.blob_digest
-        {
+        if !self.matches_digest() {
             return Err(Reject::Refetch { start_height: entry.start_height });
         }
         let start = entry.start_height;

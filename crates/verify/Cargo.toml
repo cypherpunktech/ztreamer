@@ -11,29 +11,45 @@ workspace = true
 [dependencies]
 async-trait = "0.1"
 blake3 = "1"
+bytes = "1"
 ed25519-dalek.workspace = true
 hex = "0.4"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 pasta_curves.workspace = true
 rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sapling-crypto.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 serde_with = { version = "3", features = ["hex"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt"] }
+tokio-stream = "0.1"
+tonic = "0.14.6"
+tracing = "0.1"
+webpki-roots = "1"
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
 ztreamer-indexer = { path = "../indexer" }
+ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]
 criterion = "0.8"
+hyper = { version = "1", features = ["server"] }
 incrementalmerkletree.workspace = true
-tokio = { version = "1", features = ["macros", "rt"] }
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thread", "time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
+ztreamer-service = { path = "../service" }
 
 [[bench]]
 name = "epoch"

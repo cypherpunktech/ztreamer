@@ -13,7 +13,10 @@
 
 pub mod attest;
 pub mod epoch;
+pub mod fetch;
 pub mod manifest;
 pub mod range;
 pub mod sample;
 pub mod snapshot;
+#[cfg(test)]
+mod test_utils;
