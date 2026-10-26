@@ -14,35 +14,39 @@ use crate::{
     epoch::Epochs,
     fetch::{FetchError, Fetcher, RangeSource},
     manifest::Manifest,
+    range::RangeLink,
 };
 
 /// The sources of one import, in the order of the caller. Blob fetches rotate across them.
 #[derive(Debug)]
 pub(crate) struct Sources<S> {
-    fetchers: Vec<Fetcher<S>>,
-    /// `ztreamer.replicate.bytes_fetched_total` for each source.
-    bytes_fetched: Vec<Counter>,
+    /// The fetcher of each source, and its `ztreamer.replicate.bytes_fetched_total`.
+    fetchers: Vec<(Fetcher<S>, Counter)>,
     /// The count of blob fetches. It selects the first source of the next fetch.
     rotation: AtomicUsize,
 }
 
 impl<S: RangeSource> Sources<S> {
     pub(crate) fn new(sources: Vec<S>) -> Self {
-        let bytes_fetched = (0..sources.len())
-            .map(|source| {
-                let source = source.to_string();
-                metrics::counter!("ztreamer.replicate.bytes_fetched_total", "source" => source)
+        let fetchers = sources
+            .into_iter()
+            .enumerate()
+            .map(|(position, source)| {
+                let label = position.to_string();
+                let bytes_fetched =
+                    metrics::counter!("ztreamer.replicate.bytes_fetched_total", "source" => label);
+                (Fetcher::new(source), bytes_fetched)
             })
             .collect();
-        let fetchers = sources.into_iter().map(Fetcher::new).collect();
-        Self { fetchers, bytes_fetched, rotation: AtomicUsize::new(0) }
+        Self { fetchers, rotation: AtomicUsize::new(0) }
     }
 
     /// The manifest of each source that gives one, with the position of the source. The
     /// sources answer at the same time. A source with no manifest has no part in the import.
     /// When no source gives a manifest, the error is the error of the last source.
     pub(crate) async fn manifests(&self) -> Result<Vec<(usize, Manifest)>, ImportError> {
-        let answers = future::join_all(self.fetchers.iter().map(Fetcher::manifest)).await;
+        let answers =
+            future::join_all(self.fetchers.iter().map(|(fetcher, _)| fetcher.manifest())).await;
         let (mut manifests, mut failure) = (Vec::new(), None);
         for (source, answer) in answers.into_iter().enumerate() {
             match answer {
@@ -53,11 +57,10 @@ impl<S: RangeSource> Sources<S> {
                 }
             }
         }
-        match failure.filter(|_| manifests.is_empty()) {
-            Some(error) => Err(error.into()),
-            None if manifests.is_empty() => Err(ImportError::NoSources),
-            None => Ok(manifests),
+        if manifests.is_empty() {
+            return Err(failure.map_or(ImportError::NoSources, ImportError::from));
         }
+        Ok(manifests)
     }
 
     /// The blob of `entry` from one of `holders`. The fetch starts at the next holder in the
@@ -72,9 +75,10 @@ impl<S: RangeSource> Sources<S> {
         let first = self.rotation.fetch_add(1, Ordering::Relaxed) % holders.len().max(1);
         let mut failure = None;
         for &source in holders.iter().cycle().skip(first).take(holders.len()) {
-            match self.fetchers[source].blob(entry).await {
+            let (fetcher, bytes_fetched) = &self.fetchers[source];
+            match fetcher.blob(entry).await {
                 Ok(blob) => {
-                    self.bytes_fetched[source].increment(entry.blob_len);
+                    bytes_fetched.increment(entry.blob_len);
                     return Ok(blob);
                 }
                 Err(FetchError::Digest { .. } | FetchError::SourceDropped { .. }) => {}
@@ -92,7 +96,7 @@ impl<S: RangeSource> Sources<S> {
     /// verification.
     pub(crate) fn strike(&self, holders: &[usize]) {
         for &source in holders {
-            let strikes = self.fetchers[source].strikes().add();
+            let strikes = self.fetchers[source].0.strike();
             warn!(source, strikes, "source sent an epoch that failed verification");
         }
     }
@@ -129,29 +133,29 @@ impl Version {
             .map(|epoch| {
                 // The entries of a manifest follow each other from genesis.
                 let offset = (epoch.entries()[0].start_height / RANGE_SIZE) as usize;
-                let heights = offset..offset + epoch.entries().len();
-                let agree = |one: &Manifest, other: &Manifest| {
-                    let previous = offset.checked_sub(1);
-                    let (one_entries, other_entries) = (one.entries(), other.entries());
+                let positions = offset..offset + epoch.entries().len();
+                let previous = offset.checked_sub(1);
+                let agree = |one: &[ManifestEntry], other: &[ManifestEntry]| {
                     let same_link = previous.is_none_or(|at| {
-                        let (one, other) = (&one_entries[at], &other_entries[at]);
-                        one.end_hash == other.end_hash
-                            && one.end_tree_sizes == other.end_tree_sizes
+                        let (one, other) = (&one[at], &other[at]);
+                        RangeLink::from(one) == RangeLink::from(other)
                             && one.frontiers == other.frontiers
                     });
-                    let digests = |entries: &[ManifestEntry]| -> Vec<_> {
-                        entries[heights.clone()].iter().map(|entry| entry.blob_digest).collect()
-                    };
-                    same_link && digests(one_entries) == digests(other_entries)
+                    let (one, other) = (&one[positions.clone()], &other[positions.clone()]);
+                    same_link
+                        && one
+                            .iter()
+                            .zip(other)
+                            .all(|(one, other)| one.blob_digest == other.blob_digest)
                 };
                 let mut versions: Vec<Self> = Vec::new();
                 for (manifest, (source, other)) in manifests.iter().enumerate() {
-                    if other.entries().len() < heights.end {
+                    if other.entries().len() < positions.end {
                         continue;
                     }
-                    let agreed = versions
-                        .iter_mut()
-                        .find(|version| agree(&manifests[version.manifest].1, other));
+                    let agreed = versions.iter_mut().find(|version| {
+                        agree(manifests[version.manifest].1.entries(), other.entries())
+                    });
                     if let Some(version) = agreed {
                         version.holders.push(*source);
                         continue;
