@@ -171,6 +171,15 @@ impl TreeSizes {
             ironwood: self.ironwood.checked_add(other.ironwood)?,
         })
     }
+
+    /// Subtracts `other` pool by pool. Returns `None` if a pool size underflows.
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        Some(Self {
+            sapling: self.sapling.checked_sub(other.sapling)?,
+            orchard: self.orchard.checked_sub(other.orchard)?,
+            ironwood: self.ironwood.checked_sub(other.ironwood)?,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error, Eq, PartialEq)]
@@ -588,6 +597,19 @@ mod tests {
 
     use crate::test_utils::hash;
     use crate::types::{CompactSaplingOutput, CompactShieldedAction};
+
+    #[test]
+    fn tree_sizes_subtract_pool_by_pool() {
+        let sizes = TreeSizes { sapling: 5, orchard: 3, ironwood: 1 };
+        let additions = TreeSizes { sapling: 2, orchard: 3, ironwood: 0 };
+
+        assert_eq!(
+            sizes.checked_sub(additions),
+            Some(TreeSizes { sapling: 3, orchard: 0, ironwood: 1 })
+        );
+        assert_eq!(sizes.checked_sub(additions).unwrap().checked_add(additions), Some(sizes));
+        assert_eq!(additions.checked_sub(sizes), None);
+    }
 
     #[test]
     fn rejects_transactions_without_shielded_data() {
