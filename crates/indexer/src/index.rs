@@ -61,11 +61,15 @@
 //!   `sealed_through`. Only these writes advance it:
 //!   - An install of a [`VerifyState::Verified`] range, and
 //!     [`Index::advance_verified_through`]. The range must start at `verified_through + 1`, or
-//!     at 0. The write also moves `verified_through` over the next ranges that have a
-//!     [`VerifyState::Verified`] row.
+//!     at 0. The write also moves `verified_through` over the next sealed ranges that have a
+//!     [`VerifyState::Verified`] row or no row.
 //!   - A seal of mutable rows into a range that starts at `verified_through + 1`. The range has
-//!     no `range_meta` row. This write does not set a `verified_through` that is not set. Thus
-//!     the embedded mode never sets it.
+//!     no `range_meta` row.
+//!
+//!   A sealed range with no `range_meta` row came from node blocks, because an install always
+//!   writes a row. A replica trusts its source node as much as its verified snapshot. Thus such
+//!   a range joins the prefix. No write sets a `verified_through` that is not set because of a
+//!   range with no row. Thus the embedded mode never sets it.
 //! - Every `range_meta` key is the first height of a sealed range. A sealed range may have no
 //!   `range_meta` row.
 //! - An empty index has no state row, and its block tables and `range_meta` are empty.
@@ -541,8 +545,8 @@ impl Index {
     ///   `verified_through + 1`, or 0 if `verified_through` is not set.
     ///
     /// The write replaces the row with `meta`, and it moves `verified_through` to the range end.
-    /// If the next ranges have [`VerifyState::Verified`] rows, it moves `verified_through` over
-    /// them too. The commit increases the generation.
+    /// If the next sealed ranges have [`VerifyState::Verified`] rows or no rows, it moves
+    /// `verified_through` over them too. The commit increases the generation.
     pub fn advance_verified_through(
         &self,
         start: u32,
@@ -1400,6 +1404,40 @@ mod tests {
         install(&index, 1_000, VerifyState::ChainOk).unwrap();
         let state = index.write(batch(&index, 2_000..=3_100, 3_200)).unwrap();
         assert_eq!((state.sealed_through(), state.verified_through()), (Some(2_999), Some(999)));
+    }
+
+    #[test]
+    fn re_attestation_moves_verified_through_over_ranges_with_no_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::Verified).unwrap();
+        install(&index, 1_000, VerifyState::ChainOk).unwrap();
+        let state = index.write(batch(&index, 2_000..=3_100, 3_200)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(2_999), Some(999)));
+        assert_eq!(index.range_meta(2_000).unwrap(), None);
+
+        // The range at 2,000 came from node blocks. Thus it joins the prefix after the range at
+        // 1,000 is verified.
+        let meta = snapshot_range(1_000, VerifyState::Verified).1;
+        let state = index.advance_verified_through(1_000, &meta).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(2_999), Some(2_999)));
+        assert_eq!(index.range_meta(2_000).unwrap(), None);
+        index.verify_continuity().unwrap();
+
+        // With `--serve-unverified`, no range is verified at the start.
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::ChainOk).unwrap();
+        install(&index, 1_000, VerifyState::ChainOk).unwrap();
+        let state = index.write(batch(&index, 2_000..=3_100, 3_200)).unwrap();
+        assert_eq!(state.verified_through(), None);
+        let verified_meta = |start| snapshot_range(start, VerifyState::Verified).1;
+        let state = index.advance_verified_through(0, &verified_meta(0)).unwrap();
+        assert_eq!(state.verified_through(), Some(999));
+        let state = index.advance_verified_through(1_000, &verified_meta(1_000)).unwrap();
+        assert_eq!(state.verified_through(), Some(2_999));
     }
 
     #[test]
