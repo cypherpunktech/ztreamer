@@ -8071,17 +8071,22 @@ dependencies = [
 name = "ztreamer-verify"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "blake3",
  "criterion",
+ "hex",
  "incrementalmerkletree",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror 2.0.21",
+ "tokio",
  "zakura-chain",
  "zakura-pasta-curves",
  "zakura-sapling-crypto",
+ "zakura-state",
  "ztreamer-indexer",
+ "ztreamer-remote",
 ]
 
 [[package]]

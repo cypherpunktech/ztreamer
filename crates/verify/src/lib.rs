@@ -11,6 +11,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod attest;
 pub mod epoch;
 pub mod manifest;
 pub mod range;

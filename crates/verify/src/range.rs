@@ -56,8 +56,9 @@ impl From<&ManifestEntry> for RangeLink {
     }
 }
 
-/// A check that a range can fail after its digest matches. The last four are the checks of
-/// [`Epoch::verify`](crate::epoch::Epoch::verify).
+/// A check that a range can fail after its digest matches. [`Check::StartFrontier`] to
+/// [`Check::SubtreeRoots`] are the checks of [`Epoch::verify`](crate::epoch::Epoch::verify).
+/// The `Attested` checks are the checks of [`attest_epoch`](crate::attest::attest_epoch).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Check {
     /// The blob format version is not `range_version`.
@@ -86,6 +87,12 @@ pub enum Check {
     /// The subtrees that the rebuild completed in a range are not the `subtree_roots` of the
     /// manifest entry.
     SubtreeRoots,
+    /// The node has another hash at the end height of the epoch.
+    AttestedHash,
+    /// The node has other tree roots at the end height of the epoch.
+    AttestedRoots,
+    /// The node has another root for a subtree that the epoch completed.
+    AttestedSubtree,
 }
 
 impl Check {
