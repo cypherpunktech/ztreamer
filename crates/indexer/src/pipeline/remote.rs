@@ -2,10 +2,13 @@
 
 use std::{collections::VecDeque, num::NonZeroUsize, ops::RangeInclusive, panic, time::Instant};
 
-use tokio::{runtime::Handle, task::JoinHandle};
+use tokio::{
+    runtime::Handle,
+    task::{JoinError, JoinHandle},
+};
 use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
-use ztreamer_remote::{RpcError, ZakuraClient};
+use ztreamer_remote::{Method, RpcError, ZakuraClient};
 
 use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentSender};
 use crate::{index::SEAL_DEPTH, parser::parse_block, types::RawIndexBlock};
@@ -126,11 +129,13 @@ impl HistoricalSource for RemoteTailSource {
         parsed_tx: &mut SegmentSender<'_>,
         stats: &mut WorkerStats,
     ) -> Result<(), PipelineError> {
-        let mut requests = BlockRequests::new(self, start, end);
+        let mut requests = BlockRequests::new(self, start..=end);
         stats.ranges = 1;
-        for height in start..=end {
+        loop {
             let started = Instant::now();
-            let bytes = requests.next(height);
+            let Some((height, bytes)) = requests.next() else {
+                return Ok(());
+            };
             stats.read += started.elapsed();
             let bytes = bytes?;
             // The node sent the whole block. Refuse a block that is already too large before
@@ -180,24 +185,29 @@ impl HistoricalSource for RemoteTailSource {
             stats.send_wait += started.elapsed();
             sent?;
         }
-        Ok(())
     }
 }
 
-/// The `getblock` requests of one segment, in height order. At most the source's
-/// `requests_in_flight` run on the runtime at the same time, the request that the worker waits
-/// for included. When this value is dropped, it aborts the requests that are left, for example
-/// after an error.
+/// The `getblock` requests of one segment. As an [`Iterator`], it gives each height of the
+/// segment in ascending order with its serialized block or its error, then ends.
+///
+/// At most the source's `requests_in_flight` run on the runtime at the same time, the request
+/// that the worker waits for included. When this value is dropped, it aborts the requests that
+/// are left, for example after an error.
 struct BlockRequests<'a> {
     source: &'a RemoteTailSource,
     /// The heights that have no request yet.
     heights: RangeInclusive<u32>,
-    pending: VecDeque<JoinHandle<Result<Vec<u8>, RpcError>>>,
+    /// The requests that run, in height order.
+    pending: VecDeque<(u32, BlockRequest)>,
 }
 
+/// One `getblock` request on the runtime: the serialized block, or the error of the node.
+type BlockRequest = JoinHandle<Result<Vec<u8>, RpcError>>;
+
 impl<'a> BlockRequests<'a> {
-    fn new(source: &'a RemoteTailSource, start: u32, end: u32) -> Self {
-        let mut requests = Self { source, heights: start..=end, pending: VecDeque::new() };
+    fn new(source: &'a RemoteTailSource, heights: RangeInclusive<u32>) -> Self {
+        let mut requests = Self { source, heights, pending: VecDeque::new() };
         requests.fill();
         requests
     }
@@ -207,36 +217,51 @@ impl<'a> BlockRequests<'a> {
             && let Some(height) = self.heights.next()
         {
             let node = self.source.node.clone();
-            self.pending.push_back(self.source.runtime.spawn(async move {
+            let request = self.source.runtime.spawn(async move {
                 node.get_block_raw(HashOrHeight::Height(Height(height))).await.map(|bytes| bytes.0)
-            }));
+            });
+            self.pending.push_back((height, request));
         }
     }
 
-    /// Waits for the serialized block at `height`, the next height of the segment. A block that
-    /// the node does not have is [`PipelineError::MissingBody`] when the node pruned it, else
-    /// [`PipelineError::SourceGap`].
-    fn next(&mut self, height: u32) -> Result<Vec<u8>, PipelineError> {
-        let request = self.pending.pop_front().expect("the segment has a request for each height");
-        let result = self.source.runtime.block_on(request);
-        self.fill();
+    /// The result of the request for `height`. A block that the node does not have is
+    /// [`PipelineError::MissingBody`] when the node pruned it, else [`PipelineError::SourceGap`].
+    fn block(
+        &self,
+        height: u32,
+        result: Result<Result<Vec<u8>, RpcError>, JoinError>,
+    ) -> Result<Vec<u8>, PipelineError> {
         match result {
             Ok(Ok(bytes)) => Ok(bytes),
             Ok(Err(error)) if error.is_block_not_found() => Err(self.source.missing_block(height)),
             Ok(Err(error)) => Err(error.into()),
             Err(error) if error.is_panic() => panic::resume_unwind(error.into_panic()),
             // The runtime shut down and dropped the request.
-            Err(error) => {
-                Err(RpcError::Transport { method: "getblock".to_owned(), source: Box::new(error) }
-                    .into())
+            Err(error) => Err(RpcError::Transport {
+                method: Method::GetBlock.name().to_owned(),
+                source: Box::new(error),
             }
+            .into()),
         }
+    }
+}
+
+impl Iterator for BlockRequests<'_> {
+    /// A height of the segment and its serialized block.
+    type Item = (u32, Result<Vec<u8>, PipelineError>);
+
+    /// Waits for the request of the next height, then starts the request for a later height.
+    fn next(&mut self) -> Option<Self::Item> {
+        let (height, request) = self.pending.pop_front()?;
+        let result = self.source.runtime.block_on(request);
+        self.fill();
+        Some((height, self.block(height, result)))
     }
 }
 
 impl Drop for BlockRequests<'_> {
     fn drop(&mut self) {
-        self.pending.iter().for_each(JoinHandle::abort);
+        self.pending.iter().for_each(|(_, request)| request.abort());
     }
 }
 
@@ -322,6 +347,23 @@ mod tests {
         assert!(matches!(source.tip(), Err(PipelineError::Remote(_))));
         assert!(matches!(source.block_hash(7), Err(PipelineError::Remote(_))));
         assert!(matches!(source.prune_height(), Err(PipelineError::Remote(_))));
+    }
+
+    #[test]
+    fn block_requests_give_each_height_in_order_then_end() {
+        let runtime = runtime();
+        let blocks = chain(20);
+        let (_mock, source) = node(&runtime, serve(&MockChain::new(&blocks)));
+        let source = source.with_requests_in_flight(NonZeroUsize::new(2).unwrap());
+
+        let fetched: Vec<_> = BlockRequests::new(&source, 10..=14)
+            .map(|(height, bytes)| (height, bytes.unwrap()))
+            .collect();
+
+        let expected: Vec<_> = (10..=14)
+            .map(|height| (height, blocks[height as usize].zcash_serialize_to_vec().unwrap()))
+            .collect();
+        assert_eq!(fetched, expected);
     }
 
     #[test]
