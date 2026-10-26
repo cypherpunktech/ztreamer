@@ -7,7 +7,7 @@ use ztreamer_indexer::{
     index::BlockId,
     types::RawIndexBlock,
 };
-use ztreamer_remote::{RpcError, ZakuraClient};
+use ztreamer_remote::ZakuraClient;
 
 /// The canonical head of a remote zakura node, read over JSON-RPC.
 ///
@@ -45,7 +45,7 @@ impl CanonicalBlockSource for RemoteHeadSource {
     /// The best block, from one `getblockchaininfo` call. The node takes the height and the hash
     /// from the same chain tip, thus they agree.
     async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-        let info = self.node.get_blockchain_info().await.map_err(node_error)?;
+        let info = self.node.get_blockchain_info().await?;
         Ok(Some(BlockId::new(info.blocks().0, info.best_block_hash())))
     }
 
@@ -57,12 +57,12 @@ impl CanonicalBlockSource for RemoteHeadSource {
         let hash = match self.node.get_block_hash(block::Height(height)).await {
             Ok(hash) => hash.hash(),
             Err(error) if error.is_block_not_found() => return Ok(None),
-            Err(error) => return Err(node_error(error)),
+            Err(error) => return Err(error.into()),
         };
         let bytes = match self.node.get_block_raw(HashOrHeight::Hash(hash)).await {
             Ok(bytes) => bytes.0,
             Err(error) if error.is_block_not_found() => return Err(HeadError::Changed),
-            Err(error) => return Err(node_error(error)),
+            Err(error) => return Err(error.into()),
         };
         let block = RawIndexBlock::from_bytes(bytes)
             .map_err(|error| HeadError::Decode(error.to_string()))?;
@@ -74,10 +74,6 @@ impl CanonicalBlockSource for RemoteHeadSource {
         }
         Ok(Some(block))
     }
-}
-
-fn node_error(error: RpcError) -> HeadError {
-    HeadError::Node(error.to_string())
 }
 
 #[cfg(test)]

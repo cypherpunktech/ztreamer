@@ -7,6 +7,7 @@ use zakura_chain::{
 };
 use zakura_state::MAX_BLOCK_REORG_HEIGHT;
 use ztreamer_node::NodeClient;
+use ztreamer_remote::RpcError;
 
 use crate::{
     codec::CompactBlockRecord,
@@ -21,6 +22,9 @@ use crate::{
 pub enum HeadError {
     #[error("Zakura head request failed: {0}")]
     Node(String),
+    /// A request to a remote zakura node failed.
+    #[error("remote Zakura head request failed: {0}")]
+    Remote(#[from] RpcError),
     #[error("Zakura head block could not be decoded: {0}")]
     Decode(String),
     #[error("Zakura returned height {actual} for requested height {expected}")]

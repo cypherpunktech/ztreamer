@@ -28,7 +28,9 @@ use zakura_rpc::client::{
     },
 };
 
-use crate::{RetryPolicy, RpcCode, RpcConfig};
+use zakura_state::HashOrHeight;
+
+use crate::{Method, RetryPolicy, RpcCode, RpcConfig};
 
 /// What the mock does with one request.
 #[derive(Debug)]
@@ -197,9 +199,10 @@ fn json_response(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
 
 /// A best chain that a [`MockNode`] serves, with the answers and error codes of zakura.
 ///
-/// [`Self::reply`] answers `getblockchaininfo`, `getbestblockhash`, `getblockhash` and
-/// `getblock` with verbosity 0. Other requests get "method not found". Clones share the chain,
-/// thus a test can change the chain while the node runs.
+/// [`Self::reply`] answers [`Method::GetBlockchainInfo`], [`Method::GetBestBlockHash`],
+/// [`Method::GetBlockHash`] and [`Method::GetBlock`] with verbosity 0. Params that do not decode
+/// get "invalid params". Other requests get "method not found". Clones share the chain, thus a
+/// test can change the chain while the node runs.
 ///
 /// ```no_run
 /// use ztreamer_remote::test_utils::{MockChain, MockNode};
@@ -252,26 +255,35 @@ impl MockChain {
     /// The reply of zakura with this chain to `request`.
     pub fn reply(&self, request: &Seen) -> Reply {
         let state = self.state.lock().unwrap();
-        let params = &request.body["params"];
-        match request.body["method"].as_str() {
-            Some("getblockchaininfo") => state.blockchain_info(),
-            Some("getbestblockhash") => {
+        let params = request.body["params"].clone();
+        let Some(method) = request.body["method"].as_str().and_then(Method::from_name) else {
+            return METHOD_NOT_FOUND;
+        };
+        match method {
+            Method::GetBlockchainInfo => state.blockchain_info(),
+            Method::GetBestBlockHash => {
                 state.blocks.last().map_or(NO_TIP, |(hash, _)| hash_reply(*hash))
             }
-            Some("getblockhash") => params[0]
-                .as_u64()
-                .and_then(|height| state.blocks.get(usize::try_from(height).ok()?))
-                .map_or(ABOVE_TIP, |(hash, _)| hash_reply(*hash)),
-            Some("getblock") if params[1] == 0 => params[0]
-                .as_str()
-                .and_then(|block| state.find(block))
-                .map_or(BLOCK_NOT_FOUND, |bytes| {
+            Method::GetBlockHash => match serde_json::from_value::<(u32,)>(params) {
+                Ok((height,)) => state.at(height).map_or(ABOVE_TIP, |(hash, _)| hash_reply(*hash)),
+                Err(_) => INVALID_PARAMS,
+            },
+            Method::GetBlock => match serde_json::from_value::<(String, u8)>(params) {
+                Ok((block, 0)) => state.find(&block).map_or(BLOCK_NOT_FOUND, |bytes| {
                     Reply::Result(serde_json::to_value(HexData(bytes.clone())).unwrap())
                 }),
-            _ => Reply::Error { code: RpcCode::METHOD_NOT_FOUND, message: "Method not found" },
+                Ok(_) => METHOD_NOT_FOUND,
+                Err(_) => INVALID_PARAMS,
+            },
+            _ => METHOD_NOT_FOUND,
         }
     }
 }
+
+const METHOD_NOT_FOUND: Reply =
+    Reply::Error { code: RpcCode::METHOD_NOT_FOUND, message: "Method not found" };
+const INVALID_PARAMS: Reply =
+    Reply::Error { code: RpcCode::INVALID_PARAMS, message: "Invalid params" };
 
 const NO_TIP: Reply =
     Reply::Error { code: RpcCode::IN_WARMUP, message: "no chain tip available yet" };
@@ -283,12 +295,17 @@ const BLOCK_NOT_FOUND: Reply =
     Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "Block not found" };
 
 impl ChainState {
-    /// The bytes of the block that `block` names, as a height or a hash.
+    /// The hash and the bytes of the block at `height`.
+    fn at(&self, height: u32) -> Option<&(block::Hash, Vec<u8>)> {
+        self.blocks.get(usize::try_from(height).ok()?)
+    }
+
+    /// The bytes of the block that `block` names, as zakura parses a hash or a height.
     fn find(&self, block: &str) -> Option<&Vec<u8>> {
-        match block.parse::<usize>() {
-            Ok(height) => self.blocks.get(height),
-            Err(_) => {
-                let hash = block.parse::<block::Hash>().ok()?;
+        let tip = self.blocks.len().checked_sub(1).and_then(|tip| u32::try_from(tip).ok());
+        match HashOrHeight::new(block, tip.map(block::Height)).ok()? {
+            HashOrHeight::Height(height) => self.at(height.0),
+            HashOrHeight::Hash(hash) => {
                 self.blocks.iter().find(|(candidate, _)| *candidate == hash)
             }
         }

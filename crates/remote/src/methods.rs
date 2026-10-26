@@ -3,9 +3,10 @@
 //! The request and response types come from `zakura_rpc::client`. Thus this client and the node
 //! use the same code to encode and decode each value.
 
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use http::Uri;
+use serde::{Serialize, de::DeserializeOwned};
 use zakura_rpc::{
     client::{
         BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
@@ -20,18 +21,97 @@ use zakura_state::HashOrHeight;
 
 use crate::{RpcClient, RpcConfig, RpcError};
 
+/// A zakura JSON-RPC method that [`ZakuraClient`] calls.
+///
+/// [`Self::name`] is the name on the wire. [`ZakuraClient`], [`DEFAULT_METHOD_TIMEOUTS`] and the
+/// mock chain in `test_utils` use this type, thus each name has one spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Method {
+    /// `getblockchaininfo`.
+    GetBlockchainInfo,
+    /// `getbestblockhash`.
+    GetBestBlockHash,
+    /// `getblockhash`.
+    GetBlockHash,
+    /// `getblock`.
+    GetBlock,
+    /// `z_gettreestate`.
+    ZGetTreestate,
+    /// `z_getsubtreesbyindex`.
+    ZGetSubtreesByIndex,
+    /// `getrawmempool`.
+    GetRawMempool,
+    /// `getrawtransaction`.
+    GetRawTransaction,
+    /// `sendrawtransaction`.
+    SendRawTransaction,
+    /// `getaddresstxids`.
+    GetAddressTxIds,
+    /// `getaddressbalance`.
+    GetAddressBalance,
+    /// `getaddressutxos`.
+    GetAddressUtxos,
+}
+
+impl Method {
+    /// All the methods.
+    pub const ALL: [Self; 12] = [
+        Self::GetBlockchainInfo,
+        Self::GetBestBlockHash,
+        Self::GetBlockHash,
+        Self::GetBlock,
+        Self::ZGetTreestate,
+        Self::ZGetSubtreesByIndex,
+        Self::GetRawMempool,
+        Self::GetRawTransaction,
+        Self::SendRawTransaction,
+        Self::GetAddressTxIds,
+        Self::GetAddressBalance,
+        Self::GetAddressUtxos,
+    ];
+
+    /// The name of the method on the wire.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::GetBlockchainInfo => "getblockchaininfo",
+            Self::GetBestBlockHash => "getbestblockhash",
+            Self::GetBlockHash => "getblockhash",
+            Self::GetBlock => "getblock",
+            Self::ZGetTreestate => "z_gettreestate",
+            Self::ZGetSubtreesByIndex => "z_getsubtreesbyindex",
+            Self::GetRawMempool => "getrawmempool",
+            Self::GetRawTransaction => "getrawtransaction",
+            Self::SendRawTransaction => "sendrawtransaction",
+            Self::GetAddressTxIds => "getaddresstxids",
+            Self::GetAddressBalance => "getaddressbalance",
+            Self::GetAddressUtxos => "getaddressutxos",
+        }
+    }
+
+    /// The method with the wire name `name`, or `None` for a name that is not in [`Self::ALL`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|method| method.name() == name)
+    }
+}
+
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// Timeouts for the methods that can be slower than the client default.
 ///
 /// [`ZakuraClient::config`] applies them. The other methods use the default timeout of
 /// [`RpcConfig`].
-pub const DEFAULT_METHOD_TIMEOUTS: [(&str, Duration); 7] = [
-    ("getblock", Duration::from_secs(30)),
-    ("getrawtransaction", Duration::from_secs(30)),
-    ("z_gettreestate", Duration::from_secs(30)),
-    ("z_getsubtreesbyindex", Duration::from_secs(30)),
-    ("getaddressbalance", Duration::from_secs(30)),
-    ("getaddresstxids", Duration::from_secs(60)),
-    ("getaddressutxos", Duration::from_secs(60)),
+pub const DEFAULT_METHOD_TIMEOUTS: [(Method, Duration); 7] = [
+    (Method::GetBlock, Duration::from_secs(30)),
+    (Method::GetRawTransaction, Duration::from_secs(30)),
+    (Method::ZGetTreestate, Duration::from_secs(30)),
+    (Method::ZGetSubtreesByIndex, Duration::from_secs(30)),
+    (Method::GetAddressBalance, Duration::from_secs(30)),
+    (Method::GetAddressTxIds, Duration::from_secs(60)),
+    (Method::GetAddressUtxos, Duration::from_secs(60)),
 ];
 
 /// Typed calls to one zakura node, on an [`RpcClient`].
@@ -59,7 +139,7 @@ impl ZakuraClient {
         DEFAULT_METHOD_TIMEOUTS
             .into_iter()
             .fold(RpcConfig::new(url), |config, (method, timeout)| {
-                config.with_method_timeout(method, timeout)
+                config.with_method_timeout(method.name(), timeout)
             })
     }
 
@@ -73,14 +153,22 @@ impl ZakuraClient {
         &self.rpc
     }
 
+    async fn call<P: Serialize, R: DeserializeOwned>(
+        &self,
+        method: Method,
+        params: P,
+    ) -> Result<R, RpcError> {
+        self.rpc.call(method.name(), params).await
+    }
+
     /// `getblockchaininfo`: the chain, the tip and the value pools.
     pub async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse, RpcError> {
-        self.rpc.call("getblockchaininfo", ()).await
+        self.call(Method::GetBlockchainInfo, ()).await
     }
 
     /// `getbestblockhash`: the hash of the tip.
     pub async fn get_best_block_hash(&self) -> Result<GetBlockHashResponse, RpcError> {
-        self.rpc.call("getbestblockhash", ()).await
+        self.call(Method::GetBestBlockHash, ()).await
     }
 
     /// `getblockhash`: the hash of the best-chain block at `height`.
@@ -88,18 +176,18 @@ impl ZakuraClient {
         &self,
         height: block::Height,
     ) -> Result<GetBlockHashResponse, RpcError> {
-        self.rpc.call("getblockhash", (height.0,)).await
+        self.call(Method::GetBlockHash, (height.0,)).await
     }
 
     /// `getblock` with verbosity 0: the serialized block.
     pub async fn get_block_raw(&self, block: HashOrHeight) -> Result<HexData, RpcError> {
-        self.rpc.call("getblock", (block.to_string(), 0)).await
+        self.call(Method::GetBlock, (block.to_string(), 0)).await
     }
 
     /// `getblock` with verbosity 1: the block header fields, the tree roots and the
     /// transaction ids.
     pub async fn get_block(&self, block: HashOrHeight) -> Result<BlockObject, RpcError> {
-        self.rpc.call("getblock", (block.to_string(), 1)).await
+        self.call(Method::GetBlock, (block.to_string(), 1)).await
     }
 
     /// `z_gettreestate`: the note commitment tree states after `block`.
@@ -107,7 +195,7 @@ impl ZakuraClient {
         &self,
         block: HashOrHeight,
     ) -> Result<GetTreestateResponse, RpcError> {
-        self.rpc.call("z_gettreestate", (block.to_string(),)).await
+        self.call(Method::ZGetTreestate, (block.to_string(),)).await
     }
 
     /// `z_getsubtreesbyindex`: the completed subtree roots of `pool` from `start`.
@@ -121,14 +209,14 @@ impl ZakuraClient {
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<GetSubtreesByIndexResponse, RpcError> {
         match limit {
-            Some(limit) => self.rpc.call("z_getsubtreesbyindex", (pool, start, limit)).await,
-            None => self.rpc.call("z_getsubtreesbyindex", (pool, start)).await,
+            Some(limit) => self.call(Method::ZGetSubtreesByIndex, (pool, start, limit)).await,
+            None => self.call(Method::ZGetSubtreesByIndex, (pool, start)).await,
         }
     }
 
     /// `getrawmempool`: the ids of the mempool transactions.
     pub async fn get_raw_mempool(&self) -> Result<GetRawMempoolResponse, RpcError> {
-        self.rpc.call("getrawmempool", (false,)).await
+        self.call(Method::GetRawMempool, (false,)).await
     }
 
     /// `getrawtransaction`: a mempool or best-chain transaction.
@@ -140,7 +228,7 @@ impl ZakuraClient {
         txid: transaction::Hash,
         verbose: bool,
     ) -> Result<GetRawTransactionResponse, RpcError> {
-        self.rpc.call("getrawtransaction", (txid.to_string(), u8::from(verbose))).await
+        self.call(Method::GetRawTransaction, (txid.to_string(), u8::from(verbose))).await
     }
 
     /// `sendrawtransaction`: sends a serialized transaction to the mempool of the node.
@@ -148,7 +236,7 @@ impl ZakuraClient {
         &self,
         transaction: &[u8],
     ) -> Result<SendRawTransactionResponse, RpcError> {
-        self.rpc.call("sendrawtransaction", (HexData(transaction.to_vec()),)).await
+        self.call(Method::SendRawTransaction, (HexData(transaction.to_vec()),)).await
     }
 
     /// `getaddresstxids`: the ids of the transactions that touch the addresses.
@@ -156,7 +244,7 @@ impl ZakuraClient {
         &self,
         request: &GetAddressTxIdsRequest,
     ) -> Result<Vec<String>, RpcError> {
-        self.rpc.call("getaddresstxids", (request,)).await
+        self.call(Method::GetAddressTxIds, (request,)).await
     }
 
     /// `getaddressbalance`: the transparent balance of the addresses.
@@ -164,7 +252,7 @@ impl ZakuraClient {
         &self,
         request: &GetAddressBalanceRequest,
     ) -> Result<GetAddressBalanceResponse, RpcError> {
-        self.rpc.call("getaddressbalance", (request,)).await
+        self.call(Method::GetAddressBalance, (request,)).await
     }
 
     /// `getaddressutxos`: the unspent transparent outputs of the addresses.
@@ -172,7 +260,7 @@ impl ZakuraClient {
         &self,
         request: &GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse, RpcError> {
-        self.rpc.call("getaddressutxos", (request,)).await
+        self.call(Method::GetAddressUtxos, (request,)).await
     }
 }
 
@@ -185,9 +273,20 @@ mod tests {
         let rpc =
             RpcClient::new(ZakuraClient::config("http://127.0.0.1:8232".parse().unwrap())).unwrap();
         for (method, timeout) in DEFAULT_METHOD_TIMEOUTS {
-            assert_eq!(rpc.timeout_for(method), timeout, "{method}");
+            assert_eq!(rpc.timeout_for(method.name()), timeout, "{method}");
         }
         assert_eq!(rpc.timeout_for("getbestblockhash"), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn method_names_round_trip() {
+        for method in Method::ALL {
+            assert_eq!(Method::from_name(method.name()), Some(method));
+            assert_eq!(method.to_string(), method.name());
+        }
+        assert_eq!(Method::GetBlockchainInfo.name(), "getblockchaininfo");
+        assert_eq!(Method::ZGetSubtreesByIndex.name(), "z_getsubtreesbyindex");
+        assert_eq!(Method::from_name("getblockcount"), None);
     }
 
     #[test]

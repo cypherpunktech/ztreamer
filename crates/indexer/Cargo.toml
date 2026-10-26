@@ -27,6 +27,7 @@ zakura-test = { workspace = true, optional = true }
 zcash_primitives.workspace = true
 ztreamer-node = { path = "../node" }
 ztreamer-protocol = { path = "../protocol" }
+ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
