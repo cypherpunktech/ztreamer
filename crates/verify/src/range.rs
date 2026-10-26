@@ -140,7 +140,7 @@ pub(crate) fn check_range_with(
             let check = if index == 0 { Check::StartLink } else { Check::HashChain };
             return Err(reject(check, height));
         }
-        if added(link.end_tree_sizes, &record) != Some(record.end_tree_sizes) {
+        if link.end_tree_sizes.checked_add(record.additions()) != Some(record.end_tree_sizes) {
             return Err(reject(Check::TreeSizes, height));
         }
         visit(&record)?;
@@ -154,18 +154,6 @@ pub(crate) fn check_range_with(
         return Err(reject(Check::EndTreeSizes, entry.end_height));
     }
     Ok(link)
-}
-
-/// The tree sizes after `record`, from the sizes before it. `None` on overflow.
-fn added(before: TreeSizes, record: &CompactBlockRecord) -> Option<TreeSizes> {
-    record.transactions.iter().try_fold(before, |sizes, tx| {
-        let add = |size: u32, len: usize| size.checked_add(u32::try_from(len).ok()?);
-        Some(TreeSizes {
-            sapling: add(sizes.sapling, tx.sapling_outputs.len())?,
-            orchard: add(sizes.orchard, tx.orchard_actions.len())?,
-            ironwood: add(sizes.ironwood, tx.ironwood_actions.len())?,
-        })
-    })
 }
 
 /// The manifest entry that describes `blob`, a range of `records`.
@@ -189,14 +177,11 @@ pub(crate) fn entry_for(records: &[CompactBlockRecord], blob: &[u8]) -> Manifest
 #[cfg(test)]
 mod tests {
     use ztreamer_indexer::{
-        codec::encode_range,
+        codec::{RANGE_ENVELOPE_BYTES, encode_range},
         test_utils::{hash, mixed_records},
     };
 
     use super::*;
-
-    /// The size of the range envelope before the offset table.
-    const ENVELOPE_LEN: usize = 1 + 2 * 4 + 2 * 32;
 
     /// A range blob of `records` in the given order, with the envelope of `original`. Unlike
     /// `encode_range`, it does not check the order or the hash chain.
@@ -209,7 +194,7 @@ mod tests {
             body.extend_from_slice(&bytes);
         }
         offsets.extend_from_slice(&(body.len() as u32).to_be_bytes());
-        [&original[..ENVELOPE_LEN], &offsets, &body].concat()
+        [&original[..RANGE_ENVELOPE_BYTES], &offsets, &body].concat()
     }
 
     /// The records of the ranges at 0 and at 1,000, and the blob of the range at 1,000.

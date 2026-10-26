@@ -67,26 +67,15 @@ pub fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBloc
 
 /// Converts a record into the parser output that produces it, with matching tree additions.
 pub fn parsed(record: CompactBlockRecord) -> ParsedCompactBlock {
+    let additions = record.additions();
     ParsedCompactBlock {
         height: record.height,
         hash: record.hash,
         previous_hash: record.previous_hash,
         time: record.time,
-        sapling_additions: record
-            .transactions
-            .iter()
-            .map(|tx| tx.sapling_outputs.len() as u32)
-            .sum(),
-        orchard_additions: record
-            .transactions
-            .iter()
-            .map(|tx| tx.orchard_actions.len() as u32)
-            .sum(),
-        ironwood_additions: record
-            .transactions
-            .iter()
-            .map(|tx| tx.ironwood_actions.len() as u32)
-            .sum(),
+        sapling_additions: additions.sapling,
+        orchard_additions: additions.orchard,
+        ironwood_additions: additions.ironwood,
         transactions: record.transactions,
     }
 }
@@ -110,11 +99,9 @@ pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
                 tx.index = index as u64;
                 tx.txid.0[..4].copy_from_slice(&height.to_be_bytes());
                 tx.txid.0[4..12].copy_from_slice(&(index as u64).to_be_bytes());
-                sizes.sapling += tx.sapling_outputs.len() as u32;
-                sizes.orchard += tx.orchard_actions.len() as u32;
-                sizes.ironwood += tx.ironwood_actions.len() as u32;
             }
             let mut record = record(height, transactions);
+            sizes = sizes.checked_add(record.additions()).unwrap();
             record.end_tree_sizes = sizes;
             record
         })

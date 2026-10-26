@@ -14,6 +14,10 @@ pub(crate) const MAX_RECORD_BYTES: usize = 2_000_000;
 
 const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();
 
+/// The bytes of a range before its offset table: the format version, the first and the last
+/// height, the previous hash of the first block, and the hash of the last block.
+pub const RANGE_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();
+
 /// Owned record views: no LMDB transaction or mapped slice escapes a read call.
 pub trait StoredBlock: Sized {
     fn decode(bytes: &[u8]) -> Result<Self, CodecError>;
@@ -158,6 +162,15 @@ impl TreeSizes {
     pub const fn total(self) -> u64 {
         self.sapling as u64 + self.orchard as u64 + self.ironwood as u64
     }
+
+    /// Adds `other` pool by pool. Returns `None` if a pool size overflows.
+    pub fn checked_add(self, other: Self) -> Option<Self> {
+        Some(Self {
+            sapling: self.sapling.checked_add(other.sapling)?,
+            orchard: self.orchard.checked_add(other.orchard)?,
+            ironwood: self.ironwood.checked_add(other.ironwood)?,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error, Eq, PartialEq)]
@@ -179,6 +192,19 @@ pub enum CodecError {
 }
 
 impl CompactBlockRecord {
+    /// The note commitments that the block adds to each tree: its Sapling outputs, its Orchard
+    /// actions, and its Ironwood actions. A count above `u32::MAX` saturates.
+    pub fn additions(&self) -> TreeSizes {
+        let count = |len: fn(&CompactTransaction) -> usize| {
+            u32::try_from(self.transactions.iter().map(len).sum::<usize>()).unwrap_or(u32::MAX)
+        };
+        TreeSizes {
+            sapling: count(|tx| tx.sapling_outputs.len()),
+            orchard: count(|tx| tx.orchard_actions.len()),
+            ironwood: count(|tx| tx.ironwood_actions.len()),
+        }
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, CodecError> {
         let mut bytes = Vec::new();
         self.encode_into(&mut bytes)?;
@@ -366,9 +392,8 @@ fn write_range<R: RangeRecord>(records: &[R], body_len: usize) -> Result<Vec<u8>
         .checked_add(1)
         .and_then(|len| len.checked_mul(size_of::<u32>()))
         .ok_or(CodecError::Length)?;
-    let capacity = 1usize
-        .checked_add(2 * size_of::<u32>() + 2 * size_of::<block::Hash>())
-        .and_then(|len| len.checked_add(offsets_len))
+    let capacity = RANGE_ENVELOPE_BYTES
+        .checked_add(offsets_len)
         .and_then(|len| len.checked_add(body_len))
         .ok_or(CodecError::Length)?;
     let mut bytes = Vec::with_capacity(capacity);
@@ -484,7 +509,7 @@ impl fmt::Debug for RangeDecoder<'_> {
             .field("first_previous_hash", &self.first_previous_hash)
             .field("terminal_hash", &self.terminal_hash)
             .field("body_len", &self.body.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -651,6 +676,7 @@ mod tests {
             transactions: vec![transaction],
             end_tree_sizes: TreeSizes { sapling: 1, orchard: 1, ironwood: 1 },
         };
+        assert_eq!(first.additions(), TreeSizes { sapling: 1, orchard: 1, ironwood: 1 });
         let encoded_first = first.encode().unwrap();
         assert_eq!(
             EncodedBlockRecord::decode(&encoded_first).unwrap().block.encode_to_vec(),
@@ -731,6 +757,18 @@ mod tests {
 
         assert_eq!(sizes.total(), 2 * u64::from(u32::MAX) + 1);
         assert!(sizes.follows(TreeSizes { ironwood: 1, ..TreeSizes::default() }));
+    }
+
+    #[test]
+    fn tree_sizes_add_pool_by_pool_and_refuse_overflow() {
+        let sizes = TreeSizes { sapling: 5, orchard: 6, ironwood: u32::MAX - 1 };
+        let add = TreeSizes { sapling: 1, orchard: 2, ironwood: 1 };
+
+        assert_eq!(
+            sizes.checked_add(add),
+            Some(TreeSizes { sapling: 6, orchard: 8, ironwood: u32::MAX })
+        );
+        assert_eq!(sizes.checked_add(TreeSizes { ironwood: 2, ..add }), None);
     }
 
     fn action(byte: u8) -> CompactShieldedAction {
