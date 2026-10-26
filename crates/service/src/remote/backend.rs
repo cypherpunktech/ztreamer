@@ -9,7 +9,7 @@
 use std::{
     collections::HashSet,
     hash::Hash,
-    num::NonZeroUsize,
+    mem::size_of,
     ops::RangeInclusive,
     sync::{Arc, Mutex, PoisonError},
 };
@@ -34,8 +34,8 @@ use crate::backend::{
     BackendError, MinedTransaction, StateBackend, Subtrees, TipListener, TreeState,
 };
 
-/// The most subtree roots that the cache keeps for one pool.
-const SUBTREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(16_384).unwrap();
+/// The bytes that the subtree cache of one pool can hold: approximately 16,000 subtrees.
+const SUBTREE_CACHE_BYTES: usize = 2 << 20;
 
 /// The PR that adds the methods that this backend does not serve yet.
 const NEXT_PR: &str = "feat(service): RemoteBackend addresses, mempool and submit";
@@ -124,9 +124,9 @@ impl RemoteBackend {
         Ok(Self {
             node,
             network,
-            sapling_subtrees: ForeverCache::new(SUBTREE_CACHE_ENTRIES),
-            orchard_subtrees: ForeverCache::new(SUBTREE_CACHE_ENTRIES),
-            ironwood_subtrees: ForeverCache::new(SUBTREE_CACHE_ENTRIES),
+            sapling_subtrees: LruMap::new("sapling_subtrees", SUBTREE_CACHE_BYTES),
+            orchard_subtrees: LruMap::new("orchard_subtrees", SUBTREE_CACHE_BYTES),
+            ironwood_subtrees: LruMap::new("ironwood_subtrees", SUBTREE_CACHE_BYTES),
         })
     }
 
@@ -310,24 +310,103 @@ impl Pool for IronwoodPool {
     }
 }
 
-/// Answers that do not change, kept for the life of the backend. When the cache is full, it
-/// drops the entry that was used least recently.
-struct ForeverCache<K, V>(Mutex<LruCache<K, V>>);
+/// A map in front of node answers that holds at most a budget of bytes. When an insert goes
+/// above the budget, the map drops the entries that were used least recently.
+///
+/// The bytes of an entry are an estimate: the size of the key and the value, a fixed overhead
+/// for the map, and [`HeapBytes::heap_bytes`] of the value. The map reports its bytes, its
+/// entries, and its hits, misses and evictions as metrics with the label `cache`.
+struct LruMap<K, V> {
+    budget: usize,
+    inner: Mutex<LruMapInner<K, V>>,
+    metrics: CacheMetrics,
+}
+
+struct LruMapInner<K, V> {
+    entries: LruCache<K, (V, usize)>,
+    bytes: usize,
+}
 
 /// Completed subtrees of one pool by index.
-type SubtreeCache<Node> = ForeverCache<u16, NoteCommitmentSubtreeData<Node>>;
+type SubtreeCache<Node> = LruMap<u16, NoteCommitmentSubtreeData<Node>>;
 
-impl<K: Hash + Eq, V: Clone> ForeverCache<K, V> {
-    fn new(capacity: NonZeroUsize) -> Self {
-        Self(Mutex::new(LruCache::new(capacity)))
+/// The bytes that an entry of [`LruMap`] uses for the hash table and the list links.
+const ENTRY_OVERHEAD: usize = 64;
+
+/// The heap bytes of a cached value, as an estimate.
+trait HeapBytes {
+    fn heap_bytes(&self) -> usize;
+}
+
+impl<Node> HeapBytes for NoteCommitmentSubtreeData<Node> {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
+impl<K: Hash + Eq, V: Clone + HeapBytes> LruMap<K, V> {
+    fn new(name: &'static str, budget: usize) -> Self {
+        Self {
+            budget,
+            inner: Mutex::new(LruMapInner { entries: LruCache::unbounded(), bytes: 0 }),
+            metrics: CacheMetrics::new(name),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, LruMapInner<K, V>> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn get(&self, key: &K) -> Option<V> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+        let value = self.lock().entries.get(key).map(|(value, _)| value.clone());
+        match value {
+            Some(_) => self.metrics.hits.increment(1),
+            None => self.metrics.misses.increment(1),
+        }
+        value
     }
 
     fn insert(&self, key: K, value: V) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).put(key, value);
+        let bytes = size_of::<(K, V, usize)>() + ENTRY_OVERHEAD + value.heap_bytes();
+        let mut inner = self.lock();
+        if let Some((_, (_, old))) = inner.entries.push(key, (value, bytes)) {
+            inner.bytes -= old;
+        }
+        inner.bytes += bytes;
+        while inner.bytes > self.budget {
+            let Some((_, (_, dropped))) = inner.entries.pop_lru() else {
+                break;
+            };
+            inner.bytes -= dropped;
+            self.metrics.evictions.increment(1);
+        }
+        self.metrics.report(&inner);
+    }
+}
+
+/// The metrics of one [`LruMap`].
+struct CacheMetrics {
+    bytes: metrics::Gauge,
+    entries: metrics::Gauge,
+    hits: metrics::Counter,
+    misses: metrics::Counter,
+    evictions: metrics::Counter,
+}
+
+impl CacheMetrics {
+    fn new(cache: &'static str) -> Self {
+        Self {
+            bytes: metrics::gauge!("ztreamer.remote_cache.bytes", "cache" => cache),
+            entries: metrics::gauge!("ztreamer.remote_cache.entries", "cache" => cache),
+            hits: metrics::counter!("ztreamer.remote_cache.hits_total", "cache" => cache),
+            misses: metrics::counter!("ztreamer.remote_cache.misses_total", "cache" => cache),
+            evictions: metrics::counter!("ztreamer.remote_cache.evictions_total", "cache" => cache),
+        }
+    }
+
+    fn report<K: Hash + Eq, V>(&self, inner: &LruMapInner<K, V>) {
+        self.bytes.set(inner.bytes as f64);
+        self.entries.set(inner.entries.len() as f64);
     }
 }
 
@@ -459,7 +538,7 @@ impl StateBackend for RemoteBackend {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use super::*;
     use serde_json::{Value, json};
@@ -655,6 +734,46 @@ mod tests {
         let requests = mock.seen().len();
         backend.orchard_subtrees(NoteCommitmentSubtreeIndex(0), one).await.unwrap();
         assert!(mock.seen().len() > requests);
+    }
+
+    #[test]
+    fn lru_map_keeps_its_byte_budget_and_reports_it() {
+        let recorder = metrics_util::debugging::DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let map: SubtreeCache<orchard::tree::Node> =
+            metrics::with_local_recorder(&recorder, || LruMap::new("test", 1_000));
+        let entry = size_of::<(u16, NoteCommitmentSubtreeData<orchard::tree::Node>, usize)>()
+            + ENTRY_OVERHEAD;
+        let subtree = NoteCommitmentSubtreeData::new(block::Height(1), orchard_root(1));
+        (0..100).for_each(|index| map.insert(index, subtree));
+        let kept = 1_000 / entry;
+        assert_eq!(map.lock().entries.len(), kept);
+        assert!(map.lock().bytes <= 1_000);
+        // The oldest entries are gone, the newest stay.
+        assert!(map.get(&0).is_none());
+        assert!(map.get(&99).is_some());
+
+        let values: HashMap<_, _> = snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .map(|(key, _, _, value)| (key.key().name().to_owned(), value))
+            .collect();
+        use metrics_util::debugging::DebugValue;
+        assert_eq!(
+            values["ztreamer.remote_cache.entries"],
+            DebugValue::Gauge((kept as f64).into())
+        );
+        assert_eq!(
+            values["ztreamer.remote_cache.bytes"],
+            DebugValue::Gauge(((kept * entry) as f64).into())
+        );
+        assert_eq!(
+            values["ztreamer.remote_cache.evictions_total"],
+            DebugValue::Counter(100 - kept as u64)
+        );
+        assert_eq!(values["ztreamer.remote_cache.hits_total"], DebugValue::Counter(1));
+        assert_eq!(values["ztreamer.remote_cache.misses_total"], DebugValue::Counter(1));
     }
 
     #[tokio::test]
