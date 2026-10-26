@@ -13,16 +13,9 @@
 //!
 //! [`Fetcher`] reads complete blobs from a source. It continues a cut transfer from the last
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
-//! its manifest entry. A blob that fails this check is a strike against the source. After
-//! [`Strikes::LIMIT`] strikes, the fetcher drops the source.
+//! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
 
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicU8, Ordering},
-    },
-};
+use std::{pin::Pin, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -126,12 +119,6 @@ pub enum FetchError {
         /// The first height of the range.
         start_height: u32,
     },
-    /// The source sent [`Strikes::LIMIT`] blobs that failed the digest check.
-    #[error("source dropped after {strikes} blobs with a wrong digest")]
-    SourceDropped {
-        /// The strikes against the source.
-        strikes: u8,
-    },
 }
 
 impl FetchError {
@@ -210,35 +197,7 @@ impl RangeSource for Source {
     }
 }
 
-/// The strikes against one source: the blobs that it sent with a wrong digest.
-#[derive(Debug, Default)]
-pub struct Strikes(AtomicU8);
-
-impl Strikes {
-    /// The strikes that drop a source.
-    pub const LIMIT: u8 = 3;
-
-    /// The strikes so far.
-    pub fn count(&self) -> u8 {
-        self.0.load(Ordering::Relaxed)
-    }
-
-    /// Adds one strike, and returns the new count.
-    fn add(&self) -> u8 {
-        self.0.fetch_add(1, Ordering::Relaxed).saturating_add(1)
-    }
-
-    /// Refuses a source with [`Strikes::LIMIT`] strikes or more.
-    fn check(&self) -> Result<(), FetchError> {
-        let strikes = self.count();
-        if strikes >= Self::LIMIT {
-            return Err(FetchError::SourceDropped { strikes });
-        }
-        Ok(())
-    }
-}
-
-/// Reads complete blobs from a source, checks them, and counts the strikes against it.
+/// Reads complete blobs from a source, and checks the length and the digest of each blob.
 ///
 /// ```no_run
 /// use ed25519_dalek::VerifyingKey;
@@ -256,40 +215,29 @@ impl Strikes {
 #[derive(Debug)]
 pub struct Fetcher<S = Source> {
     source: S,
-    strikes: Strikes,
 }
 
 impl<S: RangeSource> Fetcher<S> {
-    /// A fetcher with no strikes against `source`.
-    pub fn new(source: S) -> Self {
-        Self { source, strikes: Strikes::default() }
-    }
-
-    /// The strikes against the source.
-    pub const fn strikes(&self) -> &Strikes {
-        &self.strikes
+    /// A fetcher of the blobs of `source`.
+    pub const fn new(source: S) -> Self {
+        Self { source }
     }
 
     /// What the export of the source holds.
     pub async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-        self.strikes.check()?;
         self.source.export_info().await
     }
 
     /// The manifest of the source.
     pub async fn manifest(&self) -> Result<Manifest, FetchError> {
-        self.strikes.check()?;
         self.source.manifest().await
     }
 
     /// The blob of `entry`, with the length and the digest of the entry.
     ///
     /// A request or a transfer that fails continues from the last byte received, at most
-    /// [`MAX_RESUMES`] times. A blob with a wrong length or digest is [`FetchError::Digest`] and
-    /// a strike. The call that adds the last strike, and each call after it, is
-    /// [`FetchError::SourceDropped`].
+    /// [`MAX_RESUMES`] times. A blob with a wrong length or digest is [`FetchError::Digest`].
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
-        self.strikes.check()?;
         let mut blob = BytesMut::new();
         let mut resumes = 0;
         while let Err(error) = self.transfer(entry, &mut blob).await {
@@ -302,11 +250,6 @@ impl<S: RangeSource> Fetcher<S> {
         }
         if RangeBlob::new(&blob, entry).matches_digest() {
             return Ok(blob.freeze());
-        }
-        let strikes = self.strikes.add();
-        warn!(start_height = entry.start_height, strikes, "range blob has a wrong digest");
-        if strikes >= Strikes::LIMIT {
-            return Err(FetchError::SourceDropped { strikes });
         }
         Err(FetchError::Digest { start_height: entry.start_height })
     }
@@ -593,7 +536,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_corrupted_blob_is_a_strike_and_the_third_drops_the_source() {
+    async fn a_corrupted_blob_is_a_digest_error() {
         let http = Http::new().await;
         let entry = &http.snapshot.manifest.entries()[0];
         let path = http.snapshot.range_path(entry);
@@ -602,15 +545,9 @@ mod tests {
         std::fs::write(&path, bytes).unwrap();
         let fetcher = http.fetcher(SEED);
 
-        for strikes in 1..Strikes::LIMIT {
-            let error = fetcher.blob(entry).await.unwrap_err();
-            assert!(matches!(error, FetchError::Digest { start_height: 0 }), "{error:?}");
-            assert_eq!(fetcher.strikes().count(), strikes);
-        }
         let error = fetcher.blob(entry).await.unwrap_err();
-        assert!(matches!(error, FetchError::SourceDropped { strikes: 3 }), "{error:?}");
-        let error = fetcher.manifest().await.unwrap_err();
-        assert!(matches!(error, FetchError::SourceDropped { strikes: 3 }), "{error:?}");
+
+        assert!(matches!(error, FetchError::Digest { start_height: 0 }), "{error:?}");
     }
 
     #[tokio::test]

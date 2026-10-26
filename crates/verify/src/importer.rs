@@ -5,8 +5,8 @@
 //! network or genesis block, and an index that is sealed at or above the manifest. Then, for
 //! each epoch after the sealed tip of the index, in ascending order, it:
 //!
-//! 1. fetches the blob of each range of the epoch, again after a wrong digest, until the
-//!    [`Fetcher`] drops the source;
+//! 1. fetches the blob of each range of the epoch with the [`Fetcher`]. A blob with a wrong
+//!    digest stops the import;
 //! 2. runs [`Epoch::verify`] on the blocking thread pool, from the end frontiers of the epoch
 //!    before;
 //! 3. runs [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`];
@@ -31,7 +31,7 @@ use tracing::info;
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::index::{
     Index, IndexError, RANGE_SIZE,
-    range_meta::{Frontiers, ManifestEntry, NodeId, RangeMeta, VerifyState},
+    range_meta::{Frontiers, NodeId, RangeMeta, VerifyState},
 };
 
 use crate::{
@@ -282,7 +282,7 @@ impl<S: RangeSource> Importer<S> {
         let end = epoch.end_height();
         let mut blobs = Vec::with_capacity(epoch.entries().len());
         for entry in epoch.entries() {
-            blobs.push(self.blob(entry).await?);
+            blobs.push(self.source.blob(entry).await?);
         }
         let proof = Self::verify(Arc::clone(manifest), at, blobs.clone(), start)
             .await
@@ -330,17 +330,6 @@ impl<S: RangeSource> Importer<S> {
             end_frontiers: proof.end_frontiers,
             verified_through: state.and_then(|state| state.verified_through()),
         })
-    }
-
-    /// The blob of `entry`. Fetches it again after a wrong digest, until the fetcher drops the
-    /// source.
-    async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, ImportError> {
-        loop {
-            match self.source.blob(entry).await {
-                Err(FetchError::Digest { .. }) => continue,
-                result => return Ok(result?),
-            }
-        }
     }
 
     /// Runs [`Epoch::verify`] for epoch `at` of `manifest` on the blocking thread pool.
@@ -538,6 +527,24 @@ mod tests {
         let state = import.target.state().unwrap();
         assert_eq!((state.sealed_through(), state.verified_through()), (Some(9_999), Some(9_999)));
         assert_eq!(import.target.range_meta(10_000).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_blob_with_a_wrong_digest_stops_the_import_at_its_epoch() {
+        let import = Import::new().await;
+        let entry = &import.snapshot.manifest.entries()[15];
+        let path = import.snapshot.range_path(entry);
+        let mut blob = std::fs::read(&path).unwrap();
+        blob[100] ^= 1;
+        std::fs::write(path, blob).unwrap();
+
+        let error = import.run().await.unwrap_err();
+
+        let digest =
+            matches!(error, ImportError::Fetch(FetchError::Digest { start_height: 15_000 }));
+        assert!(digest, "{error:?}");
+        let state = import.target.state().unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(9_999), Some(9_999)));
     }
 
     #[tokio::test]
