@@ -14,6 +14,7 @@
 pub mod attest;
 pub mod epoch;
 pub mod fetch;
+pub mod importer;
 pub mod manifest;
 pub mod range;
 pub mod sample;

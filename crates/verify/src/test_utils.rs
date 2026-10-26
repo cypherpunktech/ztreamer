@@ -25,7 +25,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
-    index::{Index, IndexState, RANGE_SIZE, range_meta::ManifestEntry},
+    index::{
+        Index, IndexState, RANGE_SIZE,
+        range_meta::{BlobDigest, ManifestEntry},
+    },
     parser::parse_block,
     test_utils::{populate, raw_block},
 };
@@ -133,6 +136,21 @@ impl Snapshot {
         let latest = latest.to_file(Some(&SigningKey::from_bytes(&SEED)));
         fs::write(snapshot.dir.path().join(Latest::PATH), latest).unwrap();
         snapshot
+    }
+
+    /// Replaces the blob of the range at `start` and its entry, and signs the new manifest, as a
+    /// source that sends a wrong range does.
+    pub(crate) fn replace_blob(&mut self, start: u32, blob: &[u8]) {
+        let mut entries = self.manifest.entries().to_vec();
+        let entry = &mut entries[(start / RANGE_SIZE) as usize];
+        entry.blob_digest = BlobDigest(*blake3::hash(blob).as_bytes());
+        entry.blob_len = blob.len() as u64;
+        fs::write(self.range_path(entry), blob).unwrap();
+        self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
+            .entries(entries)
+            .build()
+            .unwrap();
+        self.write_signed(Self::MANIFEST, &serde_json::to_vec(&self.manifest).unwrap());
     }
 
     /// The file of the blob of `entry`.
