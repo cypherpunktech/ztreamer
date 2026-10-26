@@ -132,9 +132,10 @@
 //!
 //! # Status
 //!
-//! The three parts are ready, but `ztreamerd` does not use them yet: it runs only with the
-//! embedded node. The remote mode of the daemon, its configuration and the snapshot import come
-//! in later PRs of the replication plan.
+//! `ztreamerd --remote-rpc <URL>` uses the three parts and starts no embedded node. Before the
+//! first sync, it waits until the node ends its warm-up and has the tip of the index. It refuses
+//! a node of another network, and a node that pruned the next block that the index needs. The
+//! snapshot import comes in a later PR of the replication plan.
 //!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`RpcCode`]: ztreamer_remote::RpcCode

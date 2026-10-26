@@ -8101,6 +8101,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eyre",
+ "http",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -8110,10 +8112,12 @@ dependencies = [
  "zakura",
  "zakura-chain",
  "zakura-network",
+ "zakura-rpc",
  "zakura-state",
  "zakura-test",
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",
+ "ztreamer-remote",
  "ztreamer-service",
 ]

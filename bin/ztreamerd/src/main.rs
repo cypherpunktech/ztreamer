@@ -39,6 +39,7 @@ use ztreamer_service::{
 };
 
 mod lifecycle;
+mod remote;
 
 /// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
@@ -110,6 +111,22 @@ struct Cli {
     /// replica, with the TLS settings of the CompactTxStreamer server. Off when not set.
     #[arg(long, value_name = "ADDR")]
     replicate_listen: Option<SocketAddr>,
+
+    #[command(flatten)]
+    remote: remote::RemoteArgs,
+}
+
+impl Cli {
+    /// Opens the index of `--index-dir` and refuses an index of another network.
+    fn open_index(&self, network: &Network) -> Result<Arc<Index>> {
+        let index = Index::open(
+            &self.index_dir,
+            self.index_map_size.get(),
+            &network.to_string(),
+            network.genesis_hash(),
+        )?;
+        Ok(Arc::new(index))
+    }
 }
 
 impl From<&Cli> for PipelineConfig {
@@ -143,18 +160,16 @@ async fn main() -> Result<()> {
 
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
+    if let Some(node) = cli.remote.node()? {
+        return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
+    }
 
     let mut config =
         ZakuradConfig::load(cli.zakura_config.clone()).wrap_err("load Zakura configuration")?;
     config.metrics.endpoint_addr = Some(cli.metrics_listen);
     let _metrics = MetricsEndpoint::new(&config.metrics).wrap_err("start Prometheus endpoint")?;
     let network = config.network.network.clone();
-    let index = Arc::new(Index::open(
-        &cli.index_dir,
-        cli.index_map_size.get(),
-        &network.to_string(),
-        network.genesis_hash(),
-    )?);
+    let index = cli.open_index(&network)?;
 
     let p2p = Arc::new(P2pCompactService::pending());
     info!(network = %network, "starting embedded Zakura");
@@ -183,8 +198,8 @@ async fn main() -> Result<()> {
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        run_application(cli, grpc_server, index, &network, p2p.clone(), sources, shutdown.clone())
-            .await
+        let p2p = Some(p2p.clone());
+        run_application(cli, grpc_server, index, &network, p2p, sources, shutdown.clone()).await
     };
 
     lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
@@ -202,13 +217,22 @@ struct NodeSources<T, H, B> {
 
 /// The wait until a node mode can serve the daemon.
 trait Readiness {
-    /// Waits until the node is ready for the historical index pass. Breaks on shutdown.
-    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>>;
+    /// Waits until the node is ready for the historical index pass over `index`. Breaks on
+    /// shutdown.
+    async fn wait_ready(
+        &self,
+        index: &Arc<Index>,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<()>>;
 }
 
 impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
     /// Waits until Zakura is near the chain tip and has a finalized block. Breaks on shutdown.
-    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>> {
+    async fn wait_ready(
+        &self,
+        _index: &Arc<Index>,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<()>> {
         let client = &self.head;
         info!("waiting for Zakura to sync near the chain tip");
         tokio::select! {
@@ -230,12 +254,14 @@ impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
     }
 }
 
+/// Indexes, then serves until shutdown. `p2p` gets the compact service when a node runs in this
+/// process.
 async fn run_application<T, H, B>(
     cli: Cli,
     grpc_server: Server,
     index: Arc<Index>,
     network: &Network,
-    p2p: Arc<P2pCompactService>,
+    p2p: Option<Arc<P2pCompactService>>,
     sources: NodeSources<T, H, B>,
     shutdown: CancellationToken,
 ) -> Result<()>
@@ -245,7 +271,7 @@ where
     H: CanonicalBlockSource + Clone + 'static,
     B: StateBackend,
 {
-    if sources.wait_ready(&shutdown).await?.is_break() {
+    if sources.wait_ready(&index, &shutdown).await?.is_break() {
         return Ok(());
     }
     let NodeSources { tail, head, backend } = sources;
@@ -267,8 +293,9 @@ where
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
-    p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
-    drop(p2p);
+    if let Some(p2p) = p2p {
+        p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
+    }
 
     let extras = Extras {
         filler: filler_index.map(|index| {
