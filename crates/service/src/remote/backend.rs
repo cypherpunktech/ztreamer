@@ -147,26 +147,33 @@ impl RemoteBackend {
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<Subtrees<P::Node>, BackendError> {
         let cache = P::cache(self);
+        // Index arithmetic is in `u32`, because a `u16` range cannot step past index 65535.
         let end = limit.map_or(1 << 16, |limit| u32::from(start.0) + u32::from(limit.0));
-        let mut subtrees: Subtrees<P::Node> = (start.0..)
-            .take_while(|&index| u32::from(index) < end)
+        let mut subtrees: Subtrees<P::Node> = (u32::from(start.0)..end)
+            .map_while(|index| u16::try_from(index).ok())
             .map_while(|index| cache.get(&index).map(|subtree| (index, subtree)))
             .map(|(index, subtree)| (NoteCommitmentSubtreeIndex(index), subtree))
             .collect();
-        let Some(next) = subtrees
-            .last_key_value()
-            .map_or(Some(start.0), |(last, _)| last.0.checked_add(1))
-            .filter(|&next| u32::from(next) < end)
-        else {
+        let next =
+            subtrees.last_key_value().map_or(u32::from(start.0), |(last, _)| u32::from(last.0) + 1);
+        let Some(next) = u16::try_from(next).ok().filter(|&next| u32::from(next) < end) else {
             return Ok(subtrees);
         };
         let remaining = limit.map(|_| NoteCommitmentSubtreeIndex((end - u32::from(next)) as u16));
         let next = NoteCommitmentSubtreeIndex(next);
-        let (response, tip) = tokio::try_join!(
-            async { Ok(self.node.z_get_subtrees_by_index(P::NAME, next, remaining).await?) },
+        let (response, tip) = tokio::join!(
+            self.node.z_get_subtrees_by_index(P::NAME, next, remaining),
             self.tip_height(),
-        )?;
-        let fetched = parse_subtrees::<P>(response, next)?;
+        );
+        let fetched = parse_subtrees::<P>(response?, next)?;
+        // The tip only decides what goes in the cache. Without it, the answer is still good, and
+        // nothing goes in the cache.
+        let tip = tip
+            .inspect_err(
+                |error| tracing::debug!(%error, "remote zakura: no tip for the subtree cache"),
+            )
+            .ok()
+            .flatten();
         let final_below = tip.map_or(0, |tip| tip.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT));
         fetched
             .iter()
@@ -209,8 +216,14 @@ fn parse_subtrees<P: Pool>(
     response
         .subtrees()
         .iter()
-        .zip(start.0..)
+        .zip(u32::from(start.0)..)
         .map(|(subtree, index)| {
+            let index = u16::try_from(index).map_err(|_| {
+                BackendError::Unexpected(format!(
+                    "remote zakura sent {} subtrees past index 65535",
+                    P::NAME
+                ))
+            })?;
             let root = hex::decode(&subtree.root)
                 .ok()
                 .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
@@ -227,7 +240,8 @@ async fn decode<T>(bytes: Vec<u8>, what: &'static str) -> Result<T, BackendError
 where
     T: ZcashDeserialize + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || bytes.zcash_deserialize_into::<T>())
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || span.in_scope(|| bytes.zcash_deserialize_into::<T>()))
         .await
         .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
         .map_err(|error| {
@@ -606,6 +620,47 @@ mod tests {
         assert_eq!(backend.sapling_subtrees(index, None).await.unwrap(), expected(sapling));
         assert_eq!(backend.orchard_subtrees(index, None).await.unwrap(), expected(orchard));
         assert_eq!(backend.ironwood_subtrees(index, None).await.unwrap(), expected(orchard));
+    }
+
+    #[tokio::test]
+    async fn subtrees_stop_at_the_last_index() {
+        let root = hex::encode(orchard_root(1).to_repr());
+        let mock = mainnet(10_000, move |_, params| {
+            let subtree = json!({"root": root, "end_height": 100});
+            Reply::Result(json!({"pool": "orchard", "start_index": params[1], "subtrees": [subtree, subtree]}))
+        })
+        .await;
+        let backend = backend(&mock).await;
+        let last = NoteCommitmentSubtreeIndex(u16::MAX);
+        let error = backend.orchard_subtrees(last, None).await.unwrap_err();
+        assert!(matches!(&error, BackendError::Unexpected(message) if message.contains("65535")));
+    }
+
+    #[tokio::test]
+    async fn subtrees_without_a_tip_are_served_and_not_cached() {
+        let root = hex::encode(orchard_root(1).to_repr());
+        let mock = MockNode::start(move |_, seen| match seen.body["method"].as_str().unwrap() {
+            "getblockcount" => Reply::Close,
+            "z_getsubtreesbyindex" => Reply::Result(json!({
+                "pool": "orchard",
+                "start_index": 0,
+                "subtrees": [{"root": root, "end_height": 100}],
+            })),
+            "getblockchaininfo" => {
+                Reply::Result(serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap())
+            }
+            _ => Reply::Result(json!(Network::Mainnet.genesis_hash().to_string())),
+        })
+        .await;
+        let backend = backend(&mock).await;
+        let one = Some(NoteCommitmentSubtreeIndex(1));
+        assert_eq!(
+            backend.orchard_subtrees(NoteCommitmentSubtreeIndex(0), one).await.unwrap().len(),
+            1
+        );
+        let requests = mock.seen().len();
+        backend.orchard_subtrees(NoteCommitmentSubtreeIndex(0), one).await.unwrap();
+        assert!(mock.seen().len() > requests);
     }
 
     #[tokio::test]
