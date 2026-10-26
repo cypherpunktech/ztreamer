@@ -2,6 +2,7 @@
 //! and starts no embedded node.
 
 use std::{
+    fmt,
     net::IpAddr,
     ops::ControlFlow,
     path::{Path, PathBuf},
@@ -41,7 +42,8 @@ type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBacke
 #[derive(Debug, Args)]
 pub(crate) struct RemoteArgs {
     /// JSON-RPC URL of a remote zakura node. ztreamerd then reads the chain from this node and
-    /// starts no embedded node. For HTTP basic auth, put the credentials in the URL:
+    /// starts no embedded node. The node gives the network (mainnet or testnet), and the index
+    /// must be of that network. For HTTP basic auth, put the credentials in the URL:
     /// https://user:password@host:8232. Without credentials and without --remote-rpc-cookie, a
     /// loopback URL uses the default cookie file of zakura if it exists.
     #[arg(long, value_name = "URL", conflicts_with_all = ["zakura_config", "fill_range_meta"])]
@@ -50,11 +52,6 @@ pub(crate) struct RemoteArgs {
     /// Cookie file of the --remote-rpc node.
     #[arg(long, value_name = "FILE", requires = "remote_rpc")]
     remote_rpc_cookie: Option<PathBuf>,
-
-    /// Network of the index and of the --remote-rpc node: mainnet or testnet. Defaults to
-    /// mainnet.
-    #[arg(long, requires = "remote_rpc")]
-    network: Option<Network>,
 }
 
 impl RemoteArgs {
@@ -76,8 +73,7 @@ impl RemoteArgs {
         info!(?auth, "remote zakura credentials");
         let config = ZakuraClient::config(url.uri.clone()).with_auth(auth);
         let rpc = RpcClient::new(config).wrap_err("configure the --remote-rpc client")?;
-        let network = self.network.clone().unwrap_or(Network::Mainnet);
-        Ok(Some(RemoteNode::new(ZakuraClient::new(rpc), network)))
+        Ok(Some(RemoteNode::new(ZakuraClient::new(rpc))))
     }
 
     /// The credentials for the node: `--remote-rpc-cookie`, else the credentials of the URL,
@@ -165,13 +161,12 @@ impl FromStr for NodeUrl {
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteNode {
     client: ZakuraClient,
-    network: Network,
 }
 
 impl RemoteNode {
-    /// The node behind `client`, which must run `network`.
-    pub(crate) const fn new(client: ZakuraClient, network: Network) -> Self {
-        Self { client, network }
+    /// The node behind `client`.
+    pub(crate) const fn new(client: ZakuraClient) -> Self {
+        Self { client }
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
@@ -188,8 +183,8 @@ impl RemoteNode {
         self.run_until(cli, grpc_server, signal).await
     }
 
-    /// Opens the index as the embedded mode does. Then runs the daemon on this node until
-    /// `signal`, the end of the work (`--index-only`), or a failure.
+    /// Runs the daemon on this node until `signal`, the end of the work (`--index-only`), or a
+    /// failure.
     ///
     /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
     /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
@@ -199,9 +194,8 @@ impl RemoteNode {
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
-        let index = cli.open_index(&self.network).await?;
         let url = self.client.rpc().url();
-        info!(network = %self.network, host = url.host(), port = url.port_u16(), "using remote zakura");
+        info!(host = url.host(), port = url.port_u16(), "using remote zakura");
         let shutdown = CancellationToken::new();
         // No node runs in this process. Thus the node half of the lifecycle only waits for the
         // shutdown, and `supervise` can drain it.
@@ -212,39 +206,50 @@ impl RemoteNode {
                 Ok(())
             }
         };
-        let application = self.application(cli, grpc_server, index, shutdown.clone());
+        let application = self.application(cli, grpc_server, shutdown.clone());
         lifecycle::supervise(node, application, shutdown, signal).await
     }
 
-    /// Makes the sources when the node is ready, then runs the daemon on them until shutdown.
+    /// Reads the network from the node and opens the index of that network, as the embedded
+    /// mode does. Then makes the sources when the node is ready, and runs the daemon on them
+    /// until shutdown.
+    ///
+    /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
+    /// of another network.
     async fn application(
         self,
         cli: DaemonArgs,
         grpc_server: Server,
-        index: Arc<Index>,
         shutdown: CancellationToken,
     ) -> Result<()> {
-        let ControlFlow::Continue(sources) = self.sources(&index, &shutdown).await? else {
+        let ControlFlow::Continue(info) = self.blockchain_info_when_up(&shutdown).await? else {
             return Ok(());
         };
-        run_application(cli, grpc_server, index, &self.network, None, sources, shutdown).await
+        let network = Network::try_from(NodeChain(info.chain()))?;
+        info!(%network, "remote zakura network");
+        let index = cli.open_index(&network).await?;
+        let ControlFlow::Continue(sources) =
+            self.sources(info, &network, &index, &shutdown).await?
+        else {
+            return Ok(());
+        };
+        run_application(cli, grpc_server, index, &network, None, sources, shutdown).await
     }
 
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.
     ///
-    /// It waits while the node is out of reach or in warm-up. Then it refuses a node that does
-    /// not run the network of the index, and a node that pruned the next block that the index
-    /// needs. Last, it waits until the best block of the node is at or above the durable tip of
-    /// the index.
+    /// `info` is the latest `getblockchaininfo` answer. It refuses a node whose genesis block is
+    /// not the one of `network`, and a node that pruned the next block that the index needs.
+    /// Then it waits until the best block of the node is at or above the durable tip of the
+    /// index.
     async fn sources(
         &self,
+        mut info: GetBlockchainInfoResponse,
+        network: &Network,
         index: &Arc<Index>,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), RemoteSources>> {
-        let ControlFlow::Continue(mut info) = self.blockchain_info_when_up(shutdown).await? else {
-            return Ok(ControlFlow::Break(()));
-        };
-        let (backend, poller) = RemoteBackend::connect(self.client.clone(), self.network.clone())
+        let (backend, poller) = RemoteBackend::connect(self.client.clone(), network.clone())
             .await
             .wrap_err("connect to the remote zakura node")?;
         let tip = IndexTip::read(index).await?;
@@ -312,6 +317,41 @@ impl Readiness for RemoteSources {
         Ok(ControlFlow::Continue(()))
     }
 }
+
+/// The chain name that a zakura node gives in `getblockchaininfo`. [`Network::try_from`] maps it
+/// to the network of the node.
+#[derive(Clone, Copy, Debug)]
+struct NodeChain<'a>(&'a str);
+
+impl TryFrom<NodeChain<'_>> for Network {
+    type Error = UnknownChain;
+
+    /// The network whose BIP70 name is the chain name: `main` is mainnet, `test` is the default
+    /// testnet.
+    fn try_from(chain: NodeChain<'_>) -> Result<Self, UnknownChain> {
+        [Self::Mainnet, Self::new_default_testnet()]
+            .into_iter()
+            .find(|network| network.bip70_network_name() == chain.0)
+            .ok_or_else(|| UnknownChain(chain.0.to_owned()))
+    }
+}
+
+/// A chain that ztreamerd cannot serve: only mainnet and the default testnet have a
+/// [`Network`] that ztreamerd can make from the chain name.
+#[derive(Debug)]
+pub(crate) struct UnknownChain(String);
+
+impl fmt::Display for UnknownChain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "remote zakura runs chain {:?}, ztreamerd serves only \"main\" and \"test\"",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnknownChain {}
 
 /// The durable tip of the index. The remote node must serve the blocks above it before the first
 /// sync.
