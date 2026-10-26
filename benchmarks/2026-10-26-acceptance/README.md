@@ -8,14 +8,13 @@ scripts and benchmark-only patches in `tools/`. The machine is the one in
 **Result.** Eight gates are met. The serving gate is met at 10,000-block ranges and not at the other
 range sizes. The import gate is met over HTTP and not met over a peer. An empty replica serves a
 verified index 7.2 min after start; Zaino needed 3 h 43 min to serve from empty (see "Time to a
-serving instance"). Three defects came up; two of them stop a real import:
+serving instance"). Two defects came up; both stop a real import:
 
 1. The first mainnet epoch is rejected (`AttestedRoots` at height 9,999): the filler writes an
    inactive pool as `000000`, the verifier expects empty bytes, and zakura gives no root.
-2. An import from one peer fails: the source allows 4 range streams, the replica opens one per
-   core − 2 (22 here), and a refused stream ends the import.
-3. Under 4 streams, a peer transfer of a sandblast-era range stopped after 59 s, and its resume hit
-   the stream limit and ended the import.
+2. An import from one peer fails: the source allows 4 range streams, the replica opens 2 per
+   worker (44 here, 8 with 4 workers), and a refused stream ends the import. #175 fixes this; with
+   it, a live peer import completed in 412 s.
 
 The HTTP import ran with a benchmark-only patch for defect 1 and a throwaway signing key.
 
@@ -40,7 +39,7 @@ The ratio is measured / threshold.
 | `verify_epoch`, densest epoch, batched, 24 threads | ≤ 5 s | 4.25 s | 0.85 | met |
 | Attestation, all epochs, c=8, JSON-RPC | ≤ 2 min | 34.7 s: 3,531 `getblockhash` (p50 0.88 ms) and 405 `z_gettreestate` (p50 396 ms, p95 2.28 s, max 7.68 s), 0 errors | 0.29 | met |
 | Tail, 2,000 blocks, 8 concurrent `getblock` | ≤ 2 min | 0.83 s to `historical compact index complete`, 0.89 s to serving | 0.007 | met |
-| Import end to end, 12 cores, loopback node | ≤ 8 min to fully verified | **HTTP:** 7.23 min (433.6 s) from start to `import complete`, `verified_through` 3,530,999; serving 0.2 s later. **Peer:** fails (defects 2 and 3). | 0.90 | met over HTTP, not met over a peer |
+| Import end to end, 12 cores, loopback node | ≤ 8 min to fully verified | **HTTP:** 7.23 min (433.6 s) from start to `import complete`, `verified_through` 3,530,999; serving 0.2 s later. **Peer:** fails on master (defect 2); 412 s with #175 (see defect 2). | 0.90 | met over HTTP; over a peer only with #175 |
 | Export, raw blob reads, cold cache | ≥ 350 MB/s | 494 MB/s: 18.16 GB in 36.74 s after `drop_caches`, including BLAKE3 and the writes | 1.41 | met |
 | Embedded pipeline with `range_meta` filler | within 2 % of 119 s | 107.3 s and 111.1 s (mean 109.2 s): the `historical compact index complete` pass of a full-chain `--index-only` build from an empty index, two runs | 0.92 | met: faster than the baseline |
 | Serving after import, `GetBlockRange` | ≥ 140,000 blocks/s | 147,259 at 10,000-block ranges and 144,594 in the 1-client concurrency case (warm). 126,603 at 1,000, 60,801 at 100,000, 119,542 in sync. | 1.05 / 0.90 / 0.43 / 0.85 | met at 10,000-block ranges only |
@@ -108,16 +107,18 @@ overlapped with the verification.
    node is valid only for an empty rebuilt tree. The benchmark patch gives no root for an empty
    tree; on mainnet this matches the node at every epoch end, because each pool has commitments
    before its first epoch end after activation.
-2. **Peer stream limit (stops a peer import on a large replica).** The source's Replicator allows
-   `MAX_RANGE_STREAMS = 4` streams (`crates/service/src/replicate.rs:36`). The importer opens
-   available cores − 2 (`crates/verify/src/importer.rs:104`), 22 here. The fifth stream gets
-   `ResourceExhausted: "4 range streams are running"`, and with one source the import ends
-   (`out/replica-peer-attempt1-22workers.log`).
-3. **Peer resume after a stopped transfer.** With the replica pinned to 6 CPUs (`taskset -c 0-5`,
-   4 workers), the import ran to height 1,742,000. A transfer stopped after 59 s (20:27:10 to
-   20:28:09, `gRPC call failed`), the resume got `ResourceExhausted`, and the import ended
-   (`out/replica-peer.log`). The verify crate has no timeout; the 59 s limit is in the transport
-   or on the source. Not diagnosed here.
+2. **Peer stream limit (stops a peer import).** The source's Replicator allows
+   `MAX_RANGE_STREAMS = 4` streams (`crates/service/src/replicate.rs:36`). The importer has
+   available cores − 2 workers (`crates/verify/src/importer.rs:104`), 22 here, and fetches 2
+   epochs per worker, one stream each: 44 streams. A refused stream gets
+   `ResourceExhausted: "4 range streams are running"`; the fetcher took it as a transfer error,
+   and with one source the import ended (`out/replica-peer-attempt1-22workers.log`). With the
+   replica pinned to 6 CPUs (4 workers, 8 streams) the import ran to height 1,742,000 and ended the
+   same way (`out/replica-peer.log`). An earlier version of this README called that a 59 s
+   transfer stop: it was not. Every failed attempt has `offset=0`, and the 3 resumes and the
+   failure came within 0.3 ms; 20:27:10 was an earlier log line. #175 makes a refusal back-pressure
+   and keeps at most 4 streams per peer; with it, a live import from S with 22 workers completed in
+   412 s (404 epochs, 3,524 ranges: the peer manifest ends at the last closed epoch).
 
 ## Deviations
 
