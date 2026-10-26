@@ -9,6 +9,10 @@
 //! - a manifest for another network or genesis block than the index;
 //! - a node that prunes the blocks of the heights that the import attests.
 //!
+//! With `--serve-unverified`, the import installs each range of the reference after the chain
+//! check only. Then [`Reattest`] runs the importer while the daemon serves: it proves these
+//! epochs from the blobs in the index.
+//!
 //! Only the remote mode can import: the embedded node has no attestor yet.
 
 use std::{
@@ -33,13 +37,14 @@ use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
 use ztreamer_remote::{RpcCode, ZakuraClient};
 use ztreamer_service::{
-    RemoteBackend,
-    replica::{ImportSource, ReplicaStatus},
+    CompactService, RemoteBackend,
+    replica::{ImportSource, ImportState, ReplicaStatus},
 };
 use ztreamer_verify::{
     attest::JsonRpcAttestor,
-    fetch::{HttpSource, PeerSource, RangeSource as _, Source},
-    importer::{ImportConfig, Importer, TrustedNode},
+    chain_ok::ChainOkImport,
+    fetch::{Fetcher, HttpSource, PeerSource, RangeSource as _, Source},
+    importer::{ImportConfig, ImportError, Importer, TrustedNode},
     manifest::Manifest,
     sample::{JsonRpcSampler, SamplePlan},
 };
@@ -71,6 +76,12 @@ pub(crate) struct ReplicateArgs {
     /// http(s) --replicate-from snapshot. ztreamerd has no built-in key yet.
     #[arg(long, value_name = "FILE", requires = "replicate_from")]
     snapshot_pubkey: Option<PathBuf>,
+
+    /// Serve each imported range after the chain check: the blob links to the range before it,
+    /// and the node attests its end hash. The tree proofs of the epochs run in the background,
+    /// and the replica reports import_state=verifying until they end.
+    #[arg(long, requires = "replicate_from")]
+    serve_unverified: bool,
 }
 
 impl ReplicateArgs {
@@ -95,6 +106,7 @@ impl ReplicateArgs {
             key,
             workers: self.import_workers.unwrap_or_else(ImportConfig::default_import_workers),
             verify_sample: self.verify_sample,
+            serve_unverified: self.serve_unverified,
         }))
     }
 }
@@ -158,6 +170,7 @@ pub(crate) struct Replica {
     key: Option<VerifyingKey>,
     workers: NonZeroUsize,
     verify_sample: usize,
+    serve_unverified: bool,
 }
 
 impl Replica {
@@ -184,18 +197,20 @@ impl Replica {
     }
 
     /// Imports the epochs of the reference manifest above the verified tip of `index`, checked
-    /// against the node of `client`. Breaks on shutdown.
+    /// against the node of `client`. Breaks on shutdown. With `--serve-unverified`, it gives the
+    /// [`Reattest`] to run while the daemon serves.
     ///
     /// The refusals of the module docs come first. An index that is verified at or above the
-    /// reference manifest needs no import. On shutdown, the import completes the epoch that it
-    /// installs, and stops.
+    /// reference manifest needs no import. On shutdown, the import completes the epoch or the
+    /// range that it installs, and stops.
     pub(crate) async fn import(
         &self,
         client: &ZakuraClient,
         network: &Network,
         index: &Arc<Index>,
+        status: &ReplicaStatus,
         shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<()>> {
+    ) -> Result<ControlFlow<(), Option<Reattest>>> {
         let ControlFlow::Continue(info) = Self::node_info(client, shutdown).await? else {
             return Ok(ControlFlow::Break(()));
         };
@@ -214,19 +229,19 @@ impl Replica {
             sources.push(source);
             manifests.push(manifest);
         }
-        let manifest = &manifests[0];
-        let verified = {
+        let state = {
             let index = Arc::clone(index);
             tokio::task::spawn_blocking(move || index.state())
                 .await
                 .wrap_err("index state task panicked")??
-                .verified_through()
         };
-        if verified.is_some_and(|verified| verified >= manifest.sealed_through()) {
-            info!(?verified, manifest = manifest.sealed_through(), "the index needs no import");
-            return Ok(ControlFlow::Continue(()));
+        let (sealed, verified) = (state.sealed_through(), state.verified_through());
+        let tip = manifests[0].sealed_through();
+        if verified.is_some_and(|verified| verified >= tip) {
+            info!(?verified, manifest = tip, "the index needs no import");
+            return Ok(ControlFlow::Continue(None));
         }
-        Self::check_prune_height(manifest, verified, &info)?;
+        Self::check_prune_height(&manifests[0], verified, &info)?;
 
         let node = TrustedNode {
             attestor: Arc::new(JsonRpcAttestor::new(client.clone())),
@@ -247,13 +262,51 @@ impl Replica {
         info!(
             sources = self.sources.len(),
             from = ?verified,
-            to = manifest.sealed_through(),
+            to = tip,
             workers = self.workers,
+            serve_unverified = self.serve_unverified,
             "importing sealed ranges"
         );
+        if !self.serve_unverified {
+            let import = Importer::new(sources, node, Arc::clone(index), config);
+            let report = Self::until_shutdown(|stop| import.run(stop), shutdown).await?;
+            return Ok(if report.stopped {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(None)
+            });
+        }
+        // An index sealed through the tip holds the `ChainOk` rows of an earlier start.
+        let mut chain_ok_through = sealed.filter(|&sealed| sealed >= tip).map(|_| tip);
+        if chain_ok_through.is_none() {
+            let fetcher = Fetcher::new(self.sources[0].connect(self.key).await?);
+            let manifest = manifests.swap_remove(0);
+            let attestor = Arc::clone(&node.attestor);
+            let import = ChainOkImport::new(fetcher, manifest, attestor, Arc::clone(index));
+            let report = Self::until_shutdown(|stop| import.run(stop), shutdown).await?;
+            if report.stopped {
+                return Ok(ControlFlow::Break(()));
+            }
+            chain_ok_through = report.chain_ok_through;
+        }
+        status.update(|progress| progress.chain_ok_through = chain_ok_through);
+        let importer = Importer::new(sources, node, Arc::clone(index), config);
+        let (index, status) = (Arc::clone(index), status.clone());
+        Ok(ControlFlow::Continue(Some(Reattest { importer, index, status })))
+    }
+
+    /// Spawns the import that `run` makes from a stop signal. Sends the signal on shutdown,
+    /// and waits for the import to stop.
+    async fn until_shutdown<T, F>(
+        run: impl FnOnce(watch::Receiver<bool>) -> F,
+        shutdown: &CancellationToken,
+    ) -> Result<T>
+    where
+        T: fmt::Debug + Send + 'static,
+        F: Future<Output = Result<T, ImportError>> + Send + 'static,
+    {
         let (stop, stopped) = watch::channel(false);
-        let mut import =
-            tokio::spawn(Importer::new(sources, node, Arc::clone(index), config).run(stopped));
+        let mut import = tokio::spawn(run(stopped));
         let report = tokio::select! {
             result = &mut import => result,
             _ = shutdown.cancelled() => {
@@ -265,10 +318,7 @@ impl Replica {
         .wrap_err("import task panicked")?
         .wrap_err("import the sealed ranges")?;
         info!(?report, "import complete");
-        if report.stopped {
-            return Ok(ControlFlow::Break(()));
-        }
-        Ok(ControlFlow::Continue(()))
+        Ok(report)
     }
 
     /// `getblockchaininfo`, sent again while the node is in warm-up. Refuses a node that gives
@@ -350,6 +400,45 @@ impl Replica {
              prune, or an index that is verified through height {} or above",
             prune_height - 1
         );
+        Ok(())
+    }
+}
+
+/// The proof of the epochs that `--serve-unverified` serves before their proof.
+#[derive(Debug)]
+pub(crate) struct Reattest {
+    importer: Importer,
+    index: Arc<Index>,
+    status: ReplicaStatus,
+}
+
+impl Reattest {
+    /// Runs the importer until `stop`, while `compact` serves. The importer proves the
+    /// `ChainOk` epochs from the blobs in the index.
+    ///
+    /// At the end, `compact` takes the verified prefix, and then the replica reports
+    /// [`ImportState::Following`]. Thus the two change together. Between two epochs, the
+    /// head follower takes the new generation of the index at its next poll.
+    pub(crate) async fn run(
+        self,
+        compact: CompactService,
+        stop: watch::Receiver<bool>,
+    ) -> Result<()> {
+        let report = self
+            .importer
+            .run(stop)
+            .await
+            .wrap_err("prove the ranges that the replica serves unverified")?;
+        info!(?report, "proved the ranges that the replica served unverified");
+        if report.stopped {
+            return Ok(());
+        }
+        let index = self.index;
+        let state = tokio::task::spawn_blocking(move || index.state())
+            .await
+            .wrap_err("index state task panicked")??;
+        compact.publish_verified(&state);
+        self.status.update(|progress| progress.import_state = ImportState::Following);
         Ok(())
     }
 }

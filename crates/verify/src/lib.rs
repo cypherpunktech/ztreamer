@@ -12,6 +12,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod attest;
+pub mod chain_ok;
 pub mod epoch;
 pub mod fetch;
 pub mod importer;

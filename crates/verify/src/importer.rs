@@ -223,7 +223,7 @@ pub enum ImportError {
 
 impl ImportError {
     /// The error for the epoch through `epoch` that `error` stopped.
-    fn in_epoch(epoch: u32, error: EpochError) -> Self {
+    pub(crate) fn in_epoch(epoch: u32, error: EpochError) -> Self {
         match error {
             EpochError::Reject(reject) => Self::Rejected { epoch, reject },
             EpochError::Node { height, source } => Self::Node { epoch, height, source },

@@ -135,13 +135,18 @@ impl Snapshot {
         fs::write(signature, hex::encode(key.sign(&manifest).to_bytes())).unwrap();
     }
 
-    /// A mock node that serves the chain and the tree states of empty pools.
-    async fn node(&self) -> (MockChain, MockNode) {
+    /// A mock node that serves the chain and the tree states of empty pools. It gives each
+    /// tree state after `delay`.
+    async fn node(&self, delay: Duration) -> (MockChain, MockNode) {
         let chain = MockChain::new(&self.blocks);
         let hashes: Vec<_> = self.blocks.iter().map(Block::hash).collect();
         let serve = chain.clone();
         let node = MockNode::start(move |_, request| match request.body["method"].as_str() {
-            Some("z_gettreestate") => Self::treestate(&hashes, request),
+            Some("z_gettreestate") => {
+                // The script is synchronous. The test runtime has threads to spare.
+                std::thread::sleep(delay);
+                Self::treestate(&hashes, request)
+            }
             _ => serve.reply(request),
         })
         .await;
@@ -248,47 +253,99 @@ fn assert_cause(error: &eyre::Report, expected: &str) {
     assert!(error.chain().any(|cause| cause.to_string() == expected), "{error:?}");
 }
 
+/// A replica that serves gRPC on a free local port until [`Self::stop`] sends the signal.
+struct RunningReplica {
+    grpc: SocketAddr,
+    signal: CancellationToken,
+    task: JoinHandle<Result<()>>,
+    dir: TempDir,
+}
+
+impl RunningReplica {
+    /// Starts a replica of `snapshot` with a fresh index, on `node`, with `extra` flags.
+    fn start(snapshot: &Snapshot, node: &MockNode, extra: &[&str]) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let grpc = free_addr();
+        let grpc_flag = grpc.to_string();
+        let flags: Vec<_> =
+            ["--grpc-listen", &grpc_flag].into_iter().chain(extra.iter().copied()).collect();
+        let cli = cli(&dir, &node.url().to_string(), snapshot, &flags);
+        let signal = CancellationToken::new();
+        let received = signal.clone().cancelled_owned();
+        let task = tokio::spawn(daemon(cli, async move {
+            received.await;
+            Ok(())
+        }));
+        Self { grpc, signal, task, dir }
+    }
+
+    /// The readiness text of the first `GetLightdInfo` answer that contains `text`.
+    async fn readiness_with(&self, text: &str) -> String {
+        let poll = async {
+            loop {
+                if let Ok(mut client) =
+                    CompactTxStreamerClient::connect(format!("http://{}", self.grpc)).await
+                    && let Ok(info) = client.get_lightd_info(Empty {}).await
+                    && info.get_ref().build_user.contains(text)
+                {
+                    return info.into_inner().build_user;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        timeout(Duration::from_secs(60), poll).await.expect("the replica reports the text")
+    }
+
+    /// Sends the signal. The replica must stop without an error. Returns its index.
+    async fn stop(self) -> Index {
+        self.signal.cancel();
+        timeout(Duration::from_secs(10), self.task).await.unwrap().unwrap().unwrap();
+        Index::open_existing(self.dir.path(), 1 << 30).unwrap()
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_fresh_replica_imports_three_epochs_then_follows_the_chain() {
     let snapshot = Snapshot::new().await;
-    let (_chain, node) = snapshot.node().await;
-    let dir = tempfile::tempdir().unwrap();
-    let grpc = free_addr();
-    let cli = cli(&dir, &node.url().to_string(), &snapshot, &["--grpc-listen", &grpc.to_string()]);
-    let signal = CancellationToken::new();
-    let received = signal.clone().cancelled_owned();
-    let task: JoinHandle<Result<()>> = tokio::spawn(daemon(cli, async move {
-        received.await;
-        Ok(())
-    }));
+    let (_chain, node) = snapshot.node(Duration::ZERO).await;
 
-    let following = async {
-        loop {
-            if let Ok(mut client) = CompactTxStreamerClient::connect(format!("http://{grpc}")).await
-                && let Ok(info) = client.get_lightd_info(Empty {}).await
-                && info.get_ref().build_user.contains("import_state=following")
-            {
-                return info.into_inner();
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    };
-    let info = timeout(Duration::from_secs(60), following).await.expect("the replica follows");
-    signal.cancel();
-    timeout(Duration::from_secs(10), task).await.unwrap().unwrap().unwrap();
+    let replica = RunningReplica::start(&snapshot, &node, &[]);
+    let readiness = replica.readiness_with("import_state=following").await;
+    let index = replica.stop().await;
 
     assert_eq!(
-        info.build_user,
+        readiness,
         format!(
             "sealed_through={SEALED} verified_through={SEALED} chain_ok_through=none \
              import_state=following node_state=ok import_sources={}/:0",
             snapshot.url()
         )
     );
-    assert_eq!(info.block_height, u64::from(TIP));
-    let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
+    // The tail indexed the blocks above the snapshot. The head follower keeps the last ones.
+    assert!(index.state().unwrap().durable_tip().unwrap().height > SEALED);
     assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
     assert_eq!(index.range_meta(12_000).unwrap().unwrap().state, VerifyState::Verified);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unverified_replica_serves_then_catches_up_without_a_restart() {
+    let snapshot = Snapshot::new().await;
+    // Three tree states, one per epoch: the proofs end about 1.5 s after the replica serves.
+    let (_chain, node) = snapshot.node(Duration::from_millis(500)).await;
+
+    let replica = RunningReplica::start(&snapshot, &node, &["--serve-unverified"]);
+    let verifying = replica.readiness_with("import_state=verifying").await;
+    let following = replica.readiness_with("import_state=following").await;
+    let index = replica.stop().await;
+
+    let chain_ok = format!("sealed_through={SEALED} verified_through=");
+    assert!(verifying.starts_with(&chain_ok), "{verifying}");
+    assert!(!verifying.starts_with(&format!("{chain_ok}{SEALED} ")), "{verifying}");
+    assert!(verifying.contains(&format!("chain_ok_through={SEALED} ")), "{verifying}");
+    let verified = format!("verified_through={SEALED} chain_ok_through={SEALED} ");
+    assert!(following.contains(&verified), "{following}");
+    assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
+    assert_eq!(index.range_meta(20_000).unwrap().unwrap().state, VerifyState::Verified);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -315,7 +372,7 @@ async fn a_node_of_another_chain_is_refused_before_a_range_fetch() {
 async fn a_snapshot_of_another_network_is_refused_before_a_range_fetch() {
     let snapshot = Snapshot::new().await;
     snapshot.rename_network("Testnet");
-    let (_chain, node) = snapshot.node().await;
+    let (_chain, node) = snapshot.node(Duration::ZERO).await;
     let dir = tempfile::tempdir().unwrap();
 
     let error = refusal(cli(&dir, &node.url().to_string(), &snapshot, &[])).await;
@@ -329,7 +386,7 @@ async fn a_manifest_that_another_key_signs_is_refused_before_a_range_fetch() {
     let snapshot = Snapshot::new().await;
     let other = SigningKey::from_bytes(&[8; 32]).verifying_key();
     fs::write(&snapshot.pubkey, hex::encode(other.as_bytes())).unwrap();
-    let (_chain, node) = snapshot.node().await;
+    let (_chain, node) = snapshot.node(Duration::ZERO).await;
     let dir = tempfile::tempdir().unwrap();
 
     let error = refusal(cli(&dir, &node.url().to_string(), &snapshot, &[])).await;
@@ -342,7 +399,7 @@ async fn a_manifest_that_another_key_signs_is_refused_before_a_range_fetch() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_node_that_prunes_the_attested_heights_is_refused_before_a_range_fetch() {
     let snapshot = Snapshot::new().await;
-    let (chain, node) = snapshot.node().await;
+    let (chain, node) = snapshot.node(Duration::ZERO).await;
     chain.set_prune_height(Some(block::Height(15_000)));
     let dir = tempfile::tempdir().unwrap();
 

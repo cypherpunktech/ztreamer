@@ -234,7 +234,7 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        let hooks = ServiceHooks { p2p: Some(p2p.clone()), replica: None };
+        let hooks = ServiceHooks { p2p: Some(p2p.clone()), replica: None, reattest: None };
         run_application(cli, grpc_server, index, &network, hooks, sources, shutdown.clone()).await
     };
 
@@ -287,6 +287,9 @@ struct ServiceHooks {
     p2p: Option<Arc<P2pCompactService>>,
     /// The readiness of a replica, with `--replicate-from`.
     replica: Option<ReplicaStatus>,
+    /// The proof of the epochs that the replica serves before their proof, with
+    /// `--serve-unverified`.
+    reattest: Option<replicate::Reattest>,
 }
 
 impl ServiceHooks {
@@ -344,7 +347,10 @@ where
     if let Some(p2p) = &hooks.p2p {
         p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     }
-    hooks.import_state(ImportState::Following);
+    hooks.import_state(match hooks.reattest {
+        Some(_) => ImportState::Verifying,
+        None => ImportState::Following,
+    });
 
     let extras = Extras {
         filler: filler_index.map(|index| {
@@ -352,6 +358,7 @@ where
         }),
         replicator: replicate_index
             .map(|index| ReplicatorService::new(index, compact.subscribe(), network)),
+        reattest: hooks.reattest,
     };
     serve(compact, head, pipeline, grpc_server, &cli, extras, &shutdown).await
 }
@@ -362,6 +369,9 @@ struct Extras<F> {
     filler: Option<F>,
     /// The Replicator service, with `--replicate-listen`.
     replicator: Option<ReplicatorService>,
+    /// The proof of the epochs that the replica serves before their proof, with
+    /// `--serve-unverified`.
+    reattest: Option<replicate::Reattest>,
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -437,7 +447,9 @@ async fn reconcile_head(
 
 /// Runs the head follower and gRPC server until shutdown or until either task stops. If the
 /// filler is set, runs it beside them and stops it with them. If the Replicator is set, its
-/// server runs in the gRPC task, and the task stops when either server stops.
+/// server runs in the gRPC task, and the task stops when either server stops. If the
+/// reattestation is set, it runs in the head follower task, and a failure of either stops the
+/// task.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
@@ -452,11 +464,20 @@ async fn serve(
     let mut follower = tokio::spawn({
         let compact = compact.clone();
         let receiver = server_shutdown.subscribe();
+        let reattest = extras
+            .reattest
+            .map(|reattest| reattest.run(compact.clone(), server_shutdown.subscribe()));
         async move {
-            compact
-                .follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
-                .await
-                .wrap_err("head follower failed")
+            let follow = async {
+                compact
+                    .follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
+                    .await
+                    .wrap_err("head follower failed")
+            };
+            match reattest {
+                Some(reattest) => tokio::try_join!(follow, reattest).map(drop),
+                None => follow.await,
+            }
         }
     });
     let mut grpc = tokio::spawn({

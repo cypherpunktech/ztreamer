@@ -162,15 +162,18 @@ impl RemoteNode {
         shutdown: CancellationToken,
     ) -> Result<()> {
         let status = self.replica.as_ref().map(Replica::new_status);
-        if let Some(replica) = &self.replica
-            && replica.import(&self.client, &self.network, &index, &shutdown).await?.is_break()
-        {
-            return Ok(());
+        let mut reattest = None;
+        if let (Some(replica), Some(status)) = (&self.replica, &status) {
+            let import = replica.import(&self.client, &self.network, &index, status, &shutdown);
+            let ControlFlow::Continue(task) = import.await? else {
+                return Ok(());
+            };
+            reattest = task;
         }
         let ControlFlow::Continue(sources) = self.sources(&index, &shutdown).await? else {
             return Ok(());
         };
-        let hooks = ServiceHooks { p2p: None, replica: status };
+        let hooks = ServiceHooks { p2p: None, replica: status, reattest };
         run_application(cli, grpc_server, index, &self.network, hooks, sources, shutdown).await
     }
 

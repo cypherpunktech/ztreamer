@@ -238,6 +238,27 @@ impl CompactService {
         Ok(())
     }
 
+    /// Takes the generation and the verified prefix of `state`, after a write that did not
+    /// change the blocks, such as [`Index::advance_verified_through`]. The volatile head and the
+    /// freshness stay.
+    ///
+    /// It does nothing if `state` is not newer than the serving snapshot, or has another
+    /// durable tip. Then the head follower publishes a newer state at its next poll.
+    pub fn publish_verified(&self, state: &IndexState) {
+        let taken = self.snapshot.send_if_modified(|snapshot| {
+            let newer = state.generation() > snapshot.generation
+                && state.durable_tip() == snapshot.durable_tip;
+            if newer {
+                snapshot.generation = state.generation();
+                snapshot.verified_through = state.verified_through();
+            }
+            newer
+        });
+        if taken && let Some(replica) = &self.replica {
+            replica.observe(&self.snapshot.borrow());
+        }
+    }
+
     /// Stops new chain-data requests while a deep replacement is staged.
     pub fn begin_recovery(&self) {
         let mut snapshot = self.snapshot();
