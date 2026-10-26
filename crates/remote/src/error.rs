@@ -19,6 +19,19 @@ impl RpcCode {
     /// answers for a method that needs credentials.
     pub const METHOD_NOT_FOUND: Self = Self(-32601);
 
+    /// JSON-RPC 2.0 "invalid params".
+    ///
+    /// Of the block methods, only `getblockhash` uses this code for a missing block: for a
+    /// height above the tip of the node. `getblock` answers [`Self::INVALID_PARAMETER`].
+    pub const INVALID_PARAMS: Self = Self(-32602);
+
+    /// zcashd legacy code: a parameter is not valid.
+    ///
+    /// zakura answers `getblock` with this code for a block that it does not have: an unknown
+    /// hash, or a height above its tip. `getblockhash` answers this code for a height at or below
+    /// the tip when the node has no hash for it.
+    pub const INVALID_PARAMETER: Self = Self(-8);
+
     /// zcashd legacy code: the node is still warming up.
     pub const IN_WARMUP: Self = Self(-28);
 }
@@ -161,6 +174,15 @@ impl RpcError {
         self.rpc_code() == Some(RpcCode::METHOD_NOT_FOUND)
     }
 
+    /// True when the node has no block at the requested height or with the requested hash.
+    ///
+    /// zakura answers `getblockhash` for a height above its tip with [`RpcCode::INVALID_PARAMS`].
+    /// It answers all other requests for a missing block, `getblock` included, with
+    /// [`RpcCode::INVALID_PARAMETER`].
+    pub const fn is_block_not_found(&self) -> bool {
+        matches!(self.rpc_code(), Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER))
+    }
+
     /// True when the same request may succeed if sent again.
     ///
     /// Every call the client makes is idempotent on the node, so a retry can never double an
@@ -216,6 +238,10 @@ mod tests {
         assert!(!rpc(RpcCode(-8)).is_retryable());
         assert!(!rpc(RpcCode::METHOD_NOT_FOUND).is_retryable());
         assert!(rpc(RpcCode::METHOD_NOT_FOUND).is_method_not_found());
+        assert!(rpc(RpcCode::INVALID_PARAMS).is_block_not_found());
+        assert!(rpc(RpcCode::INVALID_PARAMETER).is_block_not_found());
+        assert!(!rpc(RpcCode::IN_WARMUP).is_block_not_found());
+        assert!(!http(StatusCode::NOT_FOUND).is_block_not_found());
         assert!(
             RpcError::Timeout { method: "m".into(), timeout: Duration::from_secs(1) }
                 .is_retryable()

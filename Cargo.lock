@@ -7983,6 +7983,7 @@ dependencies = [
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",
+ "ztreamer-remote",
 ]
 
 [[package]]
@@ -8062,6 +8063,7 @@ dependencies = [
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",
+ "ztreamer-remote",
  "ztreamer-service",
 ]
 

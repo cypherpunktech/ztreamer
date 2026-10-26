@@ -244,7 +244,7 @@ impl CompactService {
         self.snapshot.send_replace(snapshot);
     }
 
-    fn snapshot(&self) -> ServingSnapshot {
+    pub(crate) fn snapshot(&self) -> ServingSnapshot {
         self.snapshot.borrow().clone()
     }
 
