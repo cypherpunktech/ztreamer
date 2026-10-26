@@ -88,7 +88,7 @@ pub enum Check {
     /// The subtrees that the rebuild completed in a range are not the `subtree_roots` of the
     /// manifest entry.
     SubtreeRoots,
-    /// The node has another hash at the end height of the epoch.
+    /// The node has another hash at the end height of a range.
     AttestedHash,
     /// The node has other tree roots at the end height of the epoch.
     AttestedRoots,
