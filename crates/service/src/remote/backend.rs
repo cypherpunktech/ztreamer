@@ -795,7 +795,7 @@ impl StateBackend for RemoteBackend {
         }
         let response = match self.node.z_get_treestate(HashOrHeight::Hash(hash)).await {
             Ok(response) => response,
-            Err(error) if error.rpc_code() == Some(BLOCK_NOT_FOUND) => {
+            Err(error) if error.rpc_code() == Some(RpcCode::INVALID_PARAMETER) => {
                 return Err(self.no_tree_state(hash, error).await);
             }
             Err(error) => return Err(error.into()),
@@ -1302,7 +1302,7 @@ mod tests {
                 Reply::Result(info)
             }
             "z_gettreestate" => {
-                Reply::Error { code: BLOCK_NOT_FOUND, message: "not in main chain" }
+                Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "not in main chain" }
             }
             method => chain_reply(method, 1_000).unwrap(),
         })
