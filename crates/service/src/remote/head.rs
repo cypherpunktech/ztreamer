@@ -13,9 +13,10 @@ use ztreamer_remote::ZakuraClient;
 ///
 /// [`CompactService::sync_head`](crate::CompactService::sync_head) and
 /// [`CompactService::follow_head`](crate::CompactService::follow_head) use it as they use the
-/// embedded node. Each [`CanonicalBlockSource::block`] call sends two requests: `getblockhash`
-/// for the height, then `getblock` with verbosity 0 for that hash. The block bytes go into the
-/// index without a second serialization.
+/// embedded node. Each [`CanonicalBlockSource::block_hash`] call sends one `getblockhash`
+/// request. Each [`CanonicalBlockSource::block`] call sends two requests: `getblockhash` for the
+/// height, then `getblock` with verbosity 0 for that hash. The block bytes go into the index
+/// without a second serialization.
 ///
 /// ```no_run
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
@@ -54,10 +55,8 @@ impl CanonicalBlockSource for RemoteHeadSource {
     /// When the block leaves the best chain between the two requests, the node does not find
     /// its hash and the result is [`HeadError::Changed`].
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
-        let hash = match self.node.get_block_hash(block::Height(height)).await {
-            Ok(hash) => hash.hash(),
-            Err(error) if error.is_block_not_found() => return Ok(None),
-            Err(error) => return Err(error.into()),
+        let Some(hash) = self.block_hash(height).await? else {
+            return Ok(None);
         };
         let bytes = match self.node.get_block_raw(HashOrHeight::Hash(hash)).await {
             Ok(bytes) => bytes.0,
@@ -73,6 +72,16 @@ impl CanonicalBlockSource for RemoteHeadSource {
             return Err(HeadError::Hash { height, expected: hash, actual: block.hash });
         }
         Ok(Some(block))
+    }
+
+    /// The best-chain hash at `height` from one `getblockhash` call, or `None` when the node has
+    /// no block at that height.
+    async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
+        match self.node.get_block_hash(block::Height(height)).await {
+            Ok(hash) => Ok(Some(hash.hash())),
+            Err(error) if error.is_block_not_found() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
@@ -285,5 +294,35 @@ mod tests {
 
         shutdown.send(true).unwrap();
         follower.await.unwrap().unwrap();
+    }
+
+    /// The requests that `mock` received after the first `from` requests, and how many of them
+    /// are `getblock`.
+    fn requests_since(mock: &MockNode, from: usize) -> (usize, usize) {
+        let seen = &mock.seen()[from..];
+        (seen.len(), seen.iter().filter(|request| request.body["method"] == "getblock").count())
+    }
+
+    #[tokio::test]
+    async fn a_tip_change_costs_requests_for_the_new_blocks_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let (service, _index) = service(&dir).await;
+        let mut blocks = chain(150);
+        let chain = MockChain::new(&blocks);
+        let (mock, mut source) = node(&chain).await;
+        service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+
+        for (tip, new) in [(151, 1), (154, 3)] {
+            grow_chain(&mut blocks, tip, 0);
+            chain.set_blocks(&blocks);
+            let before = mock.seen().len();
+            service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+
+            // One `getblockchaininfo`, one `getblockhash` each for the anchor, the old tip, the
+            // height above the new tip, and the re-check of the new tip, then one `getblockhash`
+            // and one `getblock` for each new block.
+            assert_eq!(requests_since(&mock, before), (5 + 2 * new, new));
+            assert_eq!(visible_tip(&service), Some(id(&blocks[tip as usize])));
+        }
     }
 }

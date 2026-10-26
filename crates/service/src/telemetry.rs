@@ -10,6 +10,7 @@ use std::{
 use metrics::{Counter, Gauge, Histogram};
 use tokio_stream::Stream;
 use tonic::Status;
+use zakura_chain::block;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
@@ -94,6 +95,10 @@ impl<S: CanonicalBlockSource> CanonicalBlockSource for ObservedSource<'_, S> {
 
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
         self.source.block(height).await
+    }
+
+    async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
+        self.source.block_hash(height).await
     }
 }
 
