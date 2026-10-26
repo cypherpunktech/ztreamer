@@ -9,13 +9,15 @@
 //!   gives. It does not use the key in `latest.json`: a source that can change the files can
 //!   also change that key. It reads a blob from its [`RangePath`] with an HTTP `Range` request.
 //! - [`PeerSource`] asks a ztreamer that serves the Replicator gRPC service. It builds the
-//!   manifest from `ListRanges`, up to the last listed range that closes an epoch.
+//!   manifest from `ListRanges`, up to the last listed range that closes an epoch. It opens at
+//!   most [`PEER_RANGE_STREAMS`] `GetRange` streams at a time. When the peer refuses a stream
+//!   with `RESOURCE_EXHAUSTED`, it waits and asks again: a busy peer is not a failed peer.
 //!
 //! [`Fetcher`] reads complete blobs from a source. It continues a cut transfer from the last
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
 //! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
 
-use std::{pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -27,13 +29,14 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
+use tokio::sync::Semaphore;
 use tokio_stream::{Stream, StreamExt as _};
-use tonic::transport::Channel;
-use tracing::warn;
+use tonic::{Code, Streaming, transport::Channel};
+use tracing::{debug, warn};
 use zakura_chain::block;
 use ztreamer_indexer::index::range_meta::{ExportedRange, ManifestEntry, WireError};
 use ztreamer_protocol::replicate::{
-    self, GetRangeRequest, ListRangesRequest, replicator_client::ReplicatorClient,
+    self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
 };
 
 use crate::{
@@ -44,6 +47,11 @@ use crate::{
 
 /// The times that [`Fetcher::blob`] continues one blob after a transfer error.
 pub const MAX_RESUMES: u32 = 3;
+
+/// The `GetRange` streams that one [`PeerSource`] opens at a time. It is the stream limit of the
+/// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
+/// streams above it, and [`PeerSource`] asks again.
+pub const PEER_RANGE_STREAMS: usize = 4;
 
 /// The bytes of a range blob, in order, from the offset of the request.
 pub type BlobStream = Pin<Box<dyn Stream<Item = Result<Bytes, FetchError>> + Send>>;
@@ -237,6 +245,8 @@ impl<S: RangeSource> Fetcher<S> {
     ///
     /// A request or a transfer that fails continues from the last byte received, at most
     /// [`MAX_RESUMES`] times. A blob with a wrong length or digest is [`FetchError::Digest`].
+    /// The stream of a failed transfer is dropped before the next request, thus the source can
+    /// release its place before the resume.
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
         let mut resumes = 0;
@@ -381,21 +391,83 @@ impl RangeSource for HttpSource {
     }
 }
 
+/// The waits before each new `GetRange` request to a peer that refused a stream with
+/// `RESOURCE_EXHAUSTED`: [`Self::FIRST`], then double the wait before, up to [`Self::MAX`]. The
+/// iterator does not end.
+#[derive(Clone, Copy, Debug)]
+struct RefusalBackoff {
+    next: Duration,
+}
+
+impl RefusalBackoff {
+    /// The wait after the first refusal.
+    const FIRST: Duration = Duration::from_millis(50);
+    /// The longest wait.
+    const MAX: Duration = Duration::from_secs(2);
+}
+
+impl Default for RefusalBackoff {
+    fn default() -> Self {
+        Self { next: Self::FIRST }
+    }
+}
+
+impl Iterator for RefusalBackoff {
+    type Item = Duration;
+
+    fn next(&mut self) -> Option<Duration> {
+        let wait = self.next;
+        self.next = (wait * 2).min(Self::MAX);
+        Some(wait)
+    }
+}
+
 /// A ztreamer that serves the Replicator gRPC service.
+///
+/// The clones of a source share one connection and one limit of [`PEER_RANGE_STREAMS`] open
+/// `GetRange` streams.
 #[derive(Clone, Debug)]
 pub struct PeerSource {
     client: ReplicatorClient<Channel>,
+    /// One permit for each open `GetRange` stream.
+    range_streams: Arc<Semaphore>,
 }
 
 impl PeerSource {
     /// A source over `channel`.
     pub fn new(channel: Channel) -> Self {
-        Self { client: ReplicatorClient::new(channel) }
+        let range_streams = Arc::new(Semaphore::new(PEER_RANGE_STREAMS));
+        Self { client: ReplicatorClient::new(channel), range_streams }
     }
 
     /// Connects to the Replicator service at `endpoint`.
     pub async fn connect(endpoint: Uri) -> Result<Self, FetchError> {
         Ok(Self::new(Channel::builder(endpoint).connect().await?))
+    }
+
+    /// Opens the `GetRange` stream of the range at `start_height` from byte `offset`.
+    ///
+    /// A `RESOURCE_EXHAUSTED` refusal is back-pressure: the peer runs its limit of streams. The
+    /// request waits with [`RefusalBackoff`] and asks again, with no limit on the attempts. A
+    /// stream that stopped can still hold its place on the peer for a short time after the
+    /// client drops it, thus a resume can get this refusal too.
+    async fn open_range_stream(
+        &self,
+        start_height: u32,
+        offset: u64,
+    ) -> Result<Streaming<RangeChunk>, FetchError> {
+        let mut waits = RefusalBackoff::default();
+        loop {
+            let request = GetRangeRequest { start_height, offset };
+            match self.client.clone().get_range(request).await {
+                Err(status) if status.code() == Code::ResourceExhausted => {
+                    let wait = waits.next().expect("the backoff does not end");
+                    debug!(start_height, offset, %status, ?wait, "peer is busy; asking again");
+                    tokio::time::sleep(wait).await;
+                }
+                response => return Ok(response?.into_inner()),
+            }
+        }
     }
 }
 
@@ -437,25 +509,33 @@ impl RangeSource for PeerSource {
         entry: &ManifestEntry,
         offset: u64,
     ) -> Result<BlobStream, FetchError> {
-        let request = GetRangeRequest { start_height: entry.start_height, offset };
-        let chunks = self.client.clone().get_range(request).await?.into_inner();
-        Ok(Box::pin(chunks.map(|chunk| chunk.map(|chunk| chunk.data).map_err(FetchError::from))))
+        let permit = Arc::clone(&self.range_streams)
+            .acquire_owned()
+            .await
+            .expect("the stream permits are never closed");
+        let chunks = self.open_range_stream(entry.start_height, offset).await?;
+        // The permit lasts until the blob stream is dropped.
+        Ok(Box::pin(chunks.map(move |chunk| {
+            let _ = &permit;
+            chunk.map(|chunk| chunk.data).map_err(FetchError::from)
+        })))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::SigningKey;
+    use futures_util::future;
     use tokio::sync::watch;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Server;
     use zakura_chain::parameters::Network;
     use ztreamer_indexer::index::RANGE_SIZE;
     use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
-    use ztreamer_service::{ReplicatorService, ServingSnapshot};
+    use ztreamer_service::{ReplicatorService, ServingSnapshot, replicate::MAX_RANGE_STREAMS};
 
     use super::*;
-    use crate::test_utils::{FileServer, SEED, Snapshot, SourceIndex};
+    use crate::test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex};
 
     /// Twelve ranges: the filler closes an epoch at range 9 only.
     const RANGES: u32 = 12;
@@ -578,5 +658,82 @@ mod tests {
         }
         assert_eq!(tail, blob[100..]);
         assert_eq!(Fetcher::new(Source::Peer(peer)).blob(entry).await.unwrap(), blob);
+    }
+
+    /// A source index and a [`PeerServer`] for it with `stream_limit` streams.
+    struct Peer {
+        source: SourceIndex,
+        server: PeerServer,
+        fetcher: Fetcher,
+    }
+
+    impl Peer {
+        async fn new(stream_limit: usize) -> Self {
+            let source = SourceIndex::new(RANGES).await;
+            let server = PeerServer::start(&source, stream_limit).await;
+            let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
+            Self { source, server, fetcher: Fetcher::new(Source::Peer(peer)) }
+        }
+
+        /// Fetches the blobs of the first ten ranges at the same time, and checks each one.
+        async fn fetch_ten_blobs_at_once(&self) {
+            let entries = self.source.entries();
+            let blobs = future::try_join_all(entries[..10].iter().map(|e| self.fetcher.blob(e)));
+            for (entry, blob) in entries.iter().zip(blobs.await.unwrap()) {
+                let expected = self.source.index.read_sealed_range_bytes(entry.start_height);
+                assert_eq!(blob, expected.unwrap().unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn the_peer_stream_limit_is_the_stream_limit_of_the_replicator() {
+        assert_eq!(PEER_RANGE_STREAMS, MAX_RANGE_STREAMS);
+    }
+
+    #[test]
+    fn the_refusal_backoff_doubles_up_to_its_maximum() {
+        let waits: Vec<_> =
+            RefusalBackoff::default().take(8).map(|wait| wait.as_millis()).collect();
+        assert_eq!(waits, [50, 100, 200, 400, 800, 1_600, 2_000, 2_000]);
+    }
+
+    #[tokio::test]
+    async fn a_peer_source_opens_at_most_its_stream_limit() {
+        let peer = Peer::new(64).await;
+
+        peer.fetch_ten_blobs_at_once().await;
+
+        assert_eq!(peer.server.most_open_streams(), PEER_RANGE_STREAMS);
+        assert_eq!((peer.server.refusals(), peer.server.requests().len()), (0, 10));
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_refuses_above_two_streams_sends_each_blob_after_a_wait() {
+        let peer = Peer::new(2).await;
+
+        peer.fetch_ten_blobs_at_once().await;
+
+        assert!(peer.server.refusals() > 0);
+        assert_eq!(peer.server.most_open_streams(), 2);
+        let mut requests = peer.server.requests();
+        requests.sort_unstable();
+        assert_eq!(requests, (0..10).map(|range| (range * RANGE_SIZE, 0)).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn a_cut_peer_stream_resumes_when_the_peer_releases_its_place() {
+        // The cut stream keeps the one place of the peer for a time, thus the first resume is
+        // refused.
+        let peer = Peer::new(1).await;
+        let entry = &peer.source.entries()[2];
+        peer.server.cut_next(2_000);
+
+        let blob = peer.fetcher.blob(entry).await.unwrap();
+
+        assert_eq!(blob, peer.source.index.read_sealed_range_bytes(2_000).unwrap().unwrap());
+        let half = blob.len() as u64 / 2;
+        assert_eq!(peer.server.requests(), [(2_000, 0), (2_000, half)]);
+        assert!(peer.server.refusals() > 0);
     }
 }

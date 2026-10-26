@@ -399,10 +399,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        fetch::HttpSource,
+        fetch::{HttpSource, PeerSource},
         manifest::Pool,
         range::Check,
-        test_utils::{FileServer, SEED, Snapshot, SourceIndex},
+        test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex},
     };
 
     /// Ranges of empty blocks: the epochs end at 9,999, 19,999 and 24,999.
@@ -530,6 +530,18 @@ mod tests {
 
         fn importer(&self, attestor: Arc<FakeAttestor>, network: Network) -> Importer {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
+            let sources = self.servers.iter().map(|server| {
+                Source::Http(Box::new(HttpSource::new(server.base.clone(), key).unwrap()))
+            });
+            self.importer_with_sources(sources.collect(), attestor, network)
+        }
+
+        fn importer_with_sources(
+            &self,
+            sources: Vec<Source>,
+            attestor: Arc<FakeAttestor>,
+            network: Network,
+        ) -> Importer {
             let node = TrustedNode {
                 attestor,
                 sampler: Arc::new(FakeSampler),
@@ -540,10 +552,7 @@ mod tests {
                 verify_sample: SamplePlan { per_range: 2, seed: 7 },
                 import_workers: NonZeroUsize::new(4).unwrap(),
             };
-            let sources = self.servers.iter().map(|server| {
-                Source::Http(Box::new(HttpSource::new(server.base.clone(), key).unwrap()))
-            });
-            Importer::new(sources.collect(), node, Arc::clone(&self.target), config)
+            Importer::new(sources, node, Arc::clone(&self.target), config)
         }
 
         async fn run(&self) -> Result<ImportReport, ImportError> {
@@ -610,6 +619,32 @@ mod tests {
         assert_eq!((report.epochs, report.ranges), (12, 120));
         import.assert_target_has_source_blobs();
         assert_eq!(import.blob_requests(), 120);
+    }
+
+    /// Four workers fetch up to eight epochs at a time, and the peer sends one stream at a time.
+    #[tokio::test]
+    async fn an_import_from_a_peer_with_one_stream_waits_for_the_peer_and_completes() {
+        let import = Import::new(RANGES).await;
+        let server = PeerServer::start(&import.source, 1).await;
+        let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
+        let (_stop, shutdown) = watch::channel(false);
+        let importer = import.importer_with_sources(
+            vec![Source::Peer(peer)],
+            import.fake_attestor(None),
+            Network::Mainnet,
+        );
+
+        let report = importer.run(shutdown).await.unwrap();
+
+        // A peer lists the ranges up to the last closed epoch only: range 24 closes none.
+        assert_eq!((report.epochs, report.ranges), (2, 20));
+        assert_eq!((report.sealed_through, report.verified_through), (Some(19_999), Some(19_999)));
+        for start in (0..20).map(|range| range * RANGE_SIZE) {
+            let blob = import.target.read_sealed_range_bytes(start).unwrap();
+            assert_eq!(blob, import.source.index.read_sealed_range_bytes(start).unwrap());
+        }
+        assert!(server.refusals() > 0);
+        assert_eq!(server.requests().len(), 20);
     }
 
     #[tokio::test]
