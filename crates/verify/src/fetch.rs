@@ -224,7 +224,7 @@ impl Strikes {
     }
 
     /// Adds one strike, and returns the new count.
-    fn add(&self) -> u8 {
+    pub(crate) fn add(&self) -> u8 {
         self.0.fetch_add(1, Ordering::Relaxed).saturating_add(1)
     }
 

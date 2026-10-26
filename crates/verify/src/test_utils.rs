@@ -146,6 +146,11 @@ impl Snapshot {
         entry.blob_digest = BlobDigest::hash(blob);
         entry.blob_len = blob.len() as u64;
         fs::write(self.range_path(entry), blob).unwrap();
+        self.replace_entries(entries);
+    }
+
+    /// Replaces the entries of the manifest, and signs the new manifest.
+    pub(crate) fn replace_entries(&mut self, entries: Vec<ManifestEntry>) {
         self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
             .entries(entries)
             .build()

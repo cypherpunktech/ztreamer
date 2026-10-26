@@ -1,15 +1,20 @@
-//! The importer: installs the sealed ranges of a source in an index, in verified epochs.
+//! The importer: installs the sealed ranges of one or more sources in an index, in verified
+//! epochs.
 //!
-//! [`Importer::run`] reads the manifest of the source. It refuses a manifest for another
-//! network or genesis block, and an index that is verified at or above the manifest. Then it
-//! starts the epochs after the verified tip of the index in height order, at most two for each
-//! of the [`ImportConfig::import_workers`] at a time. The work on one epoch is:
+//! [`Importer::run`] reads the manifest of each source. It refuses a manifest for another
+//! network or genesis block, and an index that is verified at or above the first manifest, the
+//! reference. Before it fetches a blob, it compares the blob digests of each epoch of the
+//! reference with the other manifests. Then it starts the epochs after the verified tip of the
+//! index in height order, at most two for each of the [`ImportConfig::import_workers`] at a
+//! time. The work on one epoch is:
 //!
 //! 1. Take its part of a byte budget of [`MAX_PENDING_BYTES`], in height order. The epoch
 //!    keeps it until its install.
-//! 2. Fetch its blobs. After a wrong digest, fetch the blob again, until the [`Fetcher`] drops
-//!    the source. An epoch at or below the sealed tip is installed already, with
-//!    [`VerifyState::ChainOk`] rows: read its blobs from the index, not from the source.
+//! 2. Fetch its blobs. The blob fetches rotate across the sources that agree on the digests of
+//!    the epoch. After a wrong digest, fetch the blob from the next source. A wrong digest is a
+//!    strike against the source, and [`Strikes::LIMIT`] strikes drop the source for the
+//!    import. An epoch at or below the sealed tip is installed already, with
+//!    [`VerifyState::ChainOk`] rows: read its blobs from the index, not from a source.
 //! 3. Run [`Epoch::verify`] on the blocking thread pool. At most `import_workers` epochs do
 //!    this at the same time.
 //! 4. Run [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`] at the same
@@ -26,36 +31,42 @@
 //! manifest entry before it. [`Epoch::verify`] of the epoch before rebuilds them byte for byte,
 //! and the writer installs an epoch only after all epochs below it.
 //!
+//! The manifests disagree about an epoch when two of them give other blob digests for its
+//! heights. Then the work on the epoch fetches, verifies and attests the version of each
+//! manifest in turn, the reference first, until one passes. The sources of each rejected
+//! version take a strike.
+//!
 //! A failed epoch stops the import. The importer first installs the epochs below it, thus the
 //! index keeps them. A restart continues after the last installed epoch, and fetches no range
 //! that is installed.
 //!
 //! [`Epoch::verify`]: crate::epoch::Epoch::verify
+//! [`Strikes::LIMIT`]: crate::fetch::Strikes::LIMIT
 //! [`Epoch::attest`]: crate::epoch::Epoch::attest
 //! [`Epoch::sample`]: crate::epoch::Epoch::sample
 //! [`VerifyState::ChainOk`]: ztreamer_indexer::index::range_meta::VerifyState::ChainOk
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
 
 mod pipeline;
+mod sources;
 mod telemetry;
 
 use std::{future, num::NonZeroUsize, panic, pin, sync::Arc, thread};
 
-use bytes::Bytes;
 use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::{Semaphore, watch};
 use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::index::{
     Index, IndexError, IndexState, RANGE_SIZE,
-    range_meta::{Frontiers, ManifestEntry, NodeId},
+    range_meta::{Frontiers, NodeId},
 };
 
-use self::pipeline::Run;
+use self::{pipeline::Run, sources::Sources};
 use crate::{
     attest::{Attestor, EpochError, NodeError},
     epoch::Epoch,
-    fetch::{FetchError, Fetcher, RangeSource, Source},
+    fetch::{FetchError, RangeSource, Source},
     manifest::Manifest,
     range::Reject,
     sample::{SamplePlan, Sampler},
@@ -137,12 +148,15 @@ impl ImportReport {
 /// Why an import stopped.
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
-    /// The source gave no manifest or no blob.
+    /// No source gave a manifest, or a source gave no blob.
     #[error(transparent)]
     Fetch(#[from] FetchError),
     /// An index read or install failed.
     #[error(transparent)]
     Index(#[from] IndexError),
+    /// The fetchers dropped all sources that have a blob, or the importer has no source.
+    #[error("no source is left")]
+    NoSources,
     /// The manifest is for another network.
     #[error("manifest is for network {manifest}, the index for {index}")]
     Network {
@@ -217,7 +231,7 @@ impl ImportError {
     }
 }
 
-/// Installs the sealed ranges of one source in an index, in verified epochs.
+/// Installs the sealed ranges of one or more sources in an index, in verified epochs.
 ///
 /// ```no_run
 /// use std::sync::Arc;
@@ -225,38 +239,38 @@ impl ImportError {
 /// use tokio::sync::watch;
 /// use ztreamer_indexer::index::Index;
 /// use ztreamer_verify::{
-///     fetch::Fetcher,
+///     fetch::Source,
 ///     importer::{ImportConfig, ImportError, ImportReport, Importer, TrustedNode},
 /// };
 ///
 /// # async fn run(
-/// #     fetcher: Fetcher,
+/// #     sources: Vec<Source>,
 /// #     node: TrustedNode,
 /// #     index: Arc<Index>,
 /// #     config: ImportConfig,
 /// # ) -> Result<ImportReport, ImportError> {
 /// let (_stop, shutdown) = watch::channel(false);
-/// let import = Importer::new(fetcher, node, index, config).run(shutdown);
+/// let import = Importer::new(sources, node, index, config).run(shutdown);
 /// tokio::spawn(import).await.unwrap()
 /// # }
 /// ```
 #[derive(Debug)]
 pub struct Importer<S = Source> {
-    source: Fetcher<S>,
+    sources: Sources<S>,
     node: TrustedNode,
     index: Arc<Index>,
     config: ImportConfig,
 }
 
 impl<S: RangeSource + 'static> Importer<S> {
-    /// An importer of the ranges of `source` into `index`, checked against `node`.
-    pub const fn new(
-        source: Fetcher<S>,
+    /// An importer of the ranges of `sources` into `index`, checked against `node`.
+    pub fn new(
+        sources: Vec<S>,
         node: TrustedNode,
         index: Arc<Index>,
         config: ImportConfig,
     ) -> Self {
-        Self { source, node, index, config }
+        Self { sources: Sources::new(sources), node, index, config }
     }
 
     /// Imports the epochs of the manifest after the verified tip of the index, as the module
@@ -269,8 +283,11 @@ impl<S: RangeSource + 'static> Importer<S> {
         self,
         mut shutdown: watch::Receiver<bool>,
     ) -> Result<ImportReport, ImportError> {
-        let manifest = self.source.manifest().await?;
-        self.check_identity(&manifest)?;
+        let manifests = self.sources.manifests().await?;
+        for (_, manifest) in &manifests {
+            self.check_identity(manifest)?;
+        }
+        let manifest = &manifests[0].1;
         let state = self.blocking(|index| index.state()).await?;
         let (sealed, verified) = (state.sealed_through(), state.verified_through());
         let tip = manifest.sealed_through();
@@ -292,7 +309,7 @@ impl<S: RangeSource + 'static> Importer<S> {
             verified_through: verified,
             ..ImportReport::default()
         };
-        let run = Arc::new(Run::new(self, manifest, first, start, sealed));
+        let run = Arc::new(Run::new(self, manifests, first, start, sealed));
         let budget = Arc::new(Semaphore::new(MAX_PENDING_BYTES as usize));
         let stop = async move {
             // A dropped sender never stops the import.
@@ -356,17 +373,6 @@ impl<S: RangeSource + 'static> Importer<S> {
             .ok_or(ImportError::MissingRow { start })
     }
 
-    /// The blob of `entry`. Fetches it again after a wrong digest, until the fetcher drops the
-    /// source.
-    async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, ImportError> {
-        loop {
-            match self.source.blob(entry).await {
-                Err(FetchError::Digest { .. }) => continue,
-                result => return Ok(result?),
-            }
-        }
-    }
-
     /// Runs an index call on the blocking thread pool.
     async fn blocking<T: Send + 'static>(
         &self,
@@ -390,14 +396,16 @@ mod tests {
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_indexer::{
         codec::{RangeDecoder, encode_range},
-        index::range_meta::{Attested, PoolRoots, RangeMeta, SubtreeNode, VerifyState},
+        index::range_meta::{
+            Attested, ManifestEntry, PoolRoots, RangeMeta, SubtreeNode, VerifyState,
+        },
         test_utils::raw_block,
         types::RawIndexBlock,
     };
 
     use super::*;
     use crate::{
-        fetch::HttpSource,
+        fetch::{HttpSource, Strikes},
         manifest::Pool,
         range::Check,
         test_utils::{FileServer, SEED, Snapshot, SourceIndex},
@@ -468,27 +476,51 @@ mod tests {
         }
     }
 
-    /// A source index, its signed snapshot over HTTP, and an empty target index.
+    /// A source index, signed snapshots of it over HTTP, and an empty target index.
     struct Import {
         source: SourceIndex,
-        snapshot: Snapshot,
-        server: FileServer,
+        snapshots: Vec<Snapshot>,
+        servers: Vec<FileServer>,
         target: Arc<Index>,
+        workers: usize,
         _dir: TempDir,
     }
 
     impl Import {
-        async fn new(ranges: u32) -> Self {
+        async fn new(ranges: u32, sources: usize) -> Self {
             let source = SourceIndex::new(ranges).await;
-            let snapshot = Snapshot::export(&source);
-            let server = FileServer::start(snapshot.dir.path()).await;
+            let snapshots: Vec<_> = (0..sources).map(|_| Snapshot::export(&source)).collect();
+            let mut servers = Vec::new();
+            for snapshot in &snapshots {
+                servers.push(FileServer::start(snapshot.dir.path()).await);
+            }
             let dir = tempfile::tempdir().unwrap();
             let target = Arc::new(SourceIndex::open(&dir));
-            Self { source, snapshot, server, target, _dir: dir }
+            Self { source, snapshots, servers, target, workers: 4, _dir: dir }
+        }
+
+        /// The blob at `start` with a wrong tree size at its record 500.
+        fn mutated_blob(&self, start: u32) -> Vec<u8> {
+            let blob = self.source.index.read_sealed_range_bytes(start).unwrap().unwrap();
+            let decoder = RangeDecoder::new(&blob).unwrap();
+            let mut records: Vec<_> =
+                (0..RANGE_SIZE as usize).map(|at| decoder.record(at).unwrap()).collect();
+            records[500].end_tree_sizes.sapling = 1;
+            encode_range(&records).unwrap()
+        }
+
+        /// Changes one byte of the blob file of each entry, and keeps the manifest.
+        fn corrupt_blobs(&self, source: usize, entries: &[ManifestEntry]) {
+            for entry in entries {
+                let path = self.snapshots[source].range_path(entry);
+                let mut blob = std::fs::read(&path).unwrap();
+                blob[100] ^= 1;
+                std::fs::write(path, blob).unwrap();
+            }
         }
 
         fn attestor(&self, hold: Option<Hold>) -> Arc<FakeAttestor> {
-            let answers = self.snapshot.manifest.entries().iter().map(|entry| {
+            let answers = self.snapshots[0].manifest.entries().iter().map(|entry| {
                 let meta = self.source.index.range_meta(entry.start_height).unwrap().unwrap();
                 (entry.end_height, meta.attested.unwrap())
             });
@@ -498,7 +530,6 @@ mod tests {
 
         fn importer(&self, attestor: Arc<FakeAttestor>, network: Network) -> Importer {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
-            let source = HttpSource::new(self.server.base.clone(), key).unwrap();
             let node = TrustedNode {
                 attestor,
                 sampler: Arc::new(FakeSampler),
@@ -507,11 +538,12 @@ mod tests {
             let config = ImportConfig {
                 network,
                 verify_sample: SamplePlan { per_range: 2, seed: 7 },
-                import_workers: NonZeroUsize::new(4).unwrap(),
+                import_workers: NonZeroUsize::new(self.workers).unwrap(),
             };
-            let source = Source::Http(Box::new(source));
-            let fetcher = Fetcher::new(source);
-            Importer::new(fetcher, node, Arc::clone(&self.target), config)
+            let sources = self.servers.iter().map(|server| {
+                Source::Http(Box::new(HttpSource::new(server.base.clone(), key).unwrap()))
+            });
+            Importer::new(sources.collect(), node, Arc::clone(&self.target), config)
         }
 
         async fn run(&self) -> Result<ImportReport, ImportError> {
@@ -519,15 +551,20 @@ mod tests {
             self.importer(self.attestor(None), Network::Mainnet).run(shutdown).await
         }
 
-        /// The blob requests that the snapshot server got.
+        /// The blob requests that all snapshot servers got.
         fn fetches(&self) -> usize {
-            let requests = self.server.requests();
+            (0..self.servers.len()).map(|source| self.fetches_from(source)).sum()
+        }
+
+        /// The blob requests that the snapshot server of `source` got.
+        fn fetches_from(&self, source: usize) -> usize {
+            let requests = self.servers[source].requests();
             requests.iter().filter(|(path, _)| path.starts_with("ranges/")).count()
         }
 
         /// Checks that the target holds the blobs of the source, byte for byte, and is verified.
         fn assert_same_ranges(&self) {
-            let sealed = self.snapshot.manifest.sealed_through();
+            let sealed = self.snapshots[0].manifest.sealed_through();
             for start in (0..=sealed / RANGE_SIZE).map(|range| range * RANGE_SIZE) {
                 let blob = self.target.read_sealed_range_bytes(start).unwrap();
                 assert_eq!(blob, self.source.index.read_sealed_range_bytes(start).unwrap());
@@ -542,11 +579,11 @@ mod tests {
 
     #[tokio::test]
     async fn an_import_installs_the_same_ranges_and_verifies_them() {
-        let import = Import::new(RANGES).await;
+        let import = Import::new(RANGES, 1).await;
 
         let report = import.run().await.unwrap();
 
-        let sealed = import.snapshot.manifest.sealed_through();
+        let sealed = import.snapshots[0].manifest.sealed_through();
         let expected = ImportReport {
             epochs: 3,
             ranges: 25,
@@ -558,7 +595,7 @@ mod tests {
         import.assert_same_ranges();
         let meta = import.target.range_meta(12_000).unwrap().unwrap();
         assert_eq!(meta.state, VerifyState::Verified);
-        assert_eq!(meta.entry, import.snapshot.manifest.entries()[12]);
+        assert_eq!(meta.entry, import.snapshots[0].manifest.entries()[12]);
         assert_eq!(meta.verified_by.unwrap().url, "http://node.test");
         assert_eq!(meta.sampled_heights.len(), 2);
         assert!(meta.sampled_heights.iter().all(|height| (12_000..13_000).contains(height)));
@@ -566,7 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn four_workers_install_twelve_epochs_byte_for_byte() {
-        let import = Import::new(120).await;
+        let import = Import::new(120, 1).await;
 
         let report = import.run().await.unwrap();
 
@@ -577,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_slow_epoch_verifies_last_and_installs_in_order() {
-        let import = Import::new(RANGES).await;
+        let import = Import::new(RANGES, 1).await;
         // The first epoch gets its roots only after the last epoch.
         let attestor = import.attestor(Some((9_999, Some(24_999))));
         let (_stop, shutdown) = watch::channel(false);
@@ -594,7 +631,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stopped_import_keeps_a_prefix_and_a_restart_fetches_only_the_rest() {
-        let import = Import::new(RANGES).await;
+        let import = Import::new(RANGES, 1).await;
         // The second epoch never gets its roots.
         let attestor = import.attestor(Some((19_999, None)));
         let (stop, shutdown) = watch::channel(false);
@@ -620,8 +657,8 @@ mod tests {
 
     #[tokio::test]
     async fn chain_ok_ranges_are_attested_again_from_the_index() {
-        let import = Import::new(RANGES).await;
-        for entry in &import.snapshot.manifest.entries()[..10] {
+        let import = Import::new(RANGES, 1).await;
+        for entry in &import.snapshots[0].manifest.entries()[..10] {
             let start = entry.start_height;
             let blob = import.source.index.read_sealed_range_bytes(start).unwrap().unwrap();
             // An older manifest ended at 4,999, and marked its last range as an epoch end.
@@ -649,13 +686,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_mutated_blob_stops_the_import_at_its_epoch() {
-        let mut import = Import::new(RANGES).await;
-        let blob = import.source.index.read_sealed_range_bytes(15_000).unwrap().unwrap();
-        let decoder = RangeDecoder::new(&blob).unwrap();
-        let mut records: Vec<_> =
-            (0..RANGE_SIZE as usize).map(|at| decoder.record(at).unwrap()).collect();
-        records[500].end_tree_sizes.sapling = 1;
-        import.snapshot.replace_blob(15_000, &encode_range(&records).unwrap());
+        let mut import = Import::new(RANGES, 1).await;
+        let blob = import.mutated_blob(15_000);
+        import.snapshots[0].replace_blob(15_000, &blob);
 
         let error = import.run().await.unwrap_err();
 
@@ -670,8 +703,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_corrupted_source_is_dropped_after_three_strikes() {
+        let mut import = Import::new(RANGES, 2).await;
+        import.workers = 1;
+        // Source 1 sends a wrong blob for each range.
+        import.corrupt_blobs(1, import.snapshots[1].manifest.entries());
+
+        let report = import.run().await.unwrap();
+
+        assert_eq!(report.ranges, 25);
+        import.assert_same_ranges();
+        // The first source of a fetch alternates, and each fetch from source 1 is a strike.
+        // Two epochs fetch at the same time, thus one more fetch can start before the third
+        // strike drops source 1.
+        let strikes = usize::from(Strikes::LIMIT);
+        assert!((strikes..=strikes + 1).contains(&import.fetches_from(1)));
+        assert_eq!(import.fetches_from(0), 25);
+    }
+
+    #[tokio::test]
+    async fn sources_that_disagree_on_a_digest_resolve_by_verification() {
+        let mut import = Import::new(RANGES, 2).await;
+        // The reference manifest gives the digest of a wrong blob, and a wrong end hash for the
+        // entry before the last epoch. Thus the reference loses two disputes.
+        let blob = import.mutated_blob(15_000);
+        import.snapshots[0].replace_blob(15_000, &blob);
+        let mut entries = import.snapshots[0].manifest.entries().to_vec();
+        entries[19].end_hash = block::Hash([9; 32]);
+        import.snapshots[0].replace_entries(entries);
+
+        let report = import.run().await.unwrap();
+
+        assert_eq!(report.ranges, 25);
+        import.assert_same_ranges();
+        let meta = import.target.range_meta(15_000).unwrap().unwrap();
+        assert_eq!(meta.entry, import.snapshots[1].manifest.entries()[15]);
+    }
+
+    #[tokio::test]
+    async fn a_version_that_its_sources_cannot_send_is_skipped() {
+        let mut import = Import::new(RANGES, 2).await;
+        // The reference gives the digest of a wrong blob at 15,000, and has no file for it.
+        let blob = import.mutated_blob(15_000);
+        import.snapshots[0].replace_blob(15_000, &blob);
+        let entry = &import.snapshots[0].manifest.entries()[15];
+        std::fs::remove_file(import.snapshots[0].range_path(entry)).unwrap();
+
+        let report = import.run().await.unwrap();
+
+        assert_eq!(report.ranges, 25);
+        import.assert_same_ranges();
+        let meta = import.target.range_meta(15_000).unwrap().unwrap();
+        assert_eq!(meta.entry, import.snapshots[1].manifest.entries()[15]);
+    }
+
+    #[tokio::test]
+    async fn a_source_without_a_blob_leaves_it_to_the_other_source() {
+        let mut import = Import::new(RANGES, 2).await;
+        import.workers = 1;
+        for entry in &import.snapshots[1].manifest.entries()[..10] {
+            std::fs::remove_file(import.snapshots[1].range_path(entry)).unwrap();
+        }
+
+        let report = import.run().await.unwrap();
+
+        assert_eq!(report.ranges, 25);
+        import.assert_same_ranges();
+    }
+
+    #[tokio::test]
+    async fn sources_that_all_send_a_wrong_blob_leave_no_source() {
+        let import = Import::new(RANGES, 2).await;
+        for source in 0..2 {
+            import.corrupt_blobs(source, &import.snapshots[source].manifest.entries()[..1]);
+        }
+
+        let error = import.run().await.unwrap_err();
+
+        assert!(matches!(error, ImportError::NoSources), "{error:?}");
+        assert_eq!(import.target.state().unwrap().sealed_through(), None);
+    }
+
+    #[tokio::test]
     async fn an_index_at_the_manifest_tip_or_on_another_network_is_refused() {
-        let import = Import::new(RANGES).await;
+        let import = Import::new(RANGES, 1).await;
         let (stop, shutdown) = watch::channel(true);
         let importer = import.importer(import.attestor(None), Network::Mainnet);
         let report = importer.run(shutdown).await.unwrap();
