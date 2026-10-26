@@ -143,18 +143,19 @@ impl Epoch<'_> {
     /// Compares `proof`, the result of [`Epoch::verify`], with the answers of `attestor`, and
     /// returns one [`Attested`] record per entry, in order.
     ///
-    /// The method compares the end hash of each entry with the node, the three roots of `proof`
-    /// at [`Epoch::end_height`] with [`EpochProof::agrees_with`], and the root of each subtree
-    /// that the epoch completed, with one [`Attestor::subtree_roots`] call per pool. A wrong
-    /// subtree root rejects at the end height of the entry that lists it.
+    /// The method compares the end hash of each entry with the node. It compares the three
+    /// roots of `proof` at [`Epoch::end_height`] with [`EpochProof::matches_roots`]. It compares
+    /// the root of each subtree that the epoch completed, with one [`Attestor::subtree_roots`]
+    /// call per pool. A wrong subtree root rejects at the end height of the entry that lists it.
     ///
     /// The record of an entry holds the end hash of the node, the subtrees that the entry
     /// completed, and the roots at its end. The last entry has the roots of the node. An entry
     /// before it has the rebuilt roots of its frontiers: the node attests them through the end
-    /// roots, because the rebuild appends the leaves of the epoch to these trees. A pool that
-    /// has no root at the end is not active before the end, thus its root is `None` in each
-    /// record. In the epoch where a pool becomes active, an entry before the activation height
-    /// has the root of the empty tree, not `None`: its frontier does not tell the two apart.
+    /// roots, because the rebuild appends the leaves of the epoch to these trees. If the node
+    /// gives no root for a pool at the end, the pool is not active before the end. Then the root
+    /// of that pool is `None` in each record. In the epoch where a pool becomes active, an entry
+    /// before the activation height has the root of the empty tree, not `None`. The frontier of
+    /// the entry cannot show the difference.
     ///
     /// ```
     /// use ztreamer_indexer::index::range_meta::{Attested, Frontiers};
@@ -193,7 +194,7 @@ impl Epoch<'_> {
             .tree_roots(end)
             .await
             .map_err(|source| EpochError::Node { height: end, source })?;
-        if !proof.agrees_with(&roots) {
+        if !proof.matches_roots(&roots) {
             return Err(Check::AttestedRoots.at(end).into());
         }
         self.attest_subtrees(proof, attestor).await?;
@@ -441,12 +442,12 @@ mod tests {
         SubtreeNode::Sapling(sapling_crypto::Node::from_bytes([byte; 32]).unwrap())
     }
 
-    /// The honest node roots: Sapling and Orchard are active, Ironwood is not.
+    /// The roots of an honest node: Sapling and Orchard are active, Ironwood is not active.
     fn roots() -> PoolRoots {
         PoolRoots { ironwood: None, ..empty_tree_roots() }
     }
 
-    /// The root of the empty tree for each pool.
+    /// The root of the empty tree of each pool.
     fn empty_tree_roots() -> PoolRoots {
         PoolRoots {
             sapling: Some(sapling::tree::NoteCommitmentTree::default().root()),
@@ -505,8 +506,8 @@ mod tests {
     }
 
     /// Attests one epoch of three ranges, 0 to 2,999, with `attestor`. Each range adds one
-    /// Sapling commitment, and the second range completes Sapling subtree [`SUBTREE`]. The
-    /// proof has the root of the empty tree for each pool.
+    /// Sapling commitment. The second range completes Sapling subtree [`SUBTREE`]. The proof has
+    /// the root of the empty tree for each pool.
     async fn attest(attestor: &FakeAttestor) -> Result<Vec<Attested>, EpochError> {
         let completed = SubtreeRoot { index: SUBTREE, root: sapling_node(1) };
         let mut entries = synthetic_entries(&[TreeSizes { sapling: 1, ..TreeSizes::default() }; 3]);
@@ -533,8 +534,9 @@ mod tests {
     async fn matching_answers_give_one_attested_record_per_range() {
         let attested = attest(&FakeAttestor::honest()).await.unwrap();
 
-        // The first two ranges have the rebuilt roots of their frontiers, and no Ironwood root
-        // because the node gives none at the end. Only the second range completes the subtree.
+        // The first two ranges have the rebuilt roots of their frontiers. They have no Ironwood
+        // root, because the node gives no Ironwood root at the end. Only the second range
+        // completes the subtree.
         let record = |end_height, roots, subtree_roots| Attested {
             end_hash: hash(end_height),
             roots,
@@ -567,7 +569,7 @@ mod tests {
         attestor.roots.insert(2_999, PoolRoots { orchard: Some(orchard.root()), ..roots() });
         assert_rejected(attest(&attestor).await, Check::AttestedRoots, 2_999);
 
-        // The rebuilt Sapling tree has 3 commitments: an inactive Sapling pool is wrong.
+        // The rebuilt Sapling tree has 3 commitments. Thus the node must give a Sapling root.
         let mut attestor = FakeAttestor::honest();
         attestor.roots.insert(2_999, PoolRoots { sapling: None, ..roots() });
         assert_rejected(attest(&attestor).await, Check::AttestedRoots, 2_999);
@@ -708,8 +710,8 @@ mod tests {
         );
     }
 
-    /// The first mainnet epoch, 0 to 9,999, as the filler writes it: no commitments, and the
-    /// serialized empty frontier `000000` for each pool, also for a pool that is not active.
+    /// The first mainnet epoch, 0 to 9,999, as the filler writes it. It has no commitments. Each
+    /// pool has the serialized empty frontier `000000`, also a pool that is not active.
     fn first_epoch() -> (Vec<ManifestEntry>, Vec<Vec<u8>>) {
         let empty = vec![0; 3];
         let blocks: Vec<_> =
@@ -729,7 +731,7 @@ mod tests {
             .unzip()
     }
 
-    /// Verifies and attests [`first_epoch`] with a mock node that gives `treestate` at 9,999.
+    /// Verifies [`first_epoch`], and attests it with a mock node that gives `treestate` at 9,999.
     async fn attest_first_epoch(treestate: Value) -> Result<Vec<Attested>, EpochError> {
         let (entries, blobs) = first_epoch();
         let epoch = Epochs::new(&entries).next().unwrap();
@@ -739,7 +741,7 @@ mod tests {
         epoch.attest(&proof, &attestor).await
     }
 
-    /// The `z_gettreestate` answer of zakura at 9,999 on mainnet: no pool is active.
+    /// The `z_gettreestate` answer of zakura at 9,999 on mainnet. No pool is active.
     fn inactive_treestate() -> Value {
         let mut state = treestate(9_999);
         for pool in ["sapling", "orchard", "ironwood"] {
@@ -749,7 +751,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_frontiers_agree_with_a_node_that_gives_no_roots() {
+    async fn an_epoch_with_empty_trees_verifies_when_the_node_gives_no_roots() {
         let attested = attest_first_epoch(inactive_treestate()).await.unwrap();
 
         assert_eq!(attested.len(), 10);
@@ -757,7 +759,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_active_pool_with_an_empty_tree_agrees_with_the_empty_tree_root() {
+    async fn an_active_pool_with_an_empty_tree_verifies_with_the_empty_tree_root() {
         let mut state = inactive_treestate();
         let mut sapling = <[u8; 32]>::from(empty_tree_roots().sapling.unwrap());
         sapling.reverse();

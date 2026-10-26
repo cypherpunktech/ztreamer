@@ -71,8 +71,8 @@ impl<'a> Epoch<'a> {
     ///
     /// An empty frontier means that the pool is not active, as in the manifest: its tree is
     /// empty. An active pool that becomes inactive is [`Check::Frontier`]. The proof has a root
-    /// for each pool, also for an empty tree. [`EpochProof::agrees_with`] compares them with the
-    /// node.
+    /// for each pool, also for an empty tree. [`EpochProof::matches_roots`] compares these roots
+    /// with the node roots.
     pub fn verify(
         &self,
         blobs: &[impl AsRef<[u8]>],
@@ -176,30 +176,34 @@ pub struct EpochProof {
     /// The frontiers at the end of the epoch: the frontiers of its last entry, which the rebuild
     /// gave byte for byte. They are the start frontiers of the next epoch.
     pub end_frontiers: Frontiers,
-    /// The tree sizes at [`Epoch::end_height`], the sizes of the rebuilt trees.
+    /// The tree sizes at [`Epoch::end_height`]. They are the sizes of the rebuilt trees.
     pub end_tree_sizes: TreeSizes,
     /// The rebuilt roots at [`Epoch::end_height`]. Each root is `Some`: a tree with no
-    /// commitments has the root of the empty tree. Use [`EpochProof::agrees_with`] to compare
-    /// them with the `z_gettreestate` answer of the node.
+    /// commitments has the root of the empty tree. To compare these roots with the
+    /// `z_gettreestate` answer of the node, use [`EpochProof::matches_roots`].
     pub roots: PoolRoots,
     /// The subtrees that the epoch completed, in the order that its blocks completed them.
     pub completed: Vec<SubtreeRoot>,
 }
 
 impl EpochProof {
-    /// Returns `true` if `node`, the tree roots of the node at [`Epoch::end_height`], agree with
-    /// the rebuilt trees, pool by pool.
+    /// Returns `true` if each root in `node_roots` matches the rebuilt tree of its pool.
+    /// `node_roots` are the roots of the node at [`Epoch::end_height`].
     ///
-    /// A root of the node must equal the rebuilt root. The node gives no root for a pool that
-    /// is not active. That answer agrees only with a tree that has no commitments. The frontier
-    /// does not tell an inactive pool from an active pool with an empty tree: both are an empty
-    /// tree, which can have the serialized empty frontier `000000`. Thus the tree size decides,
-    /// not the frontier.
-    pub fn agrees_with(&self, node: &PoolRoots) -> bool {
+    /// The method uses one of these rules for each pool:
+    /// - The node gives a root: the root must be equal to the rebuilt root.
+    /// - The node gives no root, because the pool is not active: the rebuilt tree must have 0
+    ///   commitments.
+    ///
+    /// The method uses the tree size, not the frontier. The frontier cannot show if a pool with
+    /// an empty tree is active: both cases can have the serialized empty frontier `000000`.
+    pub fn matches_roots(&self, node_roots: &PoolRoots) -> bool {
         let (rebuilt, sizes) = (&self.roots, self.end_tree_sizes);
-        node.sapling.map_or(sizes.sapling == 0, |root| rebuilt.sapling == Some(root))
-            && node.orchard.map_or(sizes.orchard == 0, |root| rebuilt.orchard == Some(root))
-            && node.ironwood.map_or(sizes.ironwood == 0, |root| rebuilt.ironwood == Some(root))
+        node_roots.sapling.map_or(sizes.sapling == 0, |root| rebuilt.sapling == Some(root))
+            && node_roots.orchard.map_or(sizes.orchard == 0, |root| rebuilt.orchard == Some(root))
+            && node_roots
+                .ironwood
+                .map_or(sizes.ironwood == 0, |root| rebuilt.ironwood == Some(root))
     }
 }
 
