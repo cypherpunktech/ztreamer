@@ -8,7 +8,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use metrics::{Counter, Gauge, Histogram};
 use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_indexer::index::{
@@ -16,7 +15,10 @@ use ztreamer_indexer::index::{
     range_meta::{Frontiers, RangeMeta, VerifyState},
 };
 
-use super::{ImportError, Importer, MAX_PENDING_BYTES};
+use super::{
+    ImportError, Importer, MAX_PENDING_BYTES,
+    telemetry::{ImportMetrics, Stage},
+};
 use crate::{
     epoch::{Epoch, EpochProof, Epochs},
     fetch::RangeSource,
@@ -25,31 +27,6 @@ use crate::{
 
 /// The blobs of an epoch and their `range_meta` rows, in height order.
 pub(crate) type Rows = Vec<(Bytes, RangeMeta)>;
-
-/// The metrics of an import, below `ztreamer.replicate`.
-struct ImportMetrics {
-    fetch: Histogram,
-    verify: Histogram,
-    attest: Histogram,
-    sample: Histogram,
-    bytes_fetched: Counter,
-    epochs_pending: Gauge,
-    workers_busy: Gauge,
-}
-
-impl ImportMetrics {
-    fn new() -> Self {
-        Self {
-            fetch: metrics::histogram!("ztreamer.replicate.fetch_seconds"),
-            verify: metrics::histogram!("ztreamer.replicate.verify_seconds"),
-            attest: metrics::histogram!("ztreamer.replicate.attest_seconds"),
-            sample: metrics::histogram!("ztreamer.replicate.sample_seconds"),
-            bytes_fetched: metrics::counter!("ztreamer.replicate.bytes_fetched_total", "source" => "0"),
-            epochs_pending: metrics::gauge!("ztreamer.replicate.epochs_pending"),
-            workers_busy: metrics::gauge!("ztreamer.replicate.workers_busy"),
-        }
-    }
-}
 
 /// One import: the importer, the manifest, and where the import starts. The futures of the
 /// epochs share it.
@@ -156,11 +133,11 @@ impl<S: RangeSource + 'static> Run<S> {
             let mut blobs = Vec::with_capacity(entries.len());
             for entry in entries {
                 blobs.push(self.importer.blob(entry).await?);
-                self.metrics.bytes_fetched.increment(entry.blob_len);
+                self.metrics.add_fetched_bytes(entry.blob_len);
             }
             blobs
         };
-        self.metrics.fetch.record(started.elapsed());
+        self.metrics.record(Stage::Fetch, started);
         Ok(blobs)
     }
 
@@ -171,24 +148,22 @@ impl<S: RangeSource + 'static> Run<S> {
         at: usize,
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<Bytes>, EpochProof), ImportError> {
-        self.metrics.epochs_pending.increment(1.0);
-        let permit = self.workers.acquire().await.expect("the workers are never closed");
-        self.metrics.epochs_pending.decrement(1.0);
-        self.metrics.workers_busy.increment(1.0);
+        let _permit = {
+            let _pending = self.metrics.pending_epoch();
+            self.workers.acquire().await.expect("the workers are never closed")
+        };
+        let _busy = self.metrics.busy_worker();
         let (run, span) = (Arc::clone(self), Span::current());
-        let rebuilt = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
                 let started = Instant::now();
                 let rebuilt = run.verify(at, blobs);
-                run.metrics.verify.record(started.elapsed());
+                run.metrics.record(Stage::Verify, started);
                 rebuilt
             })
         })
         .await
-        .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()));
-        self.metrics.workers_busy.decrement(1.0);
-        drop(permit);
-        rebuilt
+        .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
     }
 
     /// Runs [`Epoch::verify`] for the epoch at `at`. Call it on the blocking thread pool.
@@ -222,14 +197,14 @@ impl<S: RangeSource + 'static> Run<S> {
         let attest = async {
             let started = Instant::now();
             let attested = epoch.attest(&proof, &*node.attestor).await;
-            self.metrics.attest.record(started.elapsed());
+            self.metrics.record(Stage::Attest, started);
             attested
         };
         let sample = async {
             let started = Instant::now();
             let plan = self.importer.config.verify_sample;
             let sampled = epoch.sample(&blobs, &*node.sampler, plan).await;
-            self.metrics.sample.record(started.elapsed());
+            self.metrics.record(Stage::Sample, started);
             sampled
         };
         let (attested, sampled) = tokio::join!(attest, sample);

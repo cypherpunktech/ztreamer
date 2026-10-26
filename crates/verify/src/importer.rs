@@ -37,6 +37,7 @@
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
 
 mod pipeline;
+mod telemetry;
 
 use std::{future, num::NonZeroUsize, panic, pin, sync::Arc, thread};
 
