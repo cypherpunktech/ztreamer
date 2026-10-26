@@ -8039,7 +8039,6 @@ dependencies = [
 name = "ztreamer-service"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "clap",
  "criterion",
  "futures-util",
@@ -8076,7 +8075,6 @@ name = "ztreamer-verify"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "blake3",
  "bytes",
  "criterion",
  "ed25519-dalek",

@@ -143,7 +143,7 @@ impl Snapshot {
     pub(crate) fn replace_blob(&mut self, start: u32, blob: &[u8]) {
         let mut entries = self.manifest.entries().to_vec();
         let entry = &mut entries[(start / RANGE_SIZE) as usize];
-        entry.blob_digest = BlobDigest(*blake3::hash(blob).as_bytes());
+        entry.blob_digest = BlobDigest::hash(blob);
         entry.blob_len = blob.len() as u64;
         fs::write(self.range_path(entry), blob).unwrap();
         self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())

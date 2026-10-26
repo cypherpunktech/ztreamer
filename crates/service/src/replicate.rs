@@ -232,7 +232,7 @@ mod tests {
                     end_tree_sizes: last.end_tree_sizes,
                     frontiers: Frontiers { sapling: vec![0xab; 40], ..Frontiers::default() },
                     subtree_roots: Vec::new(),
-                    blob_digest: BlobDigest(*blake3::hash(&blob).as_bytes()),
+                    blob_digest: BlobDigest::hash(&blob),
                     blob_len: blob.len() as u64,
                     epoch_end: start == 0,
                 };

@@ -12,7 +12,6 @@ workspace = true
 test-utils = ["dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer/test-utils"]
 
 [dependencies]
-blake3.workspace = true
 futures-util = "0.3"
 hex = "0.4"
 lru = "0.18"

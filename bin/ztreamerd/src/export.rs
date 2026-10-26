@@ -358,7 +358,7 @@ mod tests {
                         index: NoteCommitmentSubtreeIndex(1),
                         root: SubtreeNode::Orchard(orchard::tree::Node::try_from([2; 32]).unwrap()),
                     }],
-                    blob_digest: BlobDigest(*blake3::hash(&blob).as_bytes()),
+                    blob_digest: BlobDigest::hash(&blob),
                     blob_len: blob.len() as u64,
                     epoch_end,
                 };

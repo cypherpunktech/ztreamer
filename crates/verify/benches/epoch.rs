@@ -68,7 +68,7 @@ fn peak_range() -> (ManifestEntry, Vec<u8>) {
         end_tree_sizes: last.end_tree_sizes,
         frontiers: Frontiers { sapling: tree.to_rpc_bytes(), ..Frontiers::default() },
         subtree_roots,
-        blob_digest: BlobDigest(*blake3::hash(&blob).as_bytes()),
+        blob_digest: BlobDigest::hash(&blob),
         blob_len: blob.len() as u64,
         epoch_end: true,
     };

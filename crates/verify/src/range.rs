@@ -155,7 +155,7 @@ impl<'a> RangeBlob<'a> {
     pub fn matches_digest(&self) -> bool {
         // Compare the length first: it is free, and the digest reads the whole blob.
         u64::try_from(self.bytes.len()) == Ok(self.entry.blob_len)
-            && BlobDigest(*blake3::hash(self.bytes).as_bytes()) == self.entry.blob_digest
+            && BlobDigest::hash(self.bytes) == self.entry.blob_digest
     }
 
     /// Runs the checks in the module docs.
@@ -231,7 +231,7 @@ pub(crate) fn entry_for(records: &[CompactBlockRecord], blob: &[u8]) -> Manifest
         end_tree_sizes: last.end_tree_sizes,
         frontiers: ztreamer_indexer::index::range_meta::Frontiers::default(),
         subtree_roots: Vec::new(),
-        blob_digest: BlobDigest(*blake3::hash(blob).as_bytes()),
+        blob_digest: BlobDigest::hash(blob),
         blob_len: blob.len() as u64,
         epoch_end: false,
     }

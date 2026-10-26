@@ -311,7 +311,7 @@ impl RangeRead {
             start,
             start_tree_sizes,
             last,
-            blob_digest: BlobDigest(*blake3::hash(&blob).as_bytes()),
+            blob_digest: BlobDigest::hash(&blob),
             blob_len: blob.len() as u64,
         })
     }
@@ -460,7 +460,7 @@ mod tests {
             let entry = &meta.entry;
             assert_eq!((entry.start_height, entry.end_height), (start, start + 999));
             assert_eq!((entry.end_hash, entry.end_tree_sizes), (last.hash, last.end_tree_sizes));
-            assert_eq!(entry.blob_digest, BlobDigest(*blake3::hash(&blob).as_bytes()));
+            assert_eq!(entry.blob_digest, BlobDigest::hash(&blob));
             assert_eq!(entry.blob_len, blob.len() as u64);
             assert!(!entry.epoch_end);
             assert_eq!(meta.state, VerifyState::Verified);

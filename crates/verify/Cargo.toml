@@ -10,7 +10,6 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1"
-blake3 = "1"
 bytes = "1"
 ed25519-dalek.workspace = true
 hex = "0.4"
