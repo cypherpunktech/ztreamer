@@ -68,6 +68,11 @@ impl<'env> IndexWriter<'env> {
         self.state
     }
 
+    /// Reads the metadata of the sealed range at `start` as this transaction sees it.
+    pub(crate) fn range_meta(&self, start: u32) -> Result<Option<RangeMeta>, IndexError> {
+        self.tables.range_meta.get(&self.txn, start)
+    }
+
     /// Reads the block at `height` as this transaction sees it.
     pub(crate) fn read(&self, height: u32) -> Result<CompactBlockRecord, IndexError> {
         self.tables.read(&self.txn, self.state, height)
@@ -158,7 +163,8 @@ impl<'env> IndexWriter<'env> {
 
     /// Writes a packed range from a snapshot and its metadata. Moves `sealed_through` to the
     /// range end. A [`VerifyState::Verified`] range advances `verified_through` if the old value
-    /// is `start - 1`. The caller must check that `start` is [`IndexState::next_range_start`].
+    /// is `start - 1` (see [`IndexWriter::extend_verified_prefix`]). The caller must check that
+    /// `start` is [`IndexState::next_range_start`].
     pub(crate) fn put_sealed_range(
         &mut self,
         start: u32,
@@ -167,14 +173,39 @@ impl<'env> IndexWriter<'env> {
     ) -> Result<(), IndexError> {
         self.tables.sealed_ranges.put(&mut self.txn, start, packed)?;
         self.tables.range_meta.put(&mut self.txn, start, meta)?;
-        let end = meta.entry.end_height;
-        if meta.state == VerifyState::Verified
-            && self.state.verified_through == start.checked_sub(1)
-        {
-            self.state.verified_through = Some(end);
+        self.state.sealed_through = Some(meta.entry.end_height);
+        self.extend_verified_prefix()
+    }
+
+    /// Replaces the metadata of the sealed range at `start` with `meta`, and moves
+    /// `verified_through` to the range end (see [`IndexWriter::extend_verified_prefix`]). The
+    /// caller must check that the range is the next range after the verified prefix.
+    pub(crate) fn put_verified_range(
+        &mut self,
+        start: u32,
+        meta: &RangeMeta,
+    ) -> Result<(), IndexError> {
+        self.tables.range_meta.put(&mut self.txn, start, meta)?;
+        self.extend_verified_prefix()
+    }
+
+    /// Moves `verified_through` over each range after the verified prefix that has a
+    /// [`VerifyState::Verified`] row. It stops at the first range with no row or with another
+    /// state. Thus a range that was verified before the ranges below it joins the prefix when
+    /// they are verified.
+    fn extend_verified_prefix(&mut self) -> Result<(), IndexError> {
+        loop {
+            let start = self.state.next_verify_start()?;
+            let Some(row) = self
+                .tables
+                .range_meta
+                .get(&self.txn, start)?
+                .filter(|row| row.state == VerifyState::Verified)
+            else {
+                return Ok(());
+            };
+            self.state.verified_through = Some(row.entry.end_height);
         }
-        self.state.sealed_through = Some(end);
-        Ok(())
     }
 
     /// Seals each range that ends at or below both `seal_through` and the tip. Call it after

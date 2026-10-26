@@ -58,8 +58,10 @@
 //! - The previous hash of each block is the hash of the block below it.
 //! - The state holds the hash and the tree sizes of the durable tip.
 //! - `verified_through` is not set, or it is the last height of a range at or below
-//!   `sealed_through`. Only an install of a [`VerifyState::Verified`] range advances it. The
-//!   range must start at `verified_through + 1`, or at 0.
+//!   `sealed_through`. Only an install of a [`VerifyState::Verified`] range and
+//!   [`Index::advance_verified_through`] advance it. The range must start at
+//!   `verified_through + 1`, or at 0. The write also moves `verified_through` over the next
+//!   ranges that have a [`VerifyState::Verified`] row.
 //! - Every `range_meta` key is the first height of a sealed range. A sealed range may have no
 //!   `range_meta` row.
 //! - An empty index has no state row, and its block tables and `range_meta` are empty.
@@ -212,6 +214,13 @@ impl IndexState {
             .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
     }
 
+    /// Returns the first height of the next range to verify: `verified_through + 1`, or 0 if no
+    /// range is verified.
+    pub(crate) fn next_verify_start(&self) -> Result<u32, IndexError> {
+        self.verified_through
+            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
+    }
+
     /// Returns `true` if the index has mutable rows. The mutable rows cover the heights above
     /// `sealed_through` to the durable tip. Thus they exist only if the tip is above
     /// `sealed_through`.
@@ -277,6 +286,32 @@ pub enum IndexError {
     BlobDigest {
         /// The first height of the range.
         start: u32,
+    },
+    /// The metadata for an advance of `verified_through` does not have the state
+    /// [`VerifyState::Verified`].
+    #[error("metadata for range {start} has state {state:?}; an advance needs the state Verified")]
+    NotVerified {
+        /// The first height of the range.
+        start: u32,
+        /// The state of the metadata.
+        state: VerifyState,
+    },
+    /// The `range_meta` row of the range does not have the state [`VerifyState::ChainOk`]. Thus
+    /// an advance of `verified_through` cannot replace it.
+    #[error("range metadata at {start} has state {state:?}; an advance needs the state ChainOk")]
+    NotChainOk {
+        /// The first height of the range.
+        start: u32,
+        /// The state of the row.
+        state: VerifyState,
+    },
+    /// The range is not the next range after the verified prefix.
+    #[error("range at {start} is not the next range to verify; the next range starts at {next}")]
+    VerifyOrder {
+        /// The first height of the range.
+        start: u32,
+        /// The first height of the next range to verify.
+        next: u32,
     },
 }
 
@@ -487,6 +522,47 @@ impl Index {
         writer.put_new_hashes(&chain.ids)?;
         writer.put_sealed_range(start, blob, meta)?;
         writer.set_tip(BlockId::new(last.height, last.hash), last.end_tree_sizes);
+        writer.commit()
+    }
+
+    /// Marks the sealed range at `start` as verified after a later attestation. It does this in
+    /// one write.
+    ///
+    /// Conditions:
+    ///
+    /// - The range at `start` is sealed, and its `range_meta` row has the state
+    ///   [`VerifyState::ChainOk`].
+    /// - `meta.state` is [`VerifyState::Verified`], and `meta.entry` is the entry of the row.
+    /// - The range is the next range after the verified prefix: `start` is
+    ///   `verified_through + 1`, or 0 if `verified_through` is not set.
+    ///
+    /// The write replaces the row with `meta`, and it moves `verified_through` to the range end.
+    /// If the next ranges have [`VerifyState::Verified`] rows, it moves `verified_through` over
+    /// them too. The commit increases the generation.
+    pub fn advance_verified_through(
+        &self,
+        start: u32,
+        meta: &RangeMeta,
+    ) -> Result<IndexState, IndexError> {
+        let mut writer = IndexWriter::start_latest(&self.env, self.tables)?;
+        let state = writer.state();
+        if meta.state != VerifyState::Verified {
+            return Err(IndexError::NotVerified { start, state: meta.state });
+        }
+        // Only a sealed range has a row, and its key is the range start.
+        let old = writer.range_meta(start)?.ok_or(IndexError::RangeMeta { start })?;
+        if old.entry != meta.entry {
+            return Err(IndexError::RangeMeta { start });
+        }
+        if old.state != VerifyState::ChainOk {
+            return Err(IndexError::NotChainOk { start, state: old.state });
+        }
+        let next = state.next_verify_start()?;
+        if start != next {
+            return Err(IndexError::VerifyOrder { start, next });
+        }
+
+        writer.put_verified_range(start, meta)?;
         writer.commit()
     }
 
@@ -1295,6 +1371,105 @@ mod tests {
         let index =
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         assert_eq!(verified(install(&index, 0, VerifyState::Unverified).unwrap()), None);
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn re_attestation_advances_verified_through_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index");
+        let index = Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        // A `ChainOk` install does not set the verified prefix.
+        for start in [0, 1_000] {
+            assert_eq!(
+                install(&index, start, VerifyState::ChainOk).unwrap().verified_through(),
+                None
+            );
+        }
+        let verified_meta = |start| snapshot_range(start, VerifyState::Verified).1;
+
+        // The range at 0 is not verified. Thus the range at 1,000 is not the next range.
+        let before = index.state().unwrap();
+        assert!(matches!(
+            index.advance_verified_through(1_000, &verified_meta(1_000)),
+            Err(IndexError::VerifyOrder { start: 1_000, next: 0 })
+        ));
+        assert_eq!(index.state().unwrap(), before);
+        assert_eq!(index.range_meta(1_000).unwrap().unwrap().state, VerifyState::ChainOk);
+
+        let state = index.advance_verified_through(0, &verified_meta(0)).unwrap();
+        assert_eq!(state.verified_through(), Some(999));
+        assert_eq!(state.generation(), before.generation() + 1);
+        assert_eq!(index.range_meta(0).unwrap(), Some(verified_meta(0)));
+        let state = index.advance_verified_through(1_000, &verified_meta(1_000)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(1_999), Some(1_999)));
+        assert_eq!(index.state().unwrap(), state);
+
+        drop(index);
+        let reopened =
+            Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        assert_eq!(reopened.state().unwrap(), state);
+        assert_eq!(reopened.range_meta(1_000).unwrap(), Some(verified_meta(1_000)));
+        reopened.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn advance_refuses_a_range_that_is_not_chain_ok_or_a_meta_that_is_not_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::ChainOk).unwrap();
+        let state = install(&index, 1_000, VerifyState::Unverified).unwrap();
+        let verified_meta = |start| snapshot_range(start, VerifyState::Verified).1;
+
+        // The range at 2,000 is not sealed. Thus it has no row.
+        assert!(matches!(
+            index.advance_verified_through(2_000, &verified_meta(2_000)),
+            Err(IndexError::RangeMeta { start: 2_000 })
+        ));
+        assert!(matches!(
+            index.advance_verified_through(0, &snapshot_range(0, VerifyState::ChainOk).1),
+            Err(IndexError::NotVerified { start: 0, state: VerifyState::ChainOk })
+        ));
+        // The meta must have the same manifest entry as the row.
+        let mut meta_with_other_entry = verified_meta(0);
+        meta_with_other_entry.entry.end_hash = hash(1);
+        assert!(matches!(
+            index.advance_verified_through(0, &meta_with_other_entry),
+            Err(IndexError::RangeMeta { start: 0 })
+        ));
+        assert_eq!(index.state().unwrap(), state);
+
+        index.advance_verified_through(0, &verified_meta(0)).unwrap();
+        assert!(matches!(
+            index.advance_verified_through(0, &verified_meta(0)),
+            Err(IndexError::NotChainOk { start: 0, state: VerifyState::Verified })
+        ));
+        assert!(matches!(
+            index.advance_verified_through(1_000, &verified_meta(1_000)),
+            Err(IndexError::NotChainOk { start: 1_000, state: VerifyState::Unverified })
+        ));
+        assert_eq!(index.state().unwrap().verified_through(), Some(999));
+        index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn advance_moves_the_prefix_over_ranges_that_are_verified_already() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::ChainOk).unwrap();
+        install(&index, 1_000, VerifyState::Verified).unwrap();
+        install(&index, 2_000, VerifyState::ChainOk).unwrap();
+        // The range at 1,000 is verified, and the range at 0 is not. Thus the prefix is empty.
+        assert_eq!(index.state().unwrap().verified_through(), None);
+        let verified_meta = |start| snapshot_range(start, VerifyState::Verified).1;
+
+        // The prefix moves over the range at 1,000. It stops at the ChainOk range at 2,000.
+        let state = index.advance_verified_through(0, &verified_meta(0)).unwrap();
+        assert_eq!(state.verified_through(), Some(1_999));
+        let state = index.advance_verified_through(2_000, &verified_meta(2_000)).unwrap();
+        assert_eq!(state.verified_through(), Some(2_999));
         index.verify_continuity().unwrap();
     }
 
