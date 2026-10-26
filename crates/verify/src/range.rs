@@ -117,8 +117,10 @@ pub(crate) fn check_range_with(
     previous: Option<&RangeLink>,
     mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), Reject>,
 ) -> Result<RangeLink, Reject> {
-    let digest = BlobDigest(*blake3::hash(blob).as_bytes());
-    if u64::try_from(blob.len()) != Ok(entry.blob_len) || digest != entry.blob_digest {
+    // Compare the length first: it is free, and the digest reads the whole blob.
+    if u64::try_from(blob.len()) != Ok(entry.blob_len)
+        || BlobDigest(*blake3::hash(blob).as_bytes()) != entry.blob_digest
+    {
         return Err(Reject::Refetch { start_height: entry.start_height });
     }
     let start = entry.start_height;
