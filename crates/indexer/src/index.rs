@@ -58,10 +58,14 @@
 //! - The previous hash of each block is the hash of the block below it.
 //! - The state holds the hash and the tree sizes of the durable tip.
 //! - `verified_through` is not set, or it is the last height of a range at or below
-//!   `sealed_through`. Only an install of a [`VerifyState::Verified`] range and
-//!   [`Index::advance_verified_through`] advance it. The range must start at
-//!   `verified_through + 1`, or at 0. The write also moves `verified_through` over the next
-//!   ranges that have a [`VerifyState::Verified`] row.
+//!   `sealed_through`. Only these writes advance it:
+//!   - An install of a [`VerifyState::Verified`] range, and
+//!     [`Index::advance_verified_through`]. The range must start at `verified_through + 1`, or
+//!     at 0. The write also moves `verified_through` over the next ranges that have a
+//!     [`VerifyState::Verified`] row.
+//!   - A seal of mutable rows into a range that starts at `verified_through + 1`. The range has
+//!     no `range_meta` row. This write does not set a `verified_through` that is not set. Thus
+//!     the embedded mode never sets it.
 //! - Every `range_meta` key is the first height of a sealed range. A sealed range may have no
 //!   `range_meta` row.
 //! - An empty index has no state row, and its block tables and `range_meta` are empty.
@@ -1043,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_reorg_drops_the_metadata_and_the_verified_prefix_of_rebuilt_ranges() {
+    fn deep_reorg_drops_the_metadata_of_rebuilt_ranges_and_they_rejoin_the_verified_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let index =
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
@@ -1057,20 +1061,22 @@ mod tests {
         txn.commit().unwrap();
         assert_eq!(index.state().unwrap().verified_through(), Some(1_999));
 
-        // The reorg rebuilds the range 1,000..=1,999: its metadata goes, the first range's stays,
-        // and the verified prefix ends with the first range.
+        // The reorg rebuilds the range 1,000..=1,999: its metadata goes, and the first range's
+        // stays. The rebuilt range starts directly after the verified prefix, which ends with the
+        // first range. Thus the rebuilt range joins the prefix again.
         let common = BlockId::new(1_950, hash(1_950));
         let replacement = branch(common, 1_951..=2_110);
         let state =
             index.replace_deep_suffix(old.generation(), common, replacement, Some(2_010)).unwrap();
 
         assert_eq!(state.sealed_through(), Some(1_999));
-        assert_eq!(state.verified_through(), Some(999));
+        assert_eq!(state.verified_through(), Some(1_999));
         assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
         assert_eq!(index.range_meta(1_000).unwrap(), None);
         index.verify_continuity().unwrap();
 
-        // A reorg into the first range ends the verified prefix altogether.
+        // A reorg into the first range ends the verified prefix altogether. A range sealed with no
+        // verified prefix does not start a prefix.
         let common = BlockId::new(950, hash(950));
         let replacement = branch(common, 951..=2_110);
         let state = index
@@ -1372,6 +1378,44 @@ mod tests {
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         assert_eq!(verified(install(&index, 0, VerifyState::Unverified).unwrap()), None);
         index.verify_continuity().unwrap();
+    }
+
+    #[test]
+    fn a_range_sealed_after_the_verified_prefix_advances_verified_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::Verified).unwrap();
+        let state = index.write(batch(&index, 1_000..=2_100, 2_200)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(1_999), Some(1_999)));
+        assert_eq!(index.range_meta(1_000).unwrap(), None);
+        index.verify_continuity().unwrap();
+
+        // The range at 1,000 is not verified. Thus a range sealed at 2,000 is not directly after
+        // the verified prefix.
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::Verified).unwrap();
+        install(&index, 1_000, VerifyState::ChainOk).unwrap();
+        let state = index.write(batch(&index, 2_000..=3_100, 3_200)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(2_999), Some(999)));
+    }
+
+    #[test]
+    fn a_range_sealed_with_no_verified_prefix_keeps_verified_through_unset() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let state = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(999), None));
+
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        install(&index, 0, VerifyState::ChainOk).unwrap();
+        let state = index.write(batch(&index, 1_000..=2_100, 2_200)).unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(1_999), None));
     }
 
     #[test]

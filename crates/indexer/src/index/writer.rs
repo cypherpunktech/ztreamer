@@ -261,7 +261,19 @@ impl<'env> IndexWriter<'env> {
             timer.bytes(WriteStage::SealPut, packed.len());
         });
         self.state.sealed_through = Some(end);
+        self.join_sealed_range_to_verified_prefix(start, end);
         Ok(())
+    }
+
+    /// Moves `verified_through` to `end` if the range `start..=end`, which the index sealed from
+    /// node blocks, starts directly after the verified prefix. A replica trusts its source node
+    /// as much as its verified snapshot. Thus a range that it seals from the tail or the head
+    /// follower joins the prefix. An index with no `verified_through`, as in the embedded mode,
+    /// keeps it unset.
+    fn join_sealed_range_to_verified_prefix(&mut self, start: u32, end: u32) {
+        if self.state.verified_through.and_then(|through| through.checked_add(1)) == Some(start) {
+            self.state.verified_through = Some(end);
+        }
     }
 
     /// Advances the generation, writes the state, and commits. This is the only path that
