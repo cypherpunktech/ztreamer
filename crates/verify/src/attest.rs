@@ -16,7 +16,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use zakura_chain::{block, serialization::SerializationError, subtree::NoteCommitmentSubtreeIndex};
+use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
@@ -24,6 +24,7 @@ use ztreamer_indexer::{
     frontier::{FromRpc, RpcDecodeError},
     index::range_meta::{Attested, PoolRoots, SubtreeNode},
     parser::CompactParseError,
+    types::RawBlockError,
 };
 use ztreamer_remote::{RpcError, ZakuraClient};
 
@@ -82,12 +83,9 @@ pub enum NodeError {
         /// The index of the subtree.
         index: NoteCommitmentSubtreeIndex,
     },
-    /// The node block does not deserialize.
-    #[error("node block does not deserialize")]
-    Block(#[from] SerializationError),
-    /// The node block has no coinbase height.
-    #[error("node block has no coinbase height")]
-    CoinbaseHeight,
+    /// The node block does not deserialize, or has no coinbase height.
+    #[error(transparent)]
+    RawBlock(#[from] RawBlockError),
     /// The indexer parser does not read the node block.
     #[error(transparent)]
     Parse(#[from] CompactParseError),

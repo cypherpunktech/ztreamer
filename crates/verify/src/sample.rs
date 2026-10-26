@@ -10,10 +10,7 @@
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
-use zakura_chain::{
-    block::{self, Block},
-    serialization::ZcashDeserialize,
-};
+use zakura_chain::block;
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, RangeDecoder, TreeSizes},
@@ -169,17 +166,11 @@ impl Sampler for JsonRpcSampler {
             return Ok(None);
         }
         let bytes = self.node.get_block_raw(HashOrHeight::Height(block::Height(height))).await?.0;
-        let block = Block::zcash_deserialize(bytes.as_slice())?;
-        let actual = block.coinbase_height().ok_or(NodeError::CoinbaseHeight)?;
-        if actual.0 != height {
-            return Err(NodeError::Height { expected: height, actual: actual.0 });
+        let block = RawIndexBlock::from_bytes(bytes)?;
+        if block.height.0 != height {
+            return Err(NodeError::Height { expected: height, actual: block.height.0 });
         }
-        Ok(Some(RawIndexBlock {
-            height: actual,
-            hash: block.hash(),
-            txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-            bytes,
-        }))
+        Ok(Some(block))
     }
 
     fn prune_height(&self) -> u32 {
@@ -230,15 +221,9 @@ mod tests {
     /// Mainnet block 949,496 at `height`, with the header linked to [`hash`] of the height
     /// before.
     fn shielded_block(height: u32) -> RawIndexBlock {
-        let mut bytes = BLOCK_MAINNET_949496_BYTES.to_vec();
-        let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
-        bytes[4..36].copy_from_slice(&hash(height - 1).0);
-        RawIndexBlock {
-            height: block::Height(height),
-            hash: hash(height),
-            txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-            bytes,
-        }
+        let mut block = RawIndexBlock::from_bytes(BLOCK_MAINNET_949496_BYTES.to_vec()).unwrap();
+        block.bytes[4..36].copy_from_slice(&hash(height - 1).0);
+        RawIndexBlock { height: block::Height(height), hash: hash(height), ..block }
     }
 
     /// The node blocks 0 to 999: empty blocks, and [`shielded_block`] at [`SHIELDED`].
