@@ -6,10 +6,6 @@
 //! subtrees that the epoch completed, with one call per pool. When all answers agree, it returns
 //! one [`Attested`] record per range, which the importer keeps in `range_meta`.
 //!
-//! [`RangeBlob::check_chain_and_end_hash`] checks one range for `--serve-unverified`. It does
-//! the checks of [`RangeBlob::check`], and it compares one block hash with the node. It does not
-//! rebuild the trees.
-//!
 //! [`JsonRpcAttestor`] asks a zakura node over JSON-RPC. `z_gettreestate` takes 0.2 to 2.6 s and
 //! the node does not cache it, so the attestor keeps the answers that it gave: a retry of an
 //! epoch makes no new call.
@@ -26,7 +22,7 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     codec::CodecError,
     frontier::{FromRpc, RpcDecodeError},
-    index::range_meta::{Attested, ManifestEntry, PoolRoots, RangeMeta, SubtreeNode, VerifyState},
+    index::range_meta::{Attested, PoolRoots, SubtreeNode},
     parser::CompactParseError,
     types::RawBlockError,
 };
@@ -35,7 +31,7 @@ use ztreamer_remote::{RpcError, ZakuraClient};
 use crate::{
     epoch::{Epoch, EpochProof, Trees},
     manifest::Pool,
-    range::{Check, RangeBlob, RangeLink, Reject},
+    range::{Check, Reject},
 };
 
 /// The most answers of each kind that a [`JsonRpcAttestor`] keeps.
@@ -99,7 +95,7 @@ pub enum NodeError {
 }
 
 /// Why [`Epoch::attest`] or [`Epoch::sample`](crate::epoch::Epoch::sample) did not accept an
-/// epoch, or [`RangeBlob::check_chain_and_end_hash`] did not accept a range.
+/// epoch.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochError {
     /// A range of the epoch is wrong, or a blob must be fetched again.
@@ -143,20 +139,6 @@ pub trait Attestor: Send + Sync {
     ) -> Result<Vec<SubtreeNode>, NodeError>;
 }
 
-impl dyn Attestor + '_ {
-    /// Compares the end hash of `entry` with [`Attestor::block_hash`] at the end height of the
-    /// entry. [`Epoch::attest`] and [`RangeBlob::check_chain_and_end_hash`] use this check.
-    async fn check_end_hash(&self, entry: &ManifestEntry) -> Result<(), EpochError> {
-        let height = entry.end_height;
-        let hash =
-            self.block_hash(height).await.map_err(|source| EpochError::Node { height, source })?;
-        if hash != entry.end_hash {
-            return Err(Check::AttestedHash.at(height).into());
-        }
-        Ok(())
-    }
-}
-
 impl Epoch<'_> {
     /// Compares `proof`, the result of [`Epoch::verify`], with the answers of `attestor`, and
     /// returns one [`Attested`] record per entry, in order.
@@ -194,7 +176,14 @@ impl Epoch<'_> {
         attestor: &dyn Attestor,
     ) -> Result<Vec<Attested>, EpochError> {
         for entry in self.entries() {
-            attestor.check_end_hash(entry).await?;
+            let height = entry.end_height;
+            let hash = attestor
+                .block_hash(height)
+                .await
+                .map_err(|source| EpochError::Node { height, source })?;
+            if hash != entry.end_hash {
+                return Err(Check::AttestedHash.at(height).into());
+            }
         }
         let end = self.end_height();
         let roots = attestor
@@ -255,37 +244,6 @@ impl Epoch<'_> {
             }
         }
         Ok(())
-    }
-}
-
-impl RangeBlob<'_> {
-    /// Does the checks of [`RangeBlob::check`]. Then it compares the end hash of the entry with
-    /// one [`Attestor::block_hash`] call at the end height. Returns the `range_meta` row of the
-    /// range, with the state [`VerifyState::ChainOk`].
-    ///
-    /// A replica with `--serve-unverified` installs and serves the range with this row. The
-    /// method does not rebuild the note commitment trees, and it does not ask the node for
-    /// roots. Thus the row has no attestation, no node and no sampled heights. Later,
-    /// [`Epoch::verify`](crate::epoch::Epoch::verify) and [`Epoch::attest`] prove the trees of
-    /// the epoch. Then the importer replaces the row with a [`VerifyState::Verified`] row.
-    ///
-    /// If a range check fails, the method does not call the node. `RangeLink::from(&meta.entry)`
-    /// is the link for the check of the next range.
-    pub async fn check_chain_and_end_hash(
-        &self,
-        previous: &RangeLink,
-        attestor: &dyn Attestor,
-    ) -> Result<RangeMeta, EpochError> {
-        self.check(previous)?;
-        attestor.check_end_hash(self.entry()).await?;
-        Ok(RangeMeta {
-            entry: self.entry().clone(),
-            state: VerifyState::ChainOk,
-            verified_by: None,
-            verified_at: None,
-            attested: None,
-            sampled_heights: Vec::new(),
-        })
     }
 }
 
@@ -450,12 +408,9 @@ mod tests {
     use serde_json::{Value, json};
     use zakura_chain::{orchard, sapling};
     use ztreamer_indexer::{
-        codec::{TreeSizes, encode_range},
-        index::{
-            RANGE_SIZE,
-            range_meta::{Frontiers, SubtreeRoot},
-        },
-        test_utils::{hash, mixed_records},
+        codec::TreeSizes,
+        index::range_meta::{Frontiers, SubtreeRoot},
+        test_utils::hash,
     };
     use ztreamer_remote::{
         RpcClient,
@@ -463,10 +418,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        epoch::{Epochs, synthetic_entries},
-        range::entry_for,
-    };
+    use crate::epoch::{Epochs, synthetic_entries};
 
     const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 
@@ -603,77 +555,6 @@ mod tests {
         let result = attest(&attestor).await;
 
         assert!(matches!(result, Err(EpochError::Node { height: 2_999, .. })), "{result:?}");
-    }
-
-    /// The blob of the range at 0 and its manifest entry.
-    fn genesis_range() -> (Vec<u8>, ManifestEntry) {
-        let records = mixed_records(RANGE_SIZE);
-        let blob = encode_range(&records).unwrap();
-        let entry = entry_for(&records, &blob);
-        (blob, entry)
-    }
-
-    /// An attestor that gives only the hash `end_hash` at the height 999.
-    fn attestor_with_end_hash(end_hash: block::Hash) -> FakeAttestor {
-        FakeAttestor { hashes: BTreeMap::from([(999, end_hash)]), ..FakeAttestor::default() }
-    }
-
-    #[tokio::test]
-    async fn a_good_chain_with_the_node_end_hash_is_chain_ok() {
-        let (blob, entry) = genesis_range();
-        let attestor = attestor_with_end_hash(entry.end_hash);
-
-        let meta = RangeBlob::new(&blob, &entry)
-            .check_chain_and_end_hash(&RangeLink::GENESIS, &attestor)
-            .await;
-
-        let expected = RangeMeta {
-            entry: entry.clone(),
-            state: VerifyState::ChainOk,
-            verified_by: None,
-            verified_at: None,
-            attested: None,
-            sampled_heights: Vec::new(),
-        };
-        assert_eq!(meta.unwrap(), expected);
-    }
-
-    #[tokio::test]
-    async fn another_end_hash_from_the_node_rejects_the_range() {
-        let (blob, entry) = genesis_range();
-        let attestor = attestor_with_end_hash(hash(7));
-
-        let result = RangeBlob::new(&blob, &entry)
-            .check_chain_and_end_hash(&RangeLink::GENESIS, &attestor)
-            .await;
-
-        assert!(
-            matches!(
-                result,
-                Err(EpochError::Reject(Reject::Rejected {
-                    check: Check::AttestedHash,
-                    height: 999
-                }))
-            ),
-            "{result:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_failed_range_check_asks_the_node_nothing() {
-        let (mut blob, entry) = genesis_range();
-        let middle = blob.len() / 2;
-        blob[middle] ^= 1;
-
-        // The attestor has no answers. A call gives a node error.
-        let result = RangeBlob::new(&blob, &entry)
-            .check_chain_and_end_hash(&RangeLink::GENESIS, &FakeAttestor::default())
-            .await;
-
-        assert!(
-            matches!(result, Err(EpochError::Reject(Reject::Refetch { start_height: 0 }))),
-            "{result:?}"
-        );
     }
 
     /// The `z_gettreestate` answer at `height`, with the Sapling root of [`roots`] in reversed

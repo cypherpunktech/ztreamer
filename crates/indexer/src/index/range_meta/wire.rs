@@ -140,7 +140,6 @@ impl VerifyState {
     const fn into_wire(self) -> replicate::VerifyState {
         match self {
             Self::Unverified => replicate::VerifyState::Unverified,
-            Self::ChainOk => replicate::VerifyState::ChainOk,
             Self::Verified => replicate::VerifyState::Verified,
             Self::Rejected => replicate::VerifyState::Rejected,
         }
@@ -149,7 +148,6 @@ impl VerifyState {
     fn try_from_wire(value: i32) -> Result<Self, WireError> {
         match replicate::VerifyState::try_from(value) {
             Ok(replicate::VerifyState::Unverified) => Ok(Self::Unverified),
-            Ok(replicate::VerifyState::ChainOk) => Ok(Self::ChainOk),
             Ok(replicate::VerifyState::Verified) => Ok(Self::Verified),
             Ok(replicate::VerifyState::Rejected) => Ok(Self::Rejected),
             Ok(replicate::VerifyState::Unspecified) | Err(_) => {
@@ -175,17 +173,18 @@ mod tests {
 
     #[test]
     fn an_entry_round_trips_in_every_state() {
-        for state in [
-            VerifyState::Unverified,
-            VerifyState::ChainOk,
-            VerifyState::Verified,
-            VerifyState::Rejected,
-        ] {
+        for state in [VerifyState::Unverified, VerifyState::Verified, VerifyState::Rejected] {
             let range = ExportedRange { state, ..exported() };
             let wire = replicate::ManifestEntry::from(range.clone());
             assert_eq!(wire.end_hash.len(), 32);
             assert_eq!(ExportedRange::try_from(wire).unwrap(), range);
         }
+    }
+
+    #[test]
+    fn the_reserved_chain_ok_value_is_refused() {
+        // 2 was `VERIFY_STATE_CHAIN_OK`.
+        assert_eq!(VerifyState::try_from_wire(2), Err(WireError::Enum("state", 2)));
     }
 
     #[test]

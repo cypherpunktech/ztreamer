@@ -52,8 +52,9 @@ enum VerifyState {
     VERIFY_STATE_UNSPECIFIED = 0;
     // Installed, and no check has run.
     VERIFY_STATE_UNVERIFIED = 1;
-    // The digest, the hash chain and the tree sizes check out, and the end hash matches a node.
-    VERIFY_STATE_CHAIN_OK = 2;
+    // 2 was VERIFY_STATE_CHAIN_OK. It is free for a later use of the same state.
+    reserved 2;
+    reserved "VERIFY_STATE_CHAIN_OK";
     // The rebuilt tree roots match a node.
     VERIFY_STATE_VERIFIED = 3;
     // A check failed.

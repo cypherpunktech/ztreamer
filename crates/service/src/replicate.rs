@@ -218,7 +218,7 @@ mod tests {
             let state = fixtures::populate(&index, &records, Some(4_999));
             for (start, state) in [
                 (0, VerifyState::Verified),
-                (1_000, VerifyState::ChainOk),
+                (1_000, VerifyState::Verified),
                 (2_000, VerifyState::Unverified),
                 (4_000, VerifyState::Rejected),
             ] {

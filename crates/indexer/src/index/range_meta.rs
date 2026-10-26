@@ -102,9 +102,6 @@ impl SubtreeNode {
 pub enum VerifyState {
     /// The range is installed, and no check has run.
     Unverified,
-    /// The digest, the hash chain, and the tree sizes check out, and the end hash matches the
-    /// node. The commitment trees have not been rebuilt.
-    ChainOk,
     /// The rebuilt tree roots match the node's answers.
     Verified,
     /// A check failed. The range must not be served.
@@ -112,10 +109,11 @@ pub enum VerifyState {
 }
 
 impl VerifyState {
+    /// The stored tag of the state. Tag 1 was `ChainOk`. It is not used, and a decode refuses
+    /// it.
     const fn tag(self) -> u8 {
         match self {
             Self::Unverified => 0,
-            Self::ChainOk => 1,
             Self::Verified => 2,
             Self::Rejected => 3,
         }
@@ -124,7 +122,6 @@ impl VerifyState {
     const fn from_tag(tag: u8) -> Result<Self, CodecError> {
         match tag {
             0 => Ok(Self::Unverified),
-            1 => Ok(Self::ChainOk),
             2 => Ok(Self::Verified),
             3 => Ok(Self::Rejected),
             _ => Err(CodecError::InvalidRecord),
@@ -572,15 +569,13 @@ mod tests {
 
     #[test]
     fn every_state_round_trips() {
-        for state in [
-            VerifyState::Unverified,
-            VerifyState::ChainOk,
-            VerifyState::Verified,
-            VerifyState::Rejected,
-        ] {
+        for state in [VerifyState::Unverified, VerifyState::Verified, VerifyState::Rejected] {
             assert_eq!(VerifyState::from_tag(state.tag()).unwrap(), state);
         }
-        assert_eq!(VerifyState::from_tag(4), Err(CodecError::InvalidRecord));
+        // Tag 1 was `ChainOk`.
+        for tag in [1, 4] {
+            assert_eq!(VerifyState::from_tag(tag), Err(CodecError::InvalidRecord));
+        }
     }
 
     /// A subtree root is a pool tag and 32 bytes. The decoder refuses an unknown tag and bytes

@@ -68,11 +68,6 @@ impl<'env> IndexWriter<'env> {
         self.state
     }
 
-    /// Reads the metadata of the sealed range at `start` as this transaction sees it.
-    pub(crate) fn range_meta(&self, start: u32) -> Result<Option<RangeMeta>, IndexError> {
-        self.tables.range_meta.get(&self.txn, start)
-    }
-
     /// Reads the block at `height` as this transaction sees it.
     pub(crate) fn read(&self, height: u32) -> Result<CompactBlockRecord, IndexError> {
         self.tables.read(&self.txn, self.state, height)
@@ -162,9 +157,9 @@ impl<'env> IndexWriter<'env> {
     }
 
     /// Writes a packed range from a snapshot and its metadata. Moves `sealed_through` to the
-    /// range end. A [`VerifyState::Verified`] range advances `verified_through` if the old value
-    /// is `start - 1` (see [`IndexWriter::extend_verified_prefix`]). The caller must check that
-    /// `start` is [`IndexState::next_range_start`].
+    /// range end. A [`VerifyState::Verified`] range advances `verified_through` if the range
+    /// starts at [`IndexState::next_verify_start`]. The caller must check that `start` is
+    /// [`IndexState::next_range_start`].
     pub(crate) fn put_sealed_range(
         &mut self,
         start: u32,
@@ -174,46 +169,10 @@ impl<'env> IndexWriter<'env> {
         self.tables.sealed_ranges.put(&mut self.txn, start, packed)?;
         self.tables.range_meta.put(&mut self.txn, start, meta)?;
         self.state.sealed_through = Some(meta.entry.end_height);
-        self.extend_verified_prefix()
-    }
-
-    /// Replaces the metadata of the sealed range at `start` with `meta`, and moves
-    /// `verified_through` to the range end (see [`IndexWriter::extend_verified_prefix`]). The
-    /// caller must check that the range is the next range after the verified prefix.
-    pub(crate) fn put_verified_range(
-        &mut self,
-        start: u32,
-        meta: &RangeMeta,
-    ) -> Result<(), IndexError> {
-        self.tables.range_meta.put(&mut self.txn, start, meta)?;
-        self.extend_verified_prefix()
-    }
-
-    /// Moves `verified_through` over each sealed range after the verified prefix that has a
-    /// [`VerifyState::Verified`] row, or no row. It stops at the first range with another state,
-    /// or after `sealed_through`. Thus a range that was verified or sealed before the ranges below
-    /// it joins the prefix when they are verified.
-    ///
-    /// A sealed range with no row came from node blocks: an install always writes a row, and a
-    /// deep reorg deletes the rows of the ranges that it rebuilds. A replica trusts its source
-    /// node as much as its verified snapshot (see
-    /// [`IndexWriter::join_sealed_range_to_verified_prefix`]). If `verified_through` is not set,
-    /// a range with no row does not start a prefix. Thus the embedded mode never sets it.
-    fn extend_verified_prefix(&mut self) -> Result<(), IndexError> {
-        loop {
-            let start = self.state.next_verify_start()?;
-            if self.state.sealed_through.is_none_or(|sealed| start > sealed) {
-                return Ok(());
-            }
-            let end = match self.tables.range_meta.get(&self.txn, start)? {
-                Some(row) if row.state == VerifyState::Verified => row.entry.end_height,
-                None if self.state.verified_through.is_some() => {
-                    start.checked_add(RANGE_SIZE - 1).ok_or(IndexError::Overflow)?
-                }
-                _ => return Ok(()),
-            };
-            self.state.verified_through = Some(end);
+        if meta.state == VerifyState::Verified && self.state.next_verify_start()? == start {
+            self.state.verified_through = Some(meta.entry.end_height);
         }
+        Ok(())
     }
 
     /// Seals each range that ends at or below both `seal_through` and the tip. Call it after
