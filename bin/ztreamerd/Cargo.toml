@@ -13,6 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 clap = { version = "4.5", features = ["derive"] }
 ed25519-dalek.workspace = true
 eyre = "0.6"
+getrandom = "0.3"
 hex = "0.4"
 http = "1"
 percent-encoding = "2"
@@ -34,8 +35,13 @@ ztreamer-remote = { path = "../../crates/remote" }
 tokio-util = "0.7"
 
 [dev-dependencies]
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 serde_json = "1"
 tempfile = "3"
+tokio = { version = "1", features = ["fs", "net"] }
 zakura-network.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true

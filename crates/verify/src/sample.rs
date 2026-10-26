@@ -57,6 +57,9 @@ pub struct SamplePlan {
 }
 
 impl SamplePlan {
+    /// The heights in each range that a replica compares.
+    pub const PER_RANGE: usize = 2;
+
     /// The offsets in the range that starts at `start_height` to compare, in ascending order.
     /// Only the seed and `start_height` control the choice.
     fn offsets(self, start_height: u32) -> Vec<u32> {

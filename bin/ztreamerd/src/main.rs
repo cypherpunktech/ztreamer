@@ -15,7 +15,7 @@ use std::{
 };
 
 use clap::{Args, Parser, Subcommand};
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr, ensure, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig, server::Router};
@@ -41,6 +41,7 @@ use ztreamer_service::{
 mod export;
 mod lifecycle;
 mod remote;
+mod replicate;
 
 /// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
@@ -127,6 +128,9 @@ struct DaemonArgs {
 
     #[command(flatten)]
     remote: remote::RemoteArgs,
+
+    #[command(flatten)]
+    replicate: replicate::ReplicateArgs,
 }
 
 impl DaemonArgs {
@@ -186,9 +190,15 @@ fn main() -> Result<()> {
 async fn run_daemon(cli: DaemonArgs) -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
+    let replica = cli.replicate.replica();
     if let Some(node) = cli.remote.node()? {
+        let node = node.with_replica(replica);
         return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
     }
+    ensure!(
+        replica.is_none(),
+        "--replicate-from needs --remote-rpc: the node that attests the import"
+    );
 
     let mut config =
         ZakuradConfig::load(cli.zakura_config.clone()).wrap_err("load Zakura configuration")?;
@@ -301,6 +311,7 @@ where
     let NodeSources { tail, head, backend } = sources;
 
     let pipeline = PipelineConfig::from(&cli);
+    cli.replicate.log_import_state("tail");
     let ControlFlow::Continue(state) =
         sync_historical(tail, &index, pipeline, cli.index_only, &shutdown).await?
     else {
@@ -324,6 +335,7 @@ where
             Ok(filler.run(compact.subscribe()))
         })
         .transpose()?;
+    cli.replicate.log_import_state("following");
     let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact.clone()))

@@ -29,7 +29,7 @@ use ztreamer_indexer::{
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource};
 
-use crate::{DaemonArgs, NodeSources, Readiness, lifecycle, run_application};
+use crate::{DaemonArgs, NodeSources, Readiness, lifecycle, replicate::Replica, run_application};
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -161,12 +161,19 @@ impl FromStr for NodeUrl {
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteNode {
     client: ZakuraClient,
+    replica: Option<Replica>,
 }
 
 impl RemoteNode {
     /// The node behind `client`.
     pub(crate) const fn new(client: ZakuraClient) -> Self {
-        Self { client }
+        Self { client, replica: None }
+    }
+
+    /// Runs `replica`, the import of `--replicate-from`, before the tail.
+    pub(crate) fn with_replica(mut self, replica: Option<Replica>) -> Self {
+        self.replica = replica;
+        self
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
@@ -188,7 +195,7 @@ impl RemoteNode {
     ///
     /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
     /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
-    async fn run_until(
+    pub(crate) async fn run_until(
         self,
         cli: DaemonArgs,
         grpc_server: Server,
@@ -211,8 +218,8 @@ impl RemoteNode {
     }
 
     /// Reads the network from the node and opens the index of that network, as the embedded
-    /// mode does. Then makes the sources when the node is ready, and runs the daemon on them
-    /// until shutdown.
+    /// mode does. Runs the import of `--replicate-from`, if there is one. Then makes the sources
+    /// when the node is ready, and runs the daemon on them until shutdown.
     ///
     /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
     /// of another network.
@@ -228,6 +235,11 @@ impl RemoteNode {
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
         let index = cli.open_index(&network).await?;
+        if let Some(replica) = &self.replica
+            && replica.import(&self.client, &info, &network, &index, &shutdown).await?.is_break()
+        {
+            return Ok(());
+        }
         let ControlFlow::Continue(sources) =
             self.sources(info, &network, &index, &shutdown).await?
         else {

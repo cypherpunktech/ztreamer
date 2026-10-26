@@ -28,6 +28,16 @@ use serde_json::value::RawValue;
 use serde_with::{hex::Hex, serde_as};
 use ztreamer_indexer::index::range_meta::ManifestEntry;
 
+/// The Ed25519 public key that signs the snapshots that a replica accepts.
+///
+/// Plan PR 8.1 sets the production key. Until then, this key is a placeholder with no known
+/// secret key: the SHA-256 hash of `ztreamer placeholder snapshot key 0` with the top bit clear.
+/// Thus a replica refuses each snapshot over HTTP. A peer source has no signature.
+pub const SNAPSHOT_PUBKEY: [u8; 32] = [
+    0x42, 0xa7, 0x01, 0xa5, 0x38, 0x19, 0x3f, 0x17, 0xe5, 0x6b, 0xf6, 0xb5, 0x85, 0xea, 0x66, 0xe1,
+    0x3f, 0x1f, 0xd7, 0xb1, 0xdd, 0x78, 0xfb, 0x15, 0x7d, 0xf5, 0x8e, 0x11, 0xb8, 0x70, 0xbc, 0x2b,
+];
+
 /// The end of the path of a signature file: `<file>.sig` signs `<file>`.
 pub const SIGNATURE_SUFFIX: &str = ".sig";
 
@@ -139,6 +149,12 @@ mod tests {
 
     use super::*;
     use crate::epoch::synthetic_entries;
+
+    #[test]
+    fn the_snapshot_key_is_a_valid_key_that_is_not_weak() {
+        let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
+        assert!(!key.is_weak());
+    }
 
     fn latest() -> Latest {
         Latest {
