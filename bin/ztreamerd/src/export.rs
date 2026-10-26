@@ -1,39 +1,38 @@
 //! `ztreamerd export-snapshot`: writes the sealed ranges of an index as a snapshot that a replica
 //! can import.
 //!
-//! The layout of the snapshot directory:
+//! [`ztreamer_verify::snapshot`] gives the layout of the snapshot directory. The manifest is
+//! `manifests/<time>.json`, where `<time>` is UTC, for example `2026-10-26T143005Z`.
 //!
-//! ```text
-//! latest.json                         manifest path, sealed height, publish time, public key
-//! latest.json.sig                     Ed25519 signature of latest.json, hex
-//! manifests/<time>.json               one entry per sealed range; <time> is UTC, for example
-//!                                     2026-10-26T143005Z
-//! manifests/<time>.json.sig           Ed25519 signature of the manifest, hex
-//! ranges/<start>-<digest prefix>.bin  range blob; the prefix is 8 hex digits of its BLAKE3 digest
-//! ```
+//! The export reads the chain from the identity row of the index. It starts at genesis and stops
+//! at the first sealed range without a `range_meta` row. The last range of a manifest always
+//! closes an epoch, so the export sets `epoch_end` on the last entry. The row in the index keeps
+//! its flag.
 //!
-//! The export starts at genesis and stops at the first sealed range without a `range_meta` row.
-//! The last range of a manifest always closes an epoch, so the export sets `epoch_end` on the
-//! last entry. The row in the index keeps its flag.
-//! A range file that exists with the correct digest is not written again. Thus a daily export
-//! writes only the new ranges. A manifest is never replaced: each export writes a manifest with
-//! a new name, and `latest.json` points at the newest.
+//! A range file gets its final name only after its digest and length check. Thus a file with
+//! the name and the length of its entry holds the range, and the export does not write or read
+//! it again: a daily export writes only the new ranges. A manifest is never replaced: each export
+//! writes a manifest with a new name, and `latest.json` points at the newest. `latest.json` is
+//! the only file that an export replaces, and it holds its own signature.
 
 use std::{
     fs::{self, File},
-    io::{self, Write},
+    io::{self, Read, Write},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use ed25519_dalek::{Signer as _, SigningKey};
 use eyre::{Result, WrapErr, bail, ensure, eyre};
-use serde::{Deserialize, Serialize};
-use serde_with::{hex::Hex, serde_as};
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
+use zeroize::Zeroizing;
 use ztreamer_indexer::index::{Index, RANGE_SIZE, range_meta::ManifestEntry};
-use ztreamer_verify::manifest::Manifest;
+use ztreamer_verify::{
+    manifest::Manifest,
+    snapshot::{Latest, RangePath, SIGNATURE_SUFFIX},
+};
 
 use crate::DEFAULT_MAP_SIZE;
 
@@ -47,9 +46,10 @@ pub(crate) struct ExportArgs {
     #[arg(long, value_name = "DIR")]
     index_dir: PathBuf,
 
-    /// The chain of the index.
-    #[arg(long, default_value = "Mainnet")]
-    network: Network,
+    /// Maximum LMDB map size in bytes. Give the value of the daemon that uses the index: an
+    /// index that grows past the map of this process stops the export.
+    #[arg(long, default_value_t = NonZeroUsize::new(DEFAULT_MAP_SIZE).unwrap())]
+    index_map_size: NonZeroUsize,
 
     /// Snapshot directory. An export into the same directory writes only the new ranges.
     #[arg(long, value_name = "DIR")]
@@ -68,20 +68,18 @@ impl ExportArgs {
         if signer.is_none() {
             warn!("no --signing-key: the snapshot has no signatures, and a replica refuses it");
         }
+        let index = Index::open_existing(&self.index_dir, self.index_map_size.get())?;
+        let identity = index.identity()?;
+        let network: Network = identity
+            .network
+            .parse()
+            .wrap_err_with(|| format!("the index is for network {}", identity.network))?;
         ensure!(
-            self.index_dir.join("data.mdb").is_file(),
-            "{} contains no index",
-            self.index_dir.display()
+            network.genesis_hash() == identity.genesis_hash,
+            "the index has genesis {}, not the genesis of {network}",
+            identity.genesis_hash
         );
-        let index = Index::open(
-            &self.index_dir,
-            DEFAULT_MAP_SIZE,
-            &self.network.to_string(),
-            self.network.genesis_hash(),
-        )?;
-        SnapshotDir::new(self.out)
-            .export(&index, &self.network, Utc::now(), signer.as_ref())?
-            .log();
+        SnapshotDir::new(self.out).export(&index, &network, Utc::now(), signer.as_ref())?.log();
         Ok(())
     }
 }
@@ -168,7 +166,8 @@ impl SnapshotDir {
             published_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
             public_key: signer.map(Signer::public_key),
         };
-        self.put_signed("latest.json", &serde_json::to_vec(&latest)?, signer)?;
+        let latest = latest.to_file(signer.map(|signer| &signer.0));
+        Staged::write(self.root.join(Latest::PATH), &latest)?.commit()?;
 
         Ok(ExportReport {
             manifest: manifest_path,
@@ -180,18 +179,17 @@ impl SnapshotDir {
 
     /// Writes the blob of `entry` to its content-addressed file, and checks it against the
     /// digest and the length in `entry`. Returns `false` if the file is present with the
-    /// correct digest.
+    /// length of `entry`: see the module docs.
     fn put_range(&self, index: &Index, entry: &ManifestEntry) -> Result<bool> {
         let start = entry.start_height;
-        let path = self
-            .root
-            .join(format!("ranges/{start}-{}.bin", hex::encode(&entry.blob_digest.0[..4])));
-        if path.is_file() {
-            let present = blake3::Hasher::new().update_reader(File::open(&path)?)?.finalize();
-            if present == entry.blob_digest.0 {
-                return Ok(false);
+        let path = self.root.join(RangePath::from(entry).as_str());
+        match fs::metadata(&path) {
+            Ok(file) if file.is_file() && file.len() == entry.blob_len => return Ok(false),
+            Ok(_) => {
+                warn!(path = %path.display(), "range file has the wrong length; writing it again")
             }
-            warn!(path = %path.display(), "range file has the wrong digest; writing it again");
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
         let blob = index
             .read_sealed_range_bytes(start)?
@@ -205,7 +203,9 @@ impl SnapshotDir {
         Ok(true)
     }
 
-    /// Writes `bytes` to `relative`, and its signature to `relative` + `.sig` if `signer` is set.
+    /// Writes `bytes` to `relative`, and its signature to `relative` + [`SIGNATURE_SUFFIX`] if
+    /// `signer` is set. Only for a file that is never replaced: a reader can see the file
+    /// before its signature.
     fn put_signed(&self, relative: &str, bytes: &[u8], signer: Option<&Signer>) -> Result<()> {
         let path = self.root.join(relative);
         Staged::write(path.clone(), bytes)?.commit()?;
@@ -227,7 +227,10 @@ struct Rows {
 
 impl Rows {
     fn read(index: &Index) -> Result<Self> {
-        let sealed = index.state()?.sealed_through().map_or(0, |height| height / RANGE_SIZE + 1);
+        let Some(sealed_through) = index.state()?.sealed_through() else {
+            bail!("the index has no sealed range");
+        };
+        let sealed = sealed_through / RANGE_SIZE + 1;
         let entries = (0..sealed)
             .map_while(|range| index.range_meta(range * RANGE_SIZE).transpose())
             .map(|meta| meta.map(|meta| meta.entry))
@@ -273,13 +276,15 @@ impl Staged {
 struct Signer(SigningKey);
 
 impl Signer {
-    /// Reads a key file that holds the raw 32-byte seed.
+    /// Reads a key file that holds the raw 32-byte seed. The seed goes straight into a buffer
+    /// that is zeroed on drop, with no other copy in memory.
     fn from_file(path: &Path) -> Result<Self> {
-        let bytes =
-            fs::read(path).wrap_err_with(|| format!("read signing key {}", path.display()))?;
-        let seed = <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| {
-            eyre!("signing key {} has {} bytes, not a 32-byte seed", path.display(), bytes.len())
-        })?;
+        let read = || format!("read signing key {}", path.display());
+        let mut file = File::open(path).wrap_err_with(read)?;
+        let len = file.metadata().wrap_err_with(read)?.len();
+        ensure!(len == 32, "signing key {} has {len} bytes, not a 32-byte seed", path.display());
+        let mut seed = Zeroizing::new([0; 32]);
+        file.read_exact(seed.as_mut()).wrap_err_with(read)?;
         Ok(Self(SigningKey::from_bytes(&seed)))
     }
 
@@ -292,33 +297,18 @@ impl Signer {
         self.0.verifying_key().to_bytes()
     }
 
-    /// The path of the signature of the file at `path`: `path` with `.sig` appended.
+    /// The path of the signature of the file at `path`: `path` with [`SIGNATURE_SUFFIX`]
+    /// appended.
     fn signature_path(path: &Path) -> PathBuf {
         let mut signature = path.as_os_str().to_owned();
-        signature.push(".sig");
+        signature.push(SIGNATURE_SUFFIX);
         PathBuf::from(signature)
     }
 }
 
-/// `latest.json`: the pointer to the current manifest.
-#[serde_as]
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct Latest {
-    /// The path of the manifest, relative to the snapshot directory.
-    manifest: String,
-    /// The last height of the last range in the manifest.
-    sealed_through: u32,
-    /// The export time, RFC 3339 in UTC.
-    published_at: String,
-    /// The key that signed the manifest and this file. Absent if the export is not signed.
-    #[serde_as(as = "Option<Hex>")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public_key: Option<[u8; 32]>,
-}
-
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use ed25519_dalek::Signature;
     use serde_json::Value;
     use tempfile::TempDir;
     use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
@@ -430,6 +420,7 @@ mod tests {
         for entry in &entries {
             let start = entry.start_height;
             let name = format!("{start}-{}.bin", hex::encode(&entry.blob_digest.0[..4]));
+            assert_eq!(RangePath::from(entry).as_str(), format!("ranges/{name}"));
             let file = fs::read(out.path().join("ranges").join(name)).unwrap();
             assert_eq!(file, index.read_sealed_range_bytes(start).unwrap().unwrap());
         }
@@ -452,8 +443,10 @@ mod tests {
         assert_eq!(entry["blob_digest"], hex::encode(entries[0].blob_digest.0));
         assert_eq!(entry["end_tree_sizes"]["sapling"], 0);
 
-        let latest: Latest =
+        let json: Value =
             serde_json::from_slice(&fs::read(out.path().join("latest.json")).unwrap()).unwrap();
+        assert!(json.get("signature").is_none());
+        let latest: Latest = serde_json::from_value(json["latest"].clone()).unwrap();
         assert_eq!(
             latest,
             Latest {
@@ -483,12 +476,27 @@ mod tests {
     #[test]
     fn a_second_export_writes_no_range_file_again() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let (index, _) = indexed(&dir, 3, &ALL_ROWS);
+        let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
         export(&index, &out, 0, None);
+        // The export does not read a file with the name and the length of its entry. A file
+        // with another length is written again.
+        let [same_length, short] = [&entries[0], &entries[1]].map(|entry| {
+            let path = out.path().join(RangePath::from(entry).as_str());
+            let mut bytes = fs::read(&path).unwrap();
+            bytes[100] ^= 1;
+            (path, bytes)
+        });
+        fs::write(&same_length.0, &same_length.1).unwrap();
+        fs::write(&short.0, &short.1[..10]).unwrap();
 
         let report = export(&index, &out, 1, None);
 
-        assert_eq!((report.ranges, report.written), (3, 0));
+        assert_eq!((report.ranges, report.written), (3, 1));
+        assert_eq!(fs::read(&same_length.0).unwrap(), same_length.1);
+        assert_eq!(
+            fs::read(&short.0).unwrap(),
+            index.read_sealed_range_bytes(1_000).unwrap().unwrap()
+        );
         assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
         assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
         assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 2);
@@ -502,25 +510,26 @@ mod tests {
     }
 
     #[test]
-    fn signatures_verify_with_the_public_key_in_latest() {
+    fn signatures_verify_with_the_signing_key() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, _) = indexed(&dir, 3, &ALL_ROWS);
         let signer = signer(&dir);
+        let key = signer.0.verifying_key();
 
         let report = export(&index, &out, 0, Some(&signer));
 
-        let latest_bytes = fs::read(out.path().join("latest.json")).unwrap();
-        let latest: Latest = serde_json::from_slice(&latest_bytes).unwrap();
-        let key = VerifyingKey::from_bytes(&latest.public_key.unwrap()).unwrap();
-        assert_eq!(key.to_bytes(), signer.public_key());
-        for path in [out.path().join(report.manifest), out.path().join("latest.json")] {
-            let signature = fs::read_to_string(Signer::signature_path(&path)).unwrap();
-            let signature = <[u8; 64]>::try_from(hex::decode(signature).unwrap()).unwrap();
-            let bytes = fs::read(&path).unwrap();
-            key.verify_strict(&bytes, &Signature::from_bytes(&signature)).unwrap();
-            assert!(key.verify_strict(b"other bytes", &Signature::from_bytes(&signature)).is_err());
-        }
+        let latest_path = out.path().join(Latest::PATH);
+        let latest = Latest::from_file(&fs::read(&latest_path).unwrap(), &key).unwrap();
+        assert_eq!(latest.public_key, Some(signer.public_key()));
         assert_eq!(latest.manifest, "manifests/2026-10-26T000000Z.json");
+        // `latest.json` holds its own signature.
+        assert!(!Signer::signature_path(&latest_path).exists());
+        let path = out.path().join(report.manifest);
+        let signature = fs::read_to_string(Signer::signature_path(&path)).unwrap();
+        let signature = <[u8; 64]>::try_from(hex::decode(signature).unwrap()).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        key.verify_strict(&bytes, &Signature::from_bytes(&signature)).unwrap();
+        assert!(key.verify_strict(b"other bytes", &Signature::from_bytes(&signature)).is_err());
     }
 
     #[test]
@@ -580,5 +589,47 @@ mod tests {
 
         assert!(error.to_string().contains("no range_meta row"), "{error}");
         assert!(!out.path().join("latest.json").exists());
+    }
+
+    #[test]
+    fn an_index_with_no_sealed_range_is_refused() {
+        let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let network = Network::Mainnet;
+        let index =
+            Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", network.genesis_hash()).unwrap();
+        let records: Vec<_> = (0..10).map(|height| record(height, Vec::new())).collect();
+        populate(&index, &records, None);
+        let now = DateTime::from_timestamp(NOW, 0).unwrap();
+
+        let error = SnapshotDir::new(out.path().to_owned())
+            .export(&index, &network, now, None)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("no sealed range"), "{error}");
+    }
+
+    #[test]
+    fn the_export_reads_the_chain_from_the_index() {
+        let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        drop(indexed(&dir, 3, &ALL_ROWS));
+        let args = |index_dir: &Path| ExportArgs {
+            index_dir: index_dir.to_owned(),
+            index_map_size: NonZeroUsize::new(512 * 1024 * 1024).unwrap(),
+            out: out.path().to_owned(),
+            signing_key: None,
+        };
+
+        args(dir.path()).run().unwrap();
+
+        let json: Value =
+            serde_json::from_slice(&fs::read(out.path().join(Latest::PATH)).unwrap()).unwrap();
+        let manifest =
+            fs::read_to_string(out.path().join(json["latest"]["manifest"].as_str().unwrap()));
+        let manifest = Manifest::from_json(&manifest.unwrap()).unwrap();
+        assert_eq!(manifest.network(), "Mainnet");
+        assert_eq!(manifest.genesis_hash(), Network::Mainnet.genesis_hash());
+        let empty = tempfile::tempdir().unwrap();
+        let error = args(empty.path()).run().unwrap_err();
+        assert!(format!("{error:?}").contains("holds no index"), "{error:?}");
     }
 }

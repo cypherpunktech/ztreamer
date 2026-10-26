@@ -42,12 +42,15 @@ use heed::{Database, RoTxn, RwTxn, types::Bytes};
 use zakura_chain::block;
 
 use super::{
-    BlockId, IndexError, IndexState, PERSIST_DEPTH, RANGE_SIZE, SCHEMA_VERSION, SEAL_DEPTH,
+    BlockId, ChainIdentity, IndexError, IndexState, PERSIST_DEPTH, RANGE_SIZE, SCHEMA_VERSION,
+    SEAL_DEPTH,
 };
 use crate::codec::TreeSizes;
 
 const STATE: &[u8] = b"state";
 const IDENTITY: &[u8] = b"identity";
+/// The bytes of the identity before the genesis hash: the schema version and the fixed policy.
+const POLICY_BYTES: usize = 16;
 const STATE_V1: u8 = 1;
 const STATE_V2: u8 = 2;
 const STATE_V1_BYTES: usize = 62;
@@ -90,6 +93,27 @@ impl Metadata {
             Some(_) => Ok(()),
             None => Ok(self.0.put(txn, IDENTITY, identity.as_slice())?),
         }
+    }
+
+    /// Reads the stored identity. Refuses an index with no identity, or with another fixed
+    /// policy.
+    pub(crate) fn get_identity(&self, txn: &RoTxn<'_>) -> Result<ChainIdentity, IndexError> {
+        let stored = self.0.get(txn, IDENTITY)?.ok_or(IndexError::Identity)?;
+        let policy = &identity("", block::Hash([0; 32]))[..POLICY_BYTES];
+        let (Some(stored_policy), Some(genesis), Some(network)) = (
+            stored.get(..POLICY_BYTES),
+            stored.get(POLICY_BYTES..POLICY_BYTES + 32),
+            stored.get(POLICY_BYTES + 32..),
+        ) else {
+            return Err(IndexError::Identity);
+        };
+        if stored_policy != policy {
+            return Err(IndexError::Identity);
+        }
+        Ok(ChainIdentity {
+            network: std::str::from_utf8(network).map_err(|_| IndexError::Identity)?.to_owned(),
+            genesis_hash: block::Hash(genesis.try_into().expect("the slice has 32 bytes")),
+        })
     }
 }
 
@@ -284,5 +308,38 @@ mod tests {
             metadata.put_or_check_identity(&mut txn, "Mainnet", block::Hash([2; 32])),
             Err(IndexError::Identity)
         ));
+    }
+
+    #[test]
+    fn open_existing_reads_the_chain_and_refuses_a_path_with_no_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let map_size = 10 * 1024 * 1024;
+        drop(Index::open(dir.path(), map_size, "Testnet", block::Hash([1; 32])).unwrap());
+
+        let index = Index::open_existing(dir.path(), map_size).unwrap();
+
+        let expected =
+            ChainIdentity { network: "Testnet".to_owned(), genesis_hash: block::Hash([1; 32]) };
+        assert_eq!(index.identity().unwrap(), expected);
+        let empty = tempfile::tempdir().unwrap();
+        let error = Index::open_existing(empty.path(), map_size).unwrap_err();
+        assert!(matches!(error, IndexError::Io(_)), "{error:?}");
+        assert!(!empty.path().join("data.mdb").exists());
+    }
+
+    #[test]
+    fn an_identity_of_another_policy_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let metadata = index.tables.metadata;
+        let mut txn = index.env.write_txn().unwrap();
+        let mut stored = identity("Mainnet", block::Hash([1; 32]));
+        stored[3] ^= 1;
+        metadata.0.put(&mut txn, IDENTITY, &stored).unwrap();
+
+        assert!(matches!(metadata.get_identity(&txn), Err(IndexError::Identity)));
+        metadata.0.put(&mut txn, IDENTITY, &stored[..20]).unwrap();
+        assert!(matches!(metadata.get_identity(&txn), Err(IndexError::Identity)));
     }
 }

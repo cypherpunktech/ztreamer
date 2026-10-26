@@ -16,3 +16,4 @@ pub mod epoch;
 pub mod manifest;
 pub mod range;
 pub mod sample;
+pub mod snapshot;

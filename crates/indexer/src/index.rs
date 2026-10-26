@@ -107,7 +107,7 @@
 
 use std::{fs, io, path::Path, time::Instant};
 
-use heed::{Env, EnvOpenOptions, RoTxn};
+use heed::{Env, EnvOpenOptions, RoTxn, RwTxn};
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 
 use crate::codec::{
@@ -121,6 +121,7 @@ pub mod range_meta;
 mod tables;
 mod telemetry;
 mod writer;
+use metadata::Metadata;
 use range_meta::{RangeMeta, VerifyState};
 use tables::{SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
@@ -142,6 +143,15 @@ impl BlockId {
     pub const fn new(height: u32, hash: block::Hash) -> Self {
         Self { height, hash }
     }
+}
+
+/// The chain of an index, as its identity row stores it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChainIdentity {
+    /// The network name that the index was opened with, for example `Mainnet`.
+    pub network: String,
+    /// The hash of the genesis block.
+    pub genesis_hash: block::Hash,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -275,12 +285,41 @@ impl Index {
         genesis_hash: block::Hash,
     ) -> Result<Self, IndexError> {
         fs::create_dir_all(path.as_ref())?;
+        Self::open_with(path.as_ref(), map_size, |metadata, txn| {
+            metadata.put_or_check_identity(txn, network, genesis_hash)
+        })
+    }
+
+    /// Opens an index that exists, for the chain in its identity row. A tool that does not know
+    /// the chain of the index uses it, for example `ztreamerd export-snapshot`. Refuses a path
+    /// with no index, and an index with another format. [`Index::identity`] gives the chain.
+    pub fn open_existing(path: impl AsRef<Path>, map_size: usize) -> Result<Self, IndexError> {
+        let path = path.as_ref();
+        if !path.join("data.mdb").is_file() {
+            let message = format!("{} holds no index", path.display());
+            return Err(io::Error::new(io::ErrorKind::NotFound, message).into());
+        }
+        Self::open_with(path, map_size, |metadata, txn| metadata.get_identity(txn).map(drop))
+    }
+
+    /// The chain of the index, as its identity row stores it.
+    pub fn identity(&self) -> Result<ChainIdentity, IndexError> {
+        let txn = self.env.read_txn()?;
+        self.tables.metadata.get_identity(&txn)
+    }
+
+    /// Opens the environment and its tables, runs `check` on the identity, and checks the
+    /// coverage.
+    fn open_with(
+        path: &Path,
+        map_size: usize,
+        check: impl FnOnce(&Metadata, &mut RwTxn<'_>) -> Result<(), IndexError>,
+    ) -> Result<Self, IndexError> {
         // SAFETY: callers must not open this path with incompatible LMDB options in this process.
-        let env =
-            unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(5).open(path.as_ref())? };
+        let env = unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(5).open(path)? };
         let mut txn = env.write_txn()?;
         let tables = Tables::open(&env, &mut txn)?;
-        tables.metadata.put_or_check_identity(&mut txn, network, genesis_hash)?;
+        check(&tables.metadata, &mut txn)?;
         txn.commit()?;
 
         let index = Self { env, tables };
