@@ -70,8 +70,9 @@ impl<'a> Epoch<'a> {
     /// `subtree_roots`.
     ///
     /// An empty frontier means that the pool is not active, as in the manifest: its tree is
-    /// empty, and its root in the proof is `None`. An active pool that becomes inactive is
-    /// [`Check::Frontier`].
+    /// empty. An active pool that becomes inactive is [`Check::Frontier`]. The proof has a root
+    /// for each pool, also for an empty tree. [`EpochProof::agrees_with`] compares them with the
+    /// node.
     pub fn verify(
         &self,
         blobs: &[impl AsRef<[u8]>],
@@ -106,7 +107,8 @@ impl<'a> Epoch<'a> {
         }
         Ok(EpochProof {
             end_frontiers: end_frontiers.clone(),
-            roots: trees.roots(end_frontiers),
+            end_tree_sizes: link.end_tree_sizes,
+            roots: trees.roots(),
             completed,
         })
     }
@@ -174,12 +176,31 @@ pub struct EpochProof {
     /// The frontiers at the end of the epoch: the frontiers of its last entry, which the rebuild
     /// gave byte for byte. They are the start frontiers of the next epoch.
     pub end_frontiers: Frontiers,
-    /// The rebuilt roots at [`Epoch::end_height`]. Compare them with the `z_gettreestate` answer
-    /// of the node. A root is `None` when the end frontier of its pool is empty: the pool is not
-    /// active, and the node gives no root for it.
+    /// The tree sizes at [`Epoch::end_height`], the sizes of the rebuilt trees.
+    pub end_tree_sizes: TreeSizes,
+    /// The rebuilt roots at [`Epoch::end_height`]. Each root is `Some`: a tree with no
+    /// commitments has the root of the empty tree. Use [`EpochProof::agrees_with`] to compare
+    /// them with the `z_gettreestate` answer of the node.
     pub roots: PoolRoots,
     /// The subtrees that the epoch completed, in the order that its blocks completed them.
     pub completed: Vec<SubtreeRoot>,
+}
+
+impl EpochProof {
+    /// Returns `true` if `node`, the tree roots of the node at [`Epoch::end_height`], agree with
+    /// the rebuilt trees, pool by pool.
+    ///
+    /// A root of the node must equal the rebuilt root. The node gives no root for a pool that
+    /// is not active. That answer agrees only with a tree that has no commitments. The frontier
+    /// does not tell an inactive pool from an active pool with an empty tree: both are an empty
+    /// tree, which can have the serialized empty frontier `000000`. Thus the tree size decides,
+    /// not the frontier.
+    pub fn agrees_with(&self, node: &PoolRoots) -> bool {
+        let (rebuilt, sizes) = (&self.roots, self.end_tree_sizes);
+        node.sapling.map_or(sizes.sapling == 0, |root| rebuilt.sapling == Some(root))
+            && node.orchard.map_or(sizes.orchard == 0, |root| rebuilt.orchard == Some(root))
+            && node.ironwood.map_or(sizes.ironwood == 0, |root| rebuilt.ironwood == Some(root))
+    }
 }
 
 /// The three note commitment trees during a rebuild.
@@ -249,13 +270,12 @@ impl Trees {
             && same(&frontiers.ironwood, self.ironwood.count(), self.ironwood.to_rpc_bytes())
     }
 
-    /// The roots of the trees. A root is `None` when the frontier of its pool is empty, because
-    /// the node gives no root for a pool that is not active.
-    pub(crate) fn roots(&self, frontiers: &Frontiers) -> PoolRoots {
+    /// The root of each tree. An empty tree has the root of the empty tree.
+    pub(crate) fn roots(&self) -> PoolRoots {
         PoolRoots {
-            sapling: (!frontiers.sapling.is_empty()).then(|| self.sapling.root()),
-            orchard: (!frontiers.orchard.is_empty()).then(|| self.orchard.root()),
-            ironwood: (!frontiers.ironwood.is_empty()).then(|| self.ironwood.root()),
+            sapling: Some(self.sapling.root()),
+            orchard: Some(self.orchard.root()),
+            ironwood: Some(self.ironwood.root()),
         }
     }
 }
@@ -595,6 +615,7 @@ mod tests {
         let proof = epochs[1].verify(&fixture.blobs, &fixture.start).unwrap();
 
         assert_eq!(proof.end_frontiers, fixture.entries[2].frontiers);
+        assert_eq!(proof.end_tree_sizes, fixture.entries[2].end_tree_sizes);
         assert_eq!(
             proof.roots,
             PoolRoots {

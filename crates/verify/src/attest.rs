@@ -144,14 +144,17 @@ impl Epoch<'_> {
     /// returns one [`Attested`] record per entry, in order.
     ///
     /// The method compares the end hash of each entry with the node, the three roots of `proof`
-    /// at [`Epoch::end_height`], and the root of each subtree that the epoch completed, with
-    /// one [`Attestor::subtree_roots`] call per pool. A wrong subtree root rejects at the end
-    /// height of the entry that lists it.
+    /// at [`Epoch::end_height`] with [`EpochProof::agrees_with`], and the root of each subtree
+    /// that the epoch completed, with one [`Attestor::subtree_roots`] call per pool. A wrong
+    /// subtree root rejects at the end height of the entry that lists it.
     ///
     /// The record of an entry holds the end hash of the node, the subtrees that the entry
     /// completed, and the roots at its end. The last entry has the roots of the node. An entry
     /// before it has the rebuilt roots of its frontiers: the node attests them through the end
-    /// roots, because the rebuild appends the leaves of the epoch to these trees.
+    /// roots, because the rebuild appends the leaves of the epoch to these trees. A pool that
+    /// has no root at the end is not active before the end, thus its root is `None` in each
+    /// record. In the epoch where a pool becomes active, an entry before the activation height
+    /// has the root of the empty tree, not `None`: its frontier does not tell the two apart.
     ///
     /// ```
     /// use ztreamer_indexer::index::range_meta::{Attested, Frontiers};
@@ -190,7 +193,7 @@ impl Epoch<'_> {
             .tree_roots(end)
             .await
             .map_err(|source| EpochError::Node { height: end, source })?;
-        if roots != proof.roots {
+        if !proof.agrees_with(&roots) {
             return Err(Check::AttestedRoots.at(end).into());
         }
         self.attest_subtrees(proof, attestor).await?;
@@ -202,9 +205,14 @@ impl Epoch<'_> {
                 } else {
                     // `Epoch::verify` checked that the frontiers are the rebuilt trees, thus
                     // they parse.
-                    Trees::try_from(&entry.frontiers)
+                    let rebuilt = Trees::try_from(&entry.frontiers)
                         .map_err(|_| Check::Frontier.at(entry.end_height))?
-                        .roots(&entry.frontiers)
+                        .roots();
+                    PoolRoots {
+                        sapling: roots.sapling.and(rebuilt.sapling),
+                        orchard: roots.orchard.and(rebuilt.orchard),
+                        ironwood: roots.ironwood.and(rebuilt.ironwood),
+                    }
                 };
                 let subtree_roots = entry.subtree_roots.clone();
                 Ok(Attested { end_hash: entry.end_hash, roots, subtree_roots })
@@ -405,12 +413,16 @@ impl<K: Ord + Copy, V: Copy> Answers<K, V> {
 
 #[cfg(test)]
 mod tests {
+    use pasta_curves::pallas;
     use serde_json::{Value, json};
-    use zakura_chain::{orchard, sapling};
+    use zakura_chain::{ironwood, orchard, sapling};
     use ztreamer_indexer::{
-        codec::TreeSizes,
-        index::range_meta::{Frontiers, SubtreeRoot},
-        test_utils::hash,
+        codec::{TreeSizes, encode_range},
+        index::{
+            RANGE_SIZE,
+            range_meta::{Frontiers, ManifestEntry, SubtreeRoot},
+        },
+        test_utils::{hash, record},
     };
     use ztreamer_remote::{
         RpcClient,
@@ -418,7 +430,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::epoch::{Epochs, synthetic_entries};
+    use crate::{
+        epoch::{Epochs, synthetic_entries},
+        range::entry_for,
+    };
 
     const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 
@@ -426,11 +441,17 @@ mod tests {
         SubtreeNode::Sapling(sapling_crypto::Node::from_bytes([byte; 32]).unwrap())
     }
 
+    /// The honest node roots: Sapling and Orchard are active, Ironwood is not.
     fn roots() -> PoolRoots {
+        PoolRoots { ironwood: None, ..empty_tree_roots() }
+    }
+
+    /// The root of the empty tree for each pool.
+    fn empty_tree_roots() -> PoolRoots {
         PoolRoots {
             sapling: Some(sapling::tree::NoteCommitmentTree::default().root()),
             orchard: Some(orchard::tree::NoteCommitmentTree::default().root()),
-            ironwood: None,
+            ironwood: Some(ironwood::tree::NoteCommitmentTree::default().root()),
         }
     }
 
@@ -483,15 +504,17 @@ mod tests {
         }
     }
 
-    /// Attests one epoch of three ranges, 0 to 2,999, with `attestor`. The second range
-    /// completes Sapling subtree [`SUBTREE`].
+    /// Attests one epoch of three ranges, 0 to 2,999, with `attestor`. Each range adds one
+    /// Sapling commitment, and the second range completes Sapling subtree [`SUBTREE`]. The
+    /// proof has the root of the empty tree for each pool.
     async fn attest(attestor: &FakeAttestor) -> Result<Vec<Attested>, EpochError> {
         let completed = SubtreeRoot { index: SUBTREE, root: sapling_node(1) };
         let mut entries = synthetic_entries(&[TreeSizes { sapling: 1, ..TreeSizes::default() }; 3]);
         entries[1].subtree_roots = vec![completed];
         let proof = EpochProof {
             end_frontiers: Frontiers::default(),
-            roots: roots(),
+            end_tree_sizes: entries[2].end_tree_sizes,
+            roots: empty_tree_roots(),
             completed: vec![completed],
         };
         Epochs::new(&entries).next().unwrap().attest(&proof, attestor).await
@@ -510,8 +533,8 @@ mod tests {
     async fn matching_answers_give_one_attested_record_per_range() {
         let attested = attest(&FakeAttestor::honest()).await.unwrap();
 
-        // The first two ranges have empty frontiers: their rebuilt roots are `None`. Only the
-        // second range completes the subtree.
+        // The first two ranges have the rebuilt roots of their frontiers, and no Ironwood root
+        // because the node gives none at the end. Only the second range completes the subtree.
         let record = |end_height, roots, subtree_roots| Attested {
             end_hash: hash(end_height),
             roots,
@@ -521,8 +544,8 @@ mod tests {
         assert_eq!(
             attested,
             [
-                record(999, PoolRoots::default(), Vec::new()),
-                record(1_999, PoolRoots::default(), completed),
+                record(999, roots(), Vec::new()),
+                record(1_999, roots(), completed),
                 record(2_999, roots(), Vec::new()),
             ]
         );
@@ -538,8 +561,15 @@ mod tests {
         attestor.hashes.insert(1_999, hash(1_998));
         assert_rejected(attest(&attestor).await, Check::AttestedHash, 1_999);
 
+        let mut orchard = orchard::tree::NoteCommitmentTree::default();
+        orchard.append(pallas::Base::from(1)).unwrap();
         let mut attestor = FakeAttestor::honest();
-        attestor.roots.insert(2_999, PoolRoots { orchard: None, ..roots() });
+        attestor.roots.insert(2_999, PoolRoots { orchard: Some(orchard.root()), ..roots() });
+        assert_rejected(attest(&attestor).await, Check::AttestedRoots, 2_999);
+
+        // The rebuilt Sapling tree has 3 commitments: an inactive Sapling pool is wrong.
+        let mut attestor = FakeAttestor::honest();
+        attestor.roots.insert(2_999, PoolRoots { sapling: None, ..roots() });
         assert_rejected(attest(&attestor).await, Check::AttestedRoots, 2_999);
 
         let mut attestor = FakeAttestor::honest();
@@ -587,7 +617,10 @@ mod tests {
     /// A mock node that answers each method of the attestor, and the attestor on it.
     async fn json_rpc_attestor(treestate: Value) -> (MockNode, JsonRpcAttestor) {
         let node = MockNode::start(move |_, seen| match seen.body["method"].as_str().unwrap() {
-            "getblockhash" => Reply::Result(json!(hash(2_999).to_string())),
+            "getblockhash" => {
+                let height = seen.body["params"][0].as_u64().unwrap();
+                Reply::Result(json!(hash(u32::try_from(height).unwrap()).to_string()))
+            }
             "z_gettreestate" => Reply::Result(treestate.clone()),
             "z_getsubtreesbyindex" => {
                 let params = &seen.body["params"];
@@ -673,5 +706,68 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// The first mainnet epoch, 0 to 9,999, as the filler writes it: no commitments, and the
+    /// serialized empty frontier `000000` for each pool, also for a pool that is not active.
+    fn first_epoch() -> (Vec<ManifestEntry>, Vec<Vec<u8>>) {
+        let empty = vec![0; 3];
+        let blocks: Vec<_> =
+            (0..10 * RANGE_SIZE).map(|height| record(height, Vec::new())).collect();
+        blocks
+            .chunks(RANGE_SIZE as usize)
+            .map(|range| {
+                let blob = encode_range(range).unwrap();
+                let mut entry = entry_for(range, &blob);
+                entry.frontiers = Frontiers {
+                    sapling: empty.clone(),
+                    orchard: empty.clone(),
+                    ironwood: empty.clone(),
+                };
+                (entry, blob)
+            })
+            .unzip()
+    }
+
+    /// Verifies and attests [`first_epoch`] with a mock node that gives `treestate` at 9,999.
+    async fn attest_first_epoch(treestate: Value) -> Result<Vec<Attested>, EpochError> {
+        let (entries, blobs) = first_epoch();
+        let epoch = Epochs::new(&entries).next().unwrap();
+        assert_eq!(epoch.end_height(), 9_999);
+        let proof = epoch.verify(&blobs, &Frontiers::default()).unwrap();
+        let (_node, attestor) = json_rpc_attestor(treestate).await;
+        epoch.attest(&proof, &attestor).await
+    }
+
+    /// The `z_gettreestate` answer of zakura at 9,999 on mainnet: no pool is active.
+    fn inactive_treestate() -> Value {
+        let mut state = treestate(9_999);
+        for pool in ["sapling", "orchard", "ironwood"] {
+            state[pool] = json!({ "commitments": {} });
+        }
+        state
+    }
+
+    #[tokio::test]
+    async fn empty_frontiers_agree_with_a_node_that_gives_no_roots() {
+        let attested = attest_first_epoch(inactive_treestate()).await.unwrap();
+
+        assert_eq!(attested.len(), 10);
+        assert!(attested.iter().all(|record| record.roots == PoolRoots::default()), "{attested:?}");
+    }
+
+    #[tokio::test]
+    async fn an_active_pool_with_an_empty_tree_agrees_with_the_empty_tree_root() {
+        let mut state = inactive_treestate();
+        let mut sapling = <[u8; 32]>::from(empty_tree_roots().sapling.unwrap());
+        sapling.reverse();
+        state["sapling"] =
+            json!({ "commitments": { "finalRoot": hex::encode(sapling), "finalState": "000000" } });
+
+        let attested = attest_first_epoch(state).await.unwrap();
+
+        let sapling_only =
+            PoolRoots { sapling: empty_tree_roots().sapling, ..PoolRoots::default() };
+        assert!(attested.iter().all(|record| record.roots == sapling_only), "{attested:?}");
     }
 }
