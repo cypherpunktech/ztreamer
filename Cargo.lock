@@ -8085,6 +8085,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "incrementalmerkletree",
+ "metrics",
  "rand 0.9.5",
  "rustls",
  "serde",
