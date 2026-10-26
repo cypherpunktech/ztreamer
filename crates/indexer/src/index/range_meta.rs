@@ -55,6 +55,13 @@ const IRONWOOD_TAG: u8 = 2;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BlobDigest(pub [u8; 32]);
 
+impl BlobDigest {
+    /// Calculates the BLAKE3 digest of `blob`.
+    pub fn hash(blob: &[u8]) -> Self {
+        Self(*blake3::hash(blob).as_bytes())
+    }
+}
+
 /// The root node of a completed note commitment subtree, in its pool's node type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SubtreeNode {

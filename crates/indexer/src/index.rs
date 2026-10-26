@@ -122,7 +122,7 @@ mod tables;
 mod telemetry;
 mod writer;
 use metadata::Metadata;
-use range_meta::{RangeMeta, VerifyState};
+use range_meta::{BlobDigest, RangeMeta, VerifyState};
 use tables::{SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
@@ -262,6 +262,22 @@ pub enum IndexError {
     DuplicateHash { height: u32 },
     #[error("index has mutable rows; an install needs an index with no mutable rows")]
     MutableRows,
+    /// The length of a range blob is not the `blob_len` of its metadata.
+    #[error("range blob at {start} has {actual} bytes; the metadata gives {expected}")]
+    BlobLen {
+        /// The first height of the range.
+        start: u32,
+        /// The length that the metadata gives.
+        expected: u64,
+        /// The length of the blob.
+        actual: u64,
+    },
+    /// The BLAKE3 digest of a range blob is not the `blob_digest` of its metadata.
+    #[error("range blob at {start} does not have the digest that the metadata gives")]
+    BlobDigest {
+        /// The first height of the range.
+        start: u32,
+    },
 }
 
 /// Ztreamer's five-database LMDB index.
@@ -404,14 +420,15 @@ impl Index {
         self.tables.range_meta.rows_from(&txn, start)
     }
 
-    /// Installs one packed range from a snapshot, and its metadata, in one write. The caller
-    /// must check the blob digest first.
+    /// Installs one packed range from a snapshot, and its metadata, in one write.
     ///
     /// Conditions for an install:
     ///
     /// - The index has no mutable rows.
     /// - `start` is `sealed_through + 1`, or 0 on an empty index. Thus ranges install in height
     ///   order, with no gaps.
+    /// - The length and the BLAKE3 digest of the blob are `meta.entry.blob_len` and
+    ///   `meta.entry.blob_digest`.
     /// - Each record of the blob decodes and links to the block below it. The first record links
     ///   to the tip, or to the genesis previous hash for range 0.
     /// - The tree sizes do not decrease from the tip to the last record.
@@ -420,7 +437,9 @@ impl Index {
     ///   sizes of the blob.
     /// - `meta.state` is not [`VerifyState::Rejected`].
     ///
-    /// The method does the checks on the state before it decodes the blob.
+    /// The method does the checks on the state first. Then it checks the length and the digest.
+    /// Then it decodes the blob. It calculates the digest before it starts the write
+    /// transaction, because the digest does not need the index.
     ///
     /// The write adds the blob, its hash entries and `meta`. It moves the tip and
     /// `sealed_through` to the range end. A [`VerifyState::Verified`] range advances
@@ -432,6 +451,8 @@ impl Index {
         blob: &[u8],
         meta: &RangeMeta,
     ) -> Result<IndexState, IndexError> {
+        let blob_len = u64::try_from(blob.len()).map_err(|_| IndexError::Overflow)?;
+        let blob_digest = BlobDigest::hash(blob);
         let mut writer = IndexWriter::start_latest(&self.env, self.tables)?;
         let state = writer.state();
         let next = state.next_range_start()?;
@@ -440,6 +461,13 @@ impl Index {
         }
         if state.has_mutable_rows() {
             return Err(IndexError::MutableRows);
+        }
+        if blob_len != meta.entry.blob_len {
+            let expected = meta.entry.blob_len;
+            return Err(IndexError::BlobLen { start, expected, actual: blob_len });
+        }
+        if blob_digest != meta.entry.blob_digest {
+            return Err(IndexError::BlobDigest { start });
         }
         // The index has no mutable rows. Thus the tip is the last block of the sealed ranges.
         let parent = state.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
@@ -991,12 +1019,22 @@ mod tests {
             .collect()
     }
 
-    /// The blob of the range at `start`, as a snapshot gives it, and its metadata with `state`.
-    fn snapshot_range(start: u32, state: VerifyState) -> (Vec<u8>, RangeMeta) {
+    /// Gives the metadata of the range at `start`, with `state` and with the length and the
+    /// digest of `blob`.
+    fn snapshot_meta(start: u32, state: VerifyState, blob: &[u8]) -> RangeMeta {
         let mut meta = full_meta(start);
         meta.entry.end_tree_sizes = tree_sizes(start + RANGE_SIZE - 1);
+        meta.entry.blob_digest = BlobDigest::hash(blob);
+        meta.entry.blob_len = u64::try_from(blob.len()).unwrap();
         meta.state = state;
-        (encode_range(&range_records(start)).unwrap(), meta)
+        meta
+    }
+
+    /// The blob of the range at `start`, as a snapshot gives it, and its metadata with `state`.
+    fn snapshot_range(start: u32, state: VerifyState) -> (Vec<u8>, RangeMeta) {
+        let blob = encode_range(&range_records(start)).unwrap();
+        let meta = snapshot_meta(start, state, &blob);
+        (blob, meta)
     }
 
     fn install(index: &Index, start: u32, state: VerifyState) -> Result<IndexState, IndexError> {
@@ -1084,7 +1122,7 @@ mod tests {
             encode_range(&records).unwrap()
         };
         let refused_at = |start, blob: &[u8], height| {
-            let meta = snapshot_range(start, VerifyState::Verified).1;
+            let meta = snapshot_meta(start, VerifyState::Verified, blob);
             matches!(index.install_sealed_range(start, blob, &meta), Err(IndexError::RangeBlob { height: h }) if h == height)
         };
         let unlinked = |records: &mut [CompactBlockRecord]| {
@@ -1108,12 +1146,13 @@ mod tests {
 
         // A record in the blob does not link to the record below it. The encoder refuses this
         // range. Thus change the bytes of one record after the encode. The bytes keep their length.
-        let (mut blob, meta) = snapshot_range(1_000, VerifyState::Verified);
+        let mut blob = snapshot_range(1_000, VerifyState::Verified).0;
         let mut bad = range_records(1_000)[500].clone();
         let good = bad.encode().unwrap();
         bad.previous_hash = block::Hash([9; 32]);
         let at = blob.windows(good.len()).position(|bytes| bytes == good).unwrap();
         blob[at..at + good.len()].copy_from_slice(&bad.encode().unwrap());
+        let meta = snapshot_meta(1_000, VerifyState::Verified, &blob);
         assert!(matches!(
             index.install_sealed_range(1_000, &blob, &meta),
             Err(IndexError::RangeBlob { height: 1_500 })
@@ -1127,23 +1166,24 @@ mod tests {
         let index =
             Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
         let state = install(&index, 0, VerifyState::Verified).unwrap();
-        let meta = snapshot_range(1_000, VerifyState::Verified).1;
         // The block at 1,500 gets the hash `duplicate`. The block at 1,501 links to it.
-        let blob = |duplicate| {
+        let install_with_duplicate_hash = |duplicate| {
             let mut records = range_records(1_000);
             records[500].hash = duplicate;
             records[501].previous_hash = duplicate;
-            encode_range(&records).unwrap()
+            let blob = encode_range(&records).unwrap();
+            let meta = snapshot_meta(1_000, VerifyState::Verified, &blob);
+            index.install_sealed_range(1_000, &blob, &meta)
         };
 
         // The hash of block 5 is in range 0.
         assert!(matches!(
-            index.install_sealed_range(1_000, &blob(hash(5)), &meta),
+            install_with_duplicate_hash(hash(5)),
             Err(IndexError::DuplicateHash { height: 1_500 })
         ));
         // The hash of block 1,600 occurs at 1,500 and at 1,600 in the same blob.
         assert!(matches!(
-            index.install_sealed_range(1_000, &blob(hash(1_600)), &meta),
+            install_with_duplicate_hash(hash(1_600)),
             Err(IndexError::DuplicateHash { height: 1_600 })
         ));
         assert_eq!(index.state().unwrap(), state);
@@ -1179,6 +1219,43 @@ mod tests {
         assert_eq!(index.state().unwrap(), IndexState::default());
         assert_eq!(index.range_meta(0).unwrap(), None);
         index.install_sealed_range(0, &blob, &meta).unwrap();
+    }
+
+    #[test]
+    fn install_refuses_a_blob_with_a_wrong_length_or_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let state = install(&index, 0, VerifyState::Verified).unwrap();
+        let (blob, meta) = snapshot_range(1_000, VerifyState::Verified);
+        let len = meta.entry.blob_len;
+
+        let mut long = meta.clone();
+        long.entry.blob_len += 1;
+        assert!(matches!(
+            index.install_sealed_range(1_000, &blob, &long),
+            Err(IndexError::BlobLen { start: 1_000, expected, actual })
+                if expected == len + 1 && actual == len
+        ));
+        let mut other = meta.clone();
+        other.entry.blob_digest = BlobDigest::hash(b"another blob");
+        assert!(matches!(
+            index.install_sealed_range(1_000, &blob, &other),
+            Err(IndexError::BlobDigest { start: 1_000 })
+        ));
+        // A changed byte does not change the length. It changes the digest.
+        let mut changed = blob.clone();
+        changed[blob.len() / 2] ^= 1;
+        assert!(matches!(
+            index.install_sealed_range(1_000, &changed, &meta),
+            Err(IndexError::BlobDigest { start: 1_000 })
+        ));
+
+        assert_eq!(index.state().unwrap(), state);
+        assert_eq!(index.read_sealed_range_bytes(1_000).unwrap(), None);
+        assert_eq!(index.range_meta(1_000).unwrap(), None);
+        index.verify_continuity().unwrap();
+        index.install_sealed_range(1_000, &blob, &meta).unwrap();
     }
 
     #[test]

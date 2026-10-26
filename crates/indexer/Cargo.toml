@@ -12,6 +12,7 @@ workspace = true
 test-utils = ["dep:zakura-test"]
 
 [dependencies]
+blake3.workspace = true
 heed = { version = "0.22.1", default-features = false }
 hex = "0.4"
 incrementalmerkletree.workspace = true
