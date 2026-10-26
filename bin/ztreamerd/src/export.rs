@@ -18,7 +18,6 @@
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
-    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
@@ -34,41 +33,27 @@ use ztreamer_verify::{
     snapshot::{Latest, RangePath, SIGNATURE_SUFFIX},
 };
 
-use crate::DEFAULT_MAP_SIZE;
-
 /// Bytes per write when a range blob goes to disk.
 const WRITE_CHUNK: usize = 1024 * 1024;
 
-/// Writes the sealed ranges of an index as a snapshot.
+/// Writes the sealed ranges of an index as a snapshot. The index is the one of the global
+/// `--index-dir` and `--index-map-size` flags.
 #[derive(Debug, clap::Args)]
 pub(crate) struct ExportArgs {
-    /// Directory containing the LMDB compact index.
-    #[arg(long, value_name = "DIR")]
-    index_dir: PathBuf,
-
-    /// Maximum LMDB map size in bytes. Give the value of the daemon that uses the index: an
-    /// index that grows past the map of this process stops the export.
-    #[arg(long, default_value_t = NonZeroUsize::new(DEFAULT_MAP_SIZE).unwrap())]
-    index_map_size: NonZeroUsize,
-
     /// Snapshot directory. An export into the same directory writes only the new ranges.
     #[arg(long, value_name = "DIR")]
     out: PathBuf,
 
-    /// Ed25519 key as a raw 32-byte seed. Without it, the export writes no signatures.
+    /// Ed25519 key as a raw 32-byte seed. It signs the manifest and `latest.json`.
     #[arg(long, value_name = "FILE")]
-    signing_key: Option<PathBuf>,
+    signing_key: PathBuf,
 }
 
 impl ExportArgs {
-    /// Exports the index and logs what the export wrote.
-    pub(crate) fn run(self) -> Result<()> {
+    /// Exports `index` and logs what the export wrote.
+    pub(crate) fn run(self, index: &Index) -> Result<()> {
         // Read the key before the potentially lengthy export.
-        let signer = self.signing_key.as_deref().map(Signer::from_file).transpose()?;
-        if signer.is_none() {
-            warn!("no --signing-key: the snapshot has no signatures, and a replica refuses it");
-        }
-        let index = Index::open_existing(&self.index_dir, self.index_map_size.get())?;
+        let signer = Signer::from_file(&self.signing_key)?;
         let identity = index.identity()?;
         let network: Network = identity
             .network
@@ -79,7 +64,7 @@ impl ExportArgs {
             "the index has genesis {}, not the genesis of {network}",
             identity.genesis_hash
         );
-        SnapshotDir::new(self.out).export(&index, &network, Utc::now(), signer.as_ref())?.log();
+        SnapshotDir::new(self.out).export(index, &network, Utc::now(), &signer)?.log();
         Ok(())
     }
 }
@@ -123,13 +108,13 @@ impl SnapshotDir {
     }
 
     /// Writes the range files, then the manifest, then `latest.json`. Thus `latest.json` points
-    /// only at files that are present. Signs the manifest and `latest.json` if `signer` is set.
+    /// only at files that are present. `signer` signs the manifest and `latest.json`.
     fn export(
         &self,
         index: &Index,
         network: &Network,
         now: DateTime<Utc>,
-        signer: Option<&Signer>,
+        signer: &Signer,
     ) -> Result<ExportReport> {
         let Rows { mut entries, missing: missing_rows } = Rows::read(index)?;
         let last = entries
@@ -164,9 +149,9 @@ impl SnapshotDir {
             manifest: manifest_path.clone(),
             sealed_through: manifest.sealed_through(),
             published_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
-            public_key: signer.map(Signer::public_key),
+            public_key: Some(signer.public_key()),
         };
-        let latest = latest.to_file(signer.map(|signer| &signer.0));
+        let latest = latest.to_file(Some(&signer.0));
         Staged::write(self.root.join(Latest::PATH), &latest)?.commit()?;
 
         Ok(ExportReport {
@@ -203,16 +188,12 @@ impl SnapshotDir {
         Ok(true)
     }
 
-    /// Writes `bytes` to `relative`, and its signature to `relative` + [`SIGNATURE_SUFFIX`] if
-    /// `signer` is set. Only for a file that is never replaced: a reader can see the file
-    /// before its signature.
-    fn put_signed(&self, relative: &str, bytes: &[u8], signer: Option<&Signer>) -> Result<()> {
+    /// Writes `bytes` to `relative`, and its signature to `relative` + [`SIGNATURE_SUFFIX`].
+    /// Only for a file that is never replaced: a reader can see the file before its signature.
+    fn put_signed(&self, relative: &str, bytes: &[u8], signer: &Signer) -> Result<()> {
         let path = self.root.join(relative);
         Staged::write(path.clone(), bytes)?.commit()?;
-        if let Some(signer) = signer {
-            Staged::write(Signer::signature_path(&path), signer.sign(bytes).as_bytes())?
-                .commit()?;
-        }
+        Staged::write(Signer::signature_path(&path), signer.sign(bytes).as_bytes())?.commit()?;
         Ok(())
     }
 }
@@ -377,17 +358,23 @@ mod tests {
         (index, entries)
     }
 
-    fn export(index: &Index, out: &TempDir, days: i64, signer: Option<&Signer>) -> ExportReport {
+    fn export(index: &Index, out: &TempDir, days: i64) -> ExportReport {
         let now = DateTime::from_timestamp(NOW + days * 86_400, 0).unwrap();
         SnapshotDir::new(out.path().to_owned())
-            .export(index, &Network::Mainnet, now, signer)
+            .export(index, &Network::Mainnet, now, &signer())
             .unwrap()
     }
 
-    fn signer(dir: &TempDir) -> Signer {
-        let path = dir.path().join("key");
+    /// Writes the test key to a key file in `dir`.
+    fn key_file(dir: &Path) -> PathBuf {
+        let path = dir.join("key");
         fs::write(&path, [7; 32]).unwrap();
-        Signer::from_file(&path).unwrap()
+        path
+    }
+
+    fn signer() -> Signer {
+        let dir = tempfile::tempdir().unwrap();
+        Signer::from_file(&key_file(dir.path())).unwrap()
     }
 
     /// The rows that the filler writes for three ranges with no commitments: no range closes an
@@ -405,7 +392,7 @@ mod tests {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
 
-        let report = export(&index, &out, 0, None);
+        let report = export(&index, &out, 0);
 
         let manifest_path = "manifests/2026-10-26T000000Z.json";
         assert_eq!(
@@ -445,7 +432,7 @@ mod tests {
 
         let json: Value =
             serde_json::from_slice(&fs::read(out.path().join("latest.json")).unwrap()).unwrap();
-        assert!(json.get("signature").is_none());
+        assert!(json.get("signature").is_some());
         let latest: Latest = serde_json::from_value(json["latest"].clone()).unwrap();
         assert_eq!(
             latest,
@@ -453,11 +440,11 @@ mod tests {
                 manifest: manifest_path.to_owned(),
                 sealed_through: 2_999,
                 published_at: "2026-10-26T00:00:00Z".to_owned(),
-                public_key: None,
+                public_key: Some(signer().public_key()),
             }
         );
         assert!(!out.path().join("latest.json.sig").exists());
-        assert!(!out.path().join(format!("{manifest_path}.sig")).exists());
+        assert!(out.path().join(format!("{manifest_path}.sig")).exists());
     }
 
     #[test]
@@ -465,7 +452,7 @@ mod tests {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
 
-        let report = export(&index, &out, 0, None);
+        let report = export(&index, &out, 0);
 
         let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
         // `from_json` checks every rule of the manifest.
@@ -477,7 +464,7 @@ mod tests {
     fn a_second_export_writes_no_range_file_again() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
-        export(&index, &out, 0, None);
+        export(&index, &out, 0);
         // The export does not read a file with the name and the length of its entry. A file
         // with another length is written again.
         let [same_length, short] = [&entries[0], &entries[1]].map(|entry| {
@@ -489,7 +476,7 @@ mod tests {
         fs::write(&same_length.0, &same_length.1).unwrap();
         fs::write(&short.0, &short.1[..10]).unwrap();
 
-        let report = export(&index, &out, 1, None);
+        let report = export(&index, &out, 1);
 
         assert_eq!((report.ranges, report.written), (3, 1));
         assert_eq!(fs::read(&same_length.0).unwrap(), same_length.1);
@@ -499,12 +486,13 @@ mod tests {
         );
         assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
         assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
-        assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 2);
+        // Two manifests, each with its signature.
+        assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 4);
 
         // An export in the same second does not replace the manifest.
         let now = DateTime::from_timestamp(NOW + 86_400, 0).unwrap();
         let error = SnapshotDir::new(out.path().to_owned())
-            .export(&index, &Network::Mainnet, now, None)
+            .export(&index, &Network::Mainnet, now, &signer())
             .unwrap_err();
         assert!(error.to_string().contains("never replaced"), "{error}");
     }
@@ -513,10 +501,10 @@ mod tests {
     fn signatures_verify_with_the_signing_key() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, _) = indexed(&dir, 3, &ALL_ROWS);
-        let signer = signer(&dir);
+        let signer = signer();
         let key = signer.0.verifying_key();
 
-        let report = export(&index, &out, 0, Some(&signer));
+        let report = export(&index, &out, 0);
 
         let latest_path = out.path().join(Latest::PATH);
         let latest = Latest::from_file(&fs::read(&latest_path).unwrap(), &key).unwrap();
@@ -548,7 +536,7 @@ mod tests {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, entries) = indexed(&dir, 3, &[(0, false), (2_000, false)]);
 
-        let report = export(&index, &out, 0, None);
+        let report = export(&index, &out, 0);
 
         assert_eq!((report.ranges, report.missing_rows), (1, 2));
         let manifest: Manifest =
@@ -565,7 +553,7 @@ mod tests {
         let rows: Vec<_> = (0..12).map(|range| (range * RANGE_SIZE, range == 9)).collect();
         let (index, entries) = indexed(&dir, 12, &rows);
 
-        let report = export(&index, &out, 0, None);
+        let report = export(&index, &out, 0);
 
         assert_eq!((report.ranges, report.missing_rows), (12, 0));
         let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
@@ -584,7 +572,7 @@ mod tests {
         let now = DateTime::from_timestamp(NOW, 0).unwrap();
 
         let error = SnapshotDir::new(out.path().to_owned())
-            .export(&index, &Network::Mainnet, now, None)
+            .export(&index, &Network::Mainnet, now, &signer())
             .unwrap_err();
 
         assert!(error.to_string().contains("no range_meta row"), "{error}");
@@ -602,7 +590,7 @@ mod tests {
         let now = DateTime::from_timestamp(NOW, 0).unwrap();
 
         let error = SnapshotDir::new(out.path().to_owned())
-            .export(&index, &network, now, None)
+            .export(&index, &network, now, &signer())
             .unwrap_err();
 
         assert!(error.to_string().contains("no sealed range"), "{error}");
@@ -611,15 +599,10 @@ mod tests {
     #[test]
     fn the_export_reads_the_chain_from_the_index() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        drop(indexed(&dir, 3, &ALL_ROWS));
-        let args = |index_dir: &Path| ExportArgs {
-            index_dir: index_dir.to_owned(),
-            index_map_size: NonZeroUsize::new(512 * 1024 * 1024).unwrap(),
-            out: out.path().to_owned(),
-            signing_key: None,
-        };
+        let (index, _) = indexed(&dir, 3, &ALL_ROWS);
+        let args = ExportArgs { out: out.path().to_owned(), signing_key: key_file(dir.path()) };
 
-        args(dir.path()).run().unwrap();
+        args.run(&index).unwrap();
 
         let json: Value =
             serde_json::from_slice(&fs::read(out.path().join(Latest::PATH)).unwrap()).unwrap();
@@ -628,8 +611,18 @@ mod tests {
         let manifest = Manifest::from_json(&manifest.unwrap()).unwrap();
         assert_eq!(manifest.network(), "Mainnet");
         assert_eq!(manifest.genesis_hash(), Network::Mainnet.genesis_hash());
-        let empty = tempfile::tempdir().unwrap();
-        let error = args(empty.path()).run().unwrap_err();
-        assert!(format!("{error:?}").contains("holds no index"), "{error:?}");
+    }
+
+    #[test]
+    fn an_export_without_a_readable_key_writes_nothing() {
+        let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (index, _) = indexed(&dir, 3, &ALL_ROWS);
+        let args =
+            ExportArgs { out: out.path().to_owned(), signing_key: dir.path().join("missing") };
+
+        let error = args.run(&index).unwrap_err();
+
+        assert!(error.to_string().contains("read signing key"), "{error}");
+        assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 }

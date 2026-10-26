@@ -72,12 +72,14 @@ struct DaemonArgs {
     #[arg(long, value_name = "FILE")]
     zakura_config: Option<PathBuf>,
 
-    /// Directory containing the LMDB compact index.
-    #[arg(long, default_value = "ztreamer-index", value_name = "DIR")]
+    /// Directory containing the LMDB compact index. A subcommand reads it too: give it after
+    /// the subcommand name.
+    #[arg(long, global = true, default_value = "ztreamer-index", value_name = "DIR")]
     index_dir: PathBuf,
 
-    /// Maximum LMDB map size in bytes.
-    #[arg(long, default_value_t = NonZeroUsize::new(DEFAULT_MAP_SIZE).unwrap())]
+    /// Maximum LMDB map size in bytes. A subcommand reads it too: give it after the subcommand
+    /// name.
+    #[arg(long, global = true, default_value_t = NonZeroUsize::new(DEFAULT_MAP_SIZE).unwrap())]
     index_map_size: NonZeroUsize,
 
     /// Historical fetch/parse workers. Defaults to the pipeline setting.
@@ -149,6 +151,12 @@ impl DaemonArgs {
                 .wrap_err("index open task panicked")??;
         Ok(Arc::new(index))
     }
+
+    /// Opens the index of `--index-dir` for the chain in its identity row. Refuses a directory
+    /// with no index.
+    fn open_existing_index(&self) -> Result<Index> {
+        Ok(Index::open_existing(&self.index_dir, self.index_map_size.get())?)
+    }
 }
 
 impl From<&DaemonArgs> for PipelineConfig {
@@ -179,7 +187,7 @@ fn main() -> Result<()> {
         )
         .init();
     match command {
-        Some(Command::ExportSnapshot(args)) => args.run(),
+        Some(Command::ExportSnapshot(args)) => args.run(&daemon.open_existing_index()?),
         None => run_daemon(daemon),
     }
 }
@@ -530,18 +538,32 @@ mod tests {
 
     #[test]
     fn export_snapshot_is_a_subcommand_beside_the_daemon_flags() {
-        let cli = Cli::parse_from([
-            "ztreamerd",
-            "export-snapshot",
-            "--index-dir",
-            "index",
-            "--out",
-            "snapshot",
-        ]);
+        let export = ["export-snapshot", "--out", "snapshot", "--signing-key", "key"];
+        let cli = Cli::parse_from(["ztreamerd"].into_iter().chain(export));
         assert!(matches!(cli.command, Some(Command::ExportSnapshot(_))));
+        assert_eq!(cli.daemon.index_dir, PathBuf::from("ztreamer-index"));
         assert!(
-            Cli::try_parse_from(["ztreamerd", "--index-only", "export-snapshot", "--out", "x"])
-                .is_err()
+            Cli::try_parse_from(["ztreamerd", "--index-only"].into_iter().chain(export)).is_err()
         );
+        assert!(Cli::try_parse_from(["ztreamerd", "export-snapshot", "--out", "x"]).is_err());
+    }
+
+    #[test]
+    fn export_snapshot_reads_the_global_index_flags() {
+        let export = ["export-snapshot", "--out", "snapshot", "--signing-key", "key"];
+        let index = ["--index-dir", "index", "--index-map-size", "4096"];
+        let cli = Cli::parse_from(["ztreamerd"].into_iter().chain(export).chain(index));
+        assert!(matches!(cli.command, Some(Command::ExportSnapshot(_))));
+        assert_eq!(cli.daemon.index_dir, PathBuf::from("index"));
+        assert_eq!(cli.daemon.index_map_size.get(), 4096);
+    }
+
+    #[test]
+    fn export_snapshot_refuses_a_directory_with_no_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli =
+            Cli::parse_from(["ztreamerd".as_ref(), "--index-dir".as_ref(), dir.path().as_os_str()]);
+        let error = cli.daemon.open_existing_index().unwrap_err();
+        assert!(format!("{error:?}").contains("holds no index"), "{error:?}");
     }
 }
