@@ -143,6 +143,19 @@ pub struct Frontiers {
     pub ironwood: Vec<u8>,
 }
 
+impl Frontiers {
+    /// Returns `true` if each pool that is active in `before` is also active in `self`.
+    ///
+    /// An empty frontier means that the pool is not active: `z_gettreestate` gives no tree for
+    /// it. An active pool always has a frontier, also when its tree is empty. A pool does not
+    /// become inactive, so `false` means that `self` is wrong.
+    pub const fn follows(&self, before: &Self) -> bool {
+        (before.sapling.is_empty() || !self.sapling.is_empty())
+            && (before.orchard.is_empty() || !self.orchard.is_empty())
+            && (before.ironwood.is_empty() || !self.ironwood.is_empty())
+    }
+}
+
 /// What a snapshot manifest says about one sealed range.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ManifestEntry {
@@ -615,6 +628,17 @@ mod tests {
         let mut bad_flag = bytes;
         bad_flag[entry_len] = 2;
         assert_eq!(RangeMeta::decode(&bad_flag), Err(CodecError::InvalidRecord));
+    }
+
+    #[test]
+    fn a_pool_that_becomes_inactive_does_not_follow() {
+        let active = Frontiers { sapling: vec![1], orchard: vec![0, 0, 0], ironwood: Vec::new() };
+        let mut later = Frontiers { ironwood: vec![2], ..active.clone() };
+        assert!(later.follows(&active));
+        assert!(active.follows(&Frontiers::default()));
+
+        later.orchard.clear();
+        assert!(!later.follows(&active));
     }
 
     #[test]

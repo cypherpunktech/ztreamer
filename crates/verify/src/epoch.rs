@@ -6,7 +6,9 @@
 //! or at the first range that brings the note commitments it adds to [`MAX_COMMITMENTS`]. The
 //! last range of the manifest also closes an epoch. Mainnet has about 400 epochs.
 
-use ztreamer_indexer::{codec::TreeSizes, index::range_meta::ManifestEntry};
+use std::iter::FusedIterator;
+
+use ztreamer_indexer::index::range_meta::ManifestEntry;
 
 /// The most ranges in one epoch.
 pub const MAX_RANGES: usize = 10;
@@ -39,47 +41,61 @@ impl<'a> Epoch<'a> {
     }
 }
 
-/// Groups `entries` into epochs with the rule in the module docs.
+/// An iterator over the epochs of manifest entries, in height order.
 ///
-/// `entries` must be the ranges of a manifest in ascending order from genesis, with tree sizes
-/// that do not decrease. [`Manifest::validate`](crate::manifest::Manifest::validate) checks
-/// this. The function does not read `epoch_end`.
+/// Each item is the next [`Epoch`] with the rule in the module docs. The entries must be the
+/// ranges of a manifest in ascending order from genesis, with tree sizes that do not decrease;
+/// a [`Manifest`](crate::manifest::Manifest) always is. The iterator does not read `epoch_end`.
 ///
 /// ```
-/// use ztreamer_verify::{epoch::epochs, manifest::Manifest};
+/// use ztreamer_verify::manifest::Manifest;
 ///
 /// # fn run(manifest: Manifest) {
-/// for epoch in epochs(&manifest.entries) {
+/// for epoch in manifest.epochs() {
 ///     println!("{} ranges through {}", epoch.entries().len(), epoch.end_height());
 /// }
 /// # }
 /// ```
-pub fn epochs(entries: &[ManifestEntry]) -> Vec<Epoch<'_>> {
-    let mut epochs = Vec::new();
-    let (mut start, mut base) = (0, 0);
-    for (index, entry) in entries.iter().enumerate() {
-        let commitments = total(entry.end_tree_sizes).saturating_sub(base);
-        let closes = index + 1 - start == MAX_RANGES
-            || commitments >= MAX_COMMITMENTS
-            || index + 1 == entries.len();
-        if closes {
-            epochs.push(Epoch { entries: &entries[start..=index], commitments });
-            (start, base) = (index + 1, total(entry.end_tree_sizes));
-        }
-    }
-    epochs
+#[derive(Clone, Debug)]
+pub struct Epochs<'a> {
+    entries: &'a [ManifestEntry],
+    start: usize,
 }
 
-/// The note commitments in all three trees.
-fn total(sizes: TreeSizes) -> u64 {
-    [sizes.sapling, sizes.orchard, sizes.ironwood].into_iter().map(u64::from).sum()
+impl<'a> Epochs<'a> {
+    /// Groups `entries` into epochs, from the first entry.
+    pub const fn new(entries: &'a [ManifestEntry]) -> Self {
+        Self { entries, start: 0 }
+    }
 }
+
+impl<'a> Iterator for Epochs<'a> {
+    type Item = Epoch<'a>;
+
+    fn next(&mut self) -> Option<Epoch<'a>> {
+        let rest = self.entries.get(self.start..).filter(|rest| !rest.is_empty())?;
+        let previous = self.start.checked_sub(1).map(|previous| &self.entries[previous]);
+        let base = previous.map_or(0, |previous| previous.end_tree_sizes.total());
+        let added = |entry: &ManifestEntry| entry.end_tree_sizes.total().saturating_sub(base);
+        let len = rest
+            .iter()
+            .take(MAX_RANGES)
+            .position(|entry| added(entry) >= MAX_COMMITMENTS)
+            .map_or(rest.len().min(MAX_RANGES), |at| at + 1);
+        let entries = &rest[..len];
+        self.start += len;
+        Some(Epoch { entries, commitments: added(&entries[len - 1]) })
+    }
+}
+
+impl FusedIterator for Epochs<'_> {}
 
 /// Contiguous entries from genesis. Entry `i` adds `adds[i]` commitments to the trees, and the
-/// `epoch_end` flags agree with [`epochs`].
+/// `epoch_end` flags agree with [`Epochs`].
 #[cfg(test)]
-pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
+pub(crate) fn synthetic_entries(adds: &[ztreamer_indexer::codec::TreeSizes]) -> Vec<ManifestEntry> {
     use ztreamer_indexer::{
+        codec::TreeSizes,
         index::{
             RANGE_SIZE,
             range_meta::{BlobDigest, Frontiers},
@@ -112,12 +128,10 @@ pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
             }
         })
         .collect();
-    let mut end = 0;
-    let closes: Vec<_> = epochs(&entries)
-        .iter()
-        .map(|epoch| {
-            end += epoch.entries().len();
-            end - 1
+    let closes: Vec<_> = Epochs::new(&entries)
+        .scan(0, |end, epoch| {
+            *end += epoch.entries().len();
+            Some(*end - 1)
         })
         .collect();
     for index in closes {
@@ -128,6 +142,8 @@ pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
 
 #[cfg(test)]
 mod tests {
+    use ztreamer_indexer::codec::TreeSizes;
+
     use super::*;
 
     fn sapling(count: u32) -> TreeSizes {
@@ -135,13 +151,13 @@ mod tests {
     }
 
     fn lengths(entries: &[ManifestEntry]) -> Vec<usize> {
-        epochs(entries).iter().map(|epoch| epoch.entries().len()).collect()
+        Epochs::new(entries).map(|epoch| epoch.entries().len()).collect()
     }
 
     #[test]
     fn an_epoch_closes_at_ten_ranges() {
         let entries = synthetic_entries(&[sapling(1_000); 25]);
-        let epochs = epochs(&entries);
+        let epochs: Vec<_> = Epochs::new(&entries).collect();
 
         assert_eq!(lengths(&entries), [10, 10, 5]);
         assert_eq!(epochs[0].end_height(), 9_999);
@@ -158,7 +174,7 @@ mod tests {
         // The cap is reached exactly at the second range.
         let entries = synthetic_entries(&[sapling(999_999), sapling(1), sapling(5)]);
         assert_eq!(lengths(&entries), [2, 1]);
-        assert_eq!(epochs(&entries)[0].commitments(), MAX_COMMITMENTS);
+        assert_eq!(Epochs::new(&entries).next().unwrap().commitments(), MAX_COMMITMENTS);
 
         // A heavy range closes the epoch that it joins.
         let entries = synthetic_entries(&[sapling(10), sapling(1_060_000), sapling(10)]);
@@ -171,11 +187,14 @@ mod tests {
         let entries = synthetic_entries(&[add; 4]);
 
         assert_eq!(lengths(&entries), [2, 2]);
-        assert_eq!(epochs(&entries)[1].commitments(), 1_000_000);
+        assert_eq!(Epochs::new(&entries).nth(1).unwrap().commitments(), 1_000_000);
     }
 
     #[test]
     fn no_entries_give_no_epochs() {
-        assert!(epochs(&[]).is_empty());
+        let mut epochs = Epochs::new(&[]);
+
+        assert_eq!(epochs.next(), None);
+        assert_eq!(epochs.next(), None);
     }
 }

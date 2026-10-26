@@ -146,10 +146,15 @@ pub struct TreeSizes {
 impl TreeSizes {
     /// Returns `true` if each pool size is at least the size in `below`. The sizes of a chain do
     /// not decrease from one block to the next.
-    pub(crate) const fn follows(self, below: Self) -> bool {
+    pub const fn follows(self, below: Self) -> bool {
         self.sapling >= below.sapling
             && self.orchard >= below.orchard
             && self.ironwood >= below.ironwood
+    }
+
+    /// The note commitments in all three trees.
+    pub const fn total(self) -> u64 {
+        self.sapling as u64 + self.orchard as u64 + self.ironwood as u64
     }
 }
 
@@ -702,6 +707,14 @@ mod tests {
         let stored: Vec<_> = records.iter().map(|r| r.encode().unwrap()).collect();
         let parts: Vec<_> = stored.iter().map(Vec::as_slice).collect();
         assert_eq!(encode_range_from_bytes(&parts), Err(CodecError::InvalidRange));
+    }
+
+    #[test]
+    fn tree_sizes_total_sums_the_pools_without_overflow() {
+        let sizes = TreeSizes { sapling: u32::MAX, orchard: u32::MAX, ironwood: 1 };
+
+        assert_eq!(sizes.total(), 2 * u64::from(u32::MAX) + 1);
+        assert!(sizes.follows(TreeSizes { ironwood: 1, ..TreeSizes::default() }));
     }
 
     fn action(byte: u8) -> CompactShieldedAction {

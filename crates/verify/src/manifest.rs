@@ -37,27 +37,30 @@ use ztreamer_indexer::{
     },
 };
 
-use crate::epoch::{Epoch, epochs};
+use crate::epoch::Epochs;
 
 /// The manifest format version that this crate reads.
 pub const MANIFEST_VERSION: u32 = 1;
 
-/// A snapshot manifest.
+/// A snapshot manifest that obeys the rules in the module docs.
+///
+/// The fields are private. Each way to get a manifest checks the rules: [`Manifest::from_json`],
+/// serde, and [`ManifestBuilder::build`]. Thus a `Manifest` is always valid.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(try_from = "ManifestFields")]
+pub struct Manifest(ManifestFields);
+
+/// The fields of a manifest, before the rules are checked.
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Manifest {
-    /// The network name, for example `Mainnet`.
-    pub network: String,
-    /// The hash of the genesis block.
+struct ManifestFields {
+    network: String,
     #[serde_as(as = "DisplayFromStr")]
-    pub genesis_hash: block::Hash,
-    /// The last height of the last sealed range.
-    pub sealed_through: u32,
-    /// The manifest format version.
-    pub manifest_version: u32,
-    /// One entry per sealed range, in height order from genesis.
+    genesis_hash: block::Hash,
+    sealed_through: u32,
+    manifest_version: u32,
     #[serde_as(as = "Vec<EntryJson>")]
-    pub entries: Vec<ManifestEntry>,
+    entries: Vec<ManifestEntry>,
 }
 
 /// Builds a [`Manifest`] whose version and `sealed_through` agree with its entries.
@@ -86,21 +89,20 @@ impl ManifestBuilder {
     }
 
     /// Builds the manifest at [`MANIFEST_VERSION`], with `sealed_through` at the end of the last
-    /// entry, and validates it with [`Manifest::validate`].
+    /// entry, and checks the rules.
     pub fn build(self) -> Result<Manifest, ManifestError> {
-        let manifest = Manifest {
+        ManifestFields {
             network: self.network,
             genesis_hash: self.genesis_hash,
             sealed_through: self.entries.last().map_or(0, |entry| entry.end_height),
             manifest_version: MANIFEST_VERSION,
             entries: self.entries,
-        };
-        manifest.validate()?;
-        Ok(manifest)
+        }
+        .try_into()
     }
 }
 
-/// A manifest that does not parse or does not obey the rules in [`Manifest::validate`].
+/// A manifest that does not parse or does not obey the rules in the module docs.
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     /// The JSON does not parse into a manifest.
@@ -163,12 +165,50 @@ impl Manifest {
         ManifestBuilder { network: network.into(), genesis_hash, entries: Vec::new() }
     }
 
-    /// Parses a manifest and validates it.
+    /// Parses a manifest and checks the rules.
     pub fn from_json(json: &str) -> Result<Self, ManifestError> {
-        let manifest: Self = serde_json::from_str(json)?;
-        manifest.validate()?;
-        Ok(manifest)
+        serde_json::from_str::<ManifestFields>(json)?.try_into()
     }
+
+    /// The network name, for example `Mainnet`.
+    pub fn network(&self) -> &str {
+        &self.0.network
+    }
+
+    /// The hash of the genesis block.
+    pub const fn genesis_hash(&self) -> block::Hash {
+        self.0.genesis_hash
+    }
+
+    /// The last height of the last sealed range.
+    pub const fn sealed_through(&self) -> u32 {
+        self.0.sealed_through
+    }
+
+    /// The manifest format version, [`MANIFEST_VERSION`].
+    pub const fn manifest_version(&self) -> u32 {
+        self.0.manifest_version
+    }
+
+    /// One entry per sealed range, in height order from genesis.
+    pub fn entries(&self) -> &[ManifestEntry] {
+        &self.0.entries
+    }
+
+    /// The verification epochs of the manifest.
+    pub fn epochs(&self) -> Epochs<'_> {
+        Epochs::new(&self.0.entries)
+    }
+}
+
+impl Serialize for Manifest {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl TryFrom<ManifestFields> for Manifest {
+    type Error = ManifestError;
 
     /// Checks that:
     ///
@@ -176,23 +216,56 @@ impl Manifest {
     /// - the entries are one aligned range each, contiguous from genesis, with tree sizes that
     ///   do not decrease, and with no pool that becomes inactive;
     /// - `sealed_through` is the last height of the last entry;
-    /// - `epoch_end` agrees with [`epochs`].
-    pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.manifest_version != MANIFEST_VERSION {
-            return Err(ManifestError::Version { version: self.manifest_version });
+    /// - `epoch_end` agrees with [`Epochs`].
+    fn try_from(fields: ManifestFields) -> Result<Self, ManifestError> {
+        if fields.manifest_version != MANIFEST_VERSION {
+            return Err(ManifestError::Version { version: fields.manifest_version });
         }
-        self.entries.iter().enumerate().try_fold(None, |previous, (index, entry)| {
-            check_link(index, previous, entry).map(|()| Some(entry))
-        })?;
-        let last_end = self.entries.last().map(|entry| entry.end_height);
-        if last_end != Some(self.sealed_through) {
+        fields
+            .entries
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, entry)| fields.check_entry(index, entry))?;
+        let last_end = fields.entries.last().map(|entry| entry.end_height);
+        if last_end != Some(fields.sealed_through) {
             return Err(ManifestError::SealedThrough {
-                sealed_through: self.sealed_through,
+                sealed_through: fields.sealed_through,
                 last_end,
             });
         }
-        epochs(&self.entries)
-            .iter()
+        fields.check_epoch_ends()?;
+        Ok(Self(fields))
+    }
+}
+
+impl ManifestFields {
+    /// Checks that entry `index` is one aligned range, and that it follows the entry before it
+    /// or starts at genesis.
+    fn check_entry(&self, index: usize, entry: &ManifestEntry) -> Result<(), ManifestError> {
+        let previous = index.checked_sub(1).map(|previous| &self.entries[previous]);
+        let expected_start =
+            previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
+        if expected_start != Some(entry.start_height) {
+            return Err(ManifestError::Discontiguous { index, start_height: entry.start_height });
+        }
+        if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
+            return Err(ManifestError::RangeLength { index });
+        }
+        let Some(previous) = previous else {
+            return Ok(());
+        };
+        if !entry.end_tree_sizes.follows(previous.end_tree_sizes) {
+            return Err(ManifestError::TreeSizes { index });
+        }
+        if !entry.frontiers.follows(&previous.frontiers) {
+            return Err(ManifestError::PoolInactive { index });
+        }
+        Ok(())
+    }
+
+    /// Checks that each entry has `epoch_end` set when it is the last entry of its epoch.
+    fn check_epoch_ends(&self) -> Result<(), ManifestError> {
+        Epochs::new(&self.entries)
             .flat_map(|epoch| {
                 let last = epoch.entries().len() - 1;
                 epoch.entries().iter().enumerate().map(move |(at, entry)| (entry, at == last))
@@ -203,50 +276,6 @@ impl Manifest {
                 Err(ManifestError::EpochEnd { index, expected })
             })
     }
-
-    /// The verification epochs of the manifest.
-    pub fn epochs(&self) -> Vec<Epoch<'_>> {
-        epochs(&self.entries)
-    }
-}
-
-/// Checks that `entry` follows `previous`, or starts at genesis when there is no previous entry.
-fn check_link(
-    index: usize,
-    previous: Option<&ManifestEntry>,
-    entry: &ManifestEntry,
-) -> Result<(), ManifestError> {
-    let expected_start = previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
-    if expected_start != Some(entry.start_height) {
-        return Err(ManifestError::Discontiguous { index, start_height: entry.start_height });
-    }
-    if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
-        return Err(ManifestError::RangeLength { index });
-    }
-    let (before, after) =
-        (previous.map_or_else(TreeSizes::default, |p| p.end_tree_sizes), entry.end_tree_sizes);
-    if after.sapling < before.sapling
-        || after.orchard < before.orchard
-        || after.ironwood < before.ironwood
-    {
-        return Err(ManifestError::TreeSizes { index });
-    }
-    if previous.is_some_and(|previous| pool_deactivates(&previous.frontiers, &entry.frontiers)) {
-        return Err(ManifestError::PoolInactive { index });
-    }
-    Ok(())
-}
-
-/// Whether a pool has a frontier in `before` and none in `after`.
-///
-/// An empty frontier means that the pool is not active: `z_gettreestate` gives no tree for it.
-/// An active pool always has a frontier, also when its tree is empty. A pool does not become
-/// inactive, so `true` means that `after` is wrong.
-pub(crate) fn pool_deactivates(before: &Frontiers, after: &Frontiers) -> bool {
-    let deactivates = |before: &[u8], after: &[u8]| !before.is_empty() && after.is_empty();
-    deactivates(&before.sapling, &after.sapling)
-        || deactivates(&before.orchard, &after.orchard)
-        || deactivates(&before.ironwood, &after.ironwood)
 }
 
 /// The JSON form of a [`ManifestEntry`].
@@ -436,14 +465,23 @@ mod tests {
         Manifest::builder("Mainnet", hash(0)).entries(entries).build().unwrap()
     }
 
+    /// The fields of [`two_entry_manifest`], to break one rule at a time.
+    fn fields() -> ManifestFields {
+        two_entry_manifest().0
+    }
+
+    fn refused(fields: ManifestFields) -> ManifestError {
+        Manifest::try_from(fields).unwrap_err()
+    }
+
     #[test]
     fn manifest_round_trips_through_json() {
         let manifest = two_entry_manifest();
         let json = serde_json::to_string(&manifest).unwrap();
 
         assert_eq!(Manifest::from_json(&json).unwrap(), manifest);
-        assert_eq!(manifest.sealed_through, 1_999);
-        assert_eq!(manifest.manifest_version, MANIFEST_VERSION);
+        assert_eq!(manifest.sealed_through(), 1_999);
+        assert_eq!(manifest.manifest_version(), MANIFEST_VERSION);
     }
 
     #[test]
@@ -452,8 +490,8 @@ mod tests {
         let json: Value = serde_json::to_value(&manifest).unwrap();
         let entry = &json["entries"][0];
 
-        assert_eq!(json["genesis_hash"], manifest.genesis_hash.to_string());
-        assert_eq!(entry["end_hash"], manifest.entries[0].end_hash.to_string());
+        assert_eq!(json["genesis_hash"], manifest.genesis_hash().to_string());
+        assert_eq!(entry["end_hash"], manifest.entries()[0].end_hash.to_string());
         assert_eq!(entry["end_tree_sizes"]["sapling"], 70_000);
         assert_eq!(entry["end_tree_sizes"]["orchard"], 3);
         assert_eq!(entry["end_tree_sizes"]["ironwood"], 0);
@@ -470,6 +508,16 @@ mod tests {
     }
 
     #[test]
+    fn serde_checks_the_rules() {
+        let mut json = serde_json::to_value(two_entry_manifest()).unwrap();
+        json["sealed_through"] = Value::from(2_999);
+
+        let error = serde_json::from_value::<Manifest>(json).unwrap_err();
+
+        assert!(error.to_string().contains("sealed_through 2999"), "{error}");
+    }
+
+    #[test]
     fn a_subtree_root_that_is_not_a_field_element_is_refused() {
         let mut json = serde_json::to_value(two_entry_manifest()).unwrap();
         json["entries"][0]["subtree_roots"][1]["root"] = Value::from("ff".repeat(32));
@@ -481,10 +529,10 @@ mod tests {
 
     #[test]
     fn entries_out_of_order_are_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries.swap(0, 1);
 
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
 
         assert!(
             matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 }),
@@ -494,11 +542,11 @@ mod tests {
 
     #[test]
     fn a_gap_is_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries = synthetic_entries(&[TreeSizes::default(); 3]);
         manifest.entries.remove(1);
 
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
 
         assert!(
             matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 }),
@@ -508,27 +556,27 @@ mod tests {
 
     #[test]
     fn a_wrong_range_length_or_a_shrinking_tree_is_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries[1].end_height += 1;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(matches!(error, ManifestError::RangeLength { index: 1 }), "{error:?}");
 
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries[1].end_tree_sizes.orchard = 2;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(matches!(error, ManifestError::TreeSizes { index: 1 }), "{error:?}");
     }
 
     #[test]
     fn a_wrong_version_or_sealed_through_is_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.manifest_version = 2;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(matches!(error, ManifestError::Version { version: 2 }), "{error:?}");
 
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.sealed_through = 2_999;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(
             matches!(
                 error,
@@ -538,25 +586,25 @@ mod tests {
         );
 
         manifest.entries.clear();
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(matches!(error, ManifestError::SealedThrough { last_end: None, .. }), "{error:?}");
     }
 
     #[test]
     fn a_pool_that_becomes_inactive_is_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries[1].frontiers.orchard.clear();
 
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
 
         assert!(matches!(error, ManifestError::PoolInactive { index: 1 }), "{error:?}");
     }
 
     #[test]
     fn a_wrong_epoch_end_is_refused() {
-        let mut manifest = two_entry_manifest();
+        let mut manifest = fields();
         manifest.entries[0].epoch_end = true;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(
             matches!(error, ManifestError::EpochEnd { index: 0, expected: false }),
             "{error:?}"
@@ -565,13 +613,13 @@ mod tests {
         manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
         manifest.sealed_through = 11_999;
         manifest.entries[9].epoch_end = false;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(matches!(error, ManifestError::EpochEnd { index: 9, expected: true }), "{error:?}");
 
         // The last entry of the manifest always closes an epoch.
         manifest.entries[9].epoch_end = true;
         manifest.entries[11].epoch_end = false;
-        let error = manifest.validate().unwrap_err();
+        let error = refused(manifest.clone());
         assert!(
             matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
             "{error:?}"
