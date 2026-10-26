@@ -8083,6 +8083,7 @@ dependencies = [
  "tokio",
  "zakura-chain",
  "zakura-pasta-curves",
+ "zakura-rpc",
  "zakura-sapling-crypto",
  "zakura-state",
  "ztreamer-indexer",

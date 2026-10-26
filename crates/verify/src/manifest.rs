@@ -324,6 +324,9 @@ pub enum Pool {
 }
 
 impl Pool {
+    /// The three pools.
+    pub const ALL: [Self; 3] = [Self::Sapling, Self::Orchard, Self::Ironwood];
+
     /// The name of the pool in the manifest and in `z_getsubtreesbyindex`.
     pub const fn as_str(self) -> &'static str {
         match self {
