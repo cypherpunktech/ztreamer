@@ -1,0 +1,3 @@
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 42.5s.
+                        time:   [4.2350 s 4.2519 s 4.2732 s]
+Found 1 outliers among 10 measurements (10.00%)

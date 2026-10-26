@@ -1,0 +1,20 @@
+ranges GetBlockRange/1000 clients 1 status ok blocks/s 69902 MB/s 346 p50_ms 1.3
+ranges GetBlockRange/10000 clients 1 status ok blocks/s 87260 MB/s 398 p50_ms 7.4
+ranges GetBlockRange/100000 clients 1 status ok blocks/s 46165 MB/s 523 p50_ms 57.3
+concurrency GetBlockRange/10000 clients 1 status ok blocks/s 141497 MB/s 640 p50_ms 6.6
+concurrency GetBlockRange/10000 clients 8 status ok blocks/s 603523 MB/s 3027 p50_ms 10.7
+sync GetBlockRange/chunk-10000 clients 1 status ok blocks/s 116504 MB/s 668 p50_ms 5.9
+== replica-http-warm
+ranges GetBlockRange/1000 c 1 ok blocks/s 126603 MB/s 626
+ranges GetBlockRange/10000 c 1 ok blocks/s 147259 MB/s 671
+ranges GetBlockRange/100000 c 1 ok blocks/s 60801 MB/s 689
+concurrency GetBlockRange/10000 c 1 ok blocks/s 144594 MB/s 654
+concurrency GetBlockRange/10000 c 8 ok blocks/s 620411 MB/s 3167
+sync GetBlockRange/chunk-10000 c 1 ok blocks/s 119542 MB/s 685
+== source-embedded
+ranges GetBlockRange/1000 c 1 ok blocks/s 126392 MB/s 625
+ranges GetBlockRange/10000 c 1 ok blocks/s 149464 MB/s 681
+ranges GetBlockRange/100000 c 1 ok blocks/s 60850 MB/s 690
+concurrency GetBlockRange/10000 c 1 ok blocks/s 143965 MB/s 651
+concurrency GetBlockRange/10000 c 8 ok blocks/s 613010 MB/s 3147
+sync GetBlockRange/chunk-10000 c 1 ok blocks/s 117871 MB/s 676

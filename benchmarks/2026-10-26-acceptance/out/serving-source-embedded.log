@@ -1,0 +1,6 @@
+repeat 1: ranges GetBlockRange/1000
+repeat 1: ranges GetBlockRange/10000
+repeat 1: ranges GetBlockRange/100000
+repeat 1: concurrency 1
+repeat 1: concurrency 8
+repeat 1: wallet sync 419200..=3531614
