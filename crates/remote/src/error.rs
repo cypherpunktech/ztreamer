@@ -21,12 +21,15 @@ impl RpcCode {
 
     /// JSON-RPC 2.0 "invalid params".
     ///
-    /// zakura answers `getblockhash` with this code for a height above its tip.
+    /// Of the block methods, only `getblockhash` uses this code for a missing block: for a
+    /// height above the tip of the node. `getblock` answers [`Self::INVALID_PARAMETER`].
     pub const INVALID_PARAMS: Self = Self(-32602);
 
     /// zcashd legacy code: a parameter is not valid.
     ///
-    /// zakura answers `getblockhash` and `getblock` with this code for a block it does not have.
+    /// zakura answers `getblock` with this code for a block that it does not have: an unknown
+    /// hash, or a height above its tip. `getblockhash` answers this code for a height at or below
+    /// the tip when the node has no hash for it.
     pub const INVALID_PARAMETER: Self = Self(-8);
 
     /// zcashd legacy code: the node is still warming up.
@@ -173,8 +176,9 @@ impl RpcError {
 
     /// True when the node has no block at the requested height or with the requested hash.
     ///
-    /// zakura answers a block request above its tip with [`RpcCode::INVALID_PARAMS`] and a
-    /// request for an unknown block with [`RpcCode::INVALID_PARAMETER`].
+    /// zakura answers `getblockhash` for a height above its tip with [`RpcCode::INVALID_PARAMS`].
+    /// It answers all other requests for a missing block, `getblock` included, with
+    /// [`RpcCode::INVALID_PARAMETER`].
     pub const fn is_block_not_found(&self) -> bool {
         matches!(self.rpc_code(), Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER))
     }

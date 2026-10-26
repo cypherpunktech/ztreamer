@@ -70,10 +70,7 @@ impl CanonicalBlockSource for RemoteHeadSource {
             return Err(HeadError::Height { expected: height, actual: block.height.0 });
         }
         if block.hash != hash {
-            return Err(HeadError::Decode(format!(
-                "block {height} has hash {}, the node gave {hash}",
-                block.hash
-            )));
+            return Err(HeadError::Hash { height, expected: hash, actual: block.hash });
         }
         Ok(Some(block))
     }
@@ -87,6 +84,7 @@ fn node_error(error: RpcError) -> HeadError {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
+    use serde_json::json;
     use tokio::sync::watch;
     use zakura_chain::{block::Block, parameters::Network, serialization::ZcashSerialize as _};
     use zakura_state::Config;
@@ -97,7 +95,7 @@ mod tests {
     };
     use ztreamer_remote::{
         RpcClient,
-        test_utils::{MockChain, MockNode},
+        test_utils::{MockChain, MockNode, Reply},
     };
 
     use super::*;
@@ -152,6 +150,43 @@ mod tests {
         assert_eq!(block.bytes, blocks[3].zcash_serialize_to_vec().unwrap());
         assert_eq!(block.txids, [blocks[3].transactions[0].hash()]);
         assert!(source.block(6).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_block_with_another_hash_is_refused() {
+        let blocks = chain(5);
+        let mut fork = blocks[..3].to_vec();
+        grow_chain(&mut fork, 3, 1);
+        let named = fork[3].hash();
+        let sent = blocks[3].clone();
+        let chain = MockChain::new(&blocks);
+        // The node names the hash of the fork block at height 3, then sends the block of the best
+        // chain for that hash.
+        let mock = MockNode::start(move |_, request| {
+            let params = &request.body["params"];
+            match request.body["method"].as_str() {
+                Some("getblockhash") if params[0] == 3 => Reply::Result(json!(named.to_string())),
+                Some("getblock") if params[0] == named.to_string().as_str() => {
+                    Reply::Result(json!(hex::encode(sent.zcash_serialize_to_vec().unwrap())))
+                }
+                _ => chain.reply(request),
+            }
+        })
+        .await;
+        let mut source =
+            RemoteHeadSource::new(ZakuraClient::new(RpcClient::new(mock.config()).unwrap()));
+
+        let result = source.block(3).await;
+
+        assert!(
+            matches!(
+                result,
+                Err(HeadError::Hash { height: 3, expected, actual })
+                    if expected == fork[3].hash() && actual == blocks[3].hash()
+            ),
+            "{result:?}"
+        );
+        assert!(source.block(4).await.unwrap().is_some());
     }
 
     #[tokio::test]

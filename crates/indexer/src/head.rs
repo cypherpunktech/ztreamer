@@ -25,6 +25,9 @@ pub enum HeadError {
     Decode(String),
     #[error("Zakura returned height {actual} for requested height {expected}")]
     Height { expected: u32, actual: u32 },
+    /// The block at `height` has a hash other than the hash that the node gave for that height.
+    #[error("Zakura block {height} has hash {actual}, the node gave hash {expected} for it")]
+    Hash { height: u32, expected: block::Hash, actual: block::Hash },
     #[error("Zakura canonical block {height} does not connect to its predecessor")]
     Parent { height: u32 },
     #[error("the local anchor at height {height} is not canonical in Zakura")]
