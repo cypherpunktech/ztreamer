@@ -806,11 +806,14 @@ impl StateBackend for RemoteBackend {
                 response.hash()
             )));
         }
+        let span = tracing::Span::current();
         let trees = tokio::task::spawn_blocking(move || {
-            Ok::<_, BackendError>(TreeState {
-                sapling: parse_tree("Sapling", response.sapling())?,
-                orchard: parse_tree("Orchard", response.orchard())?,
-                ironwood: parse_tree("Ironwood", response.ironwood())?,
+            span.in_scope(|| {
+                Ok::<_, BackendError>(TreeState {
+                    sapling: parse_tree("Sapling", response.sapling())?,
+                    orchard: parse_tree("Orchard", response.orchard())?,
+                    ironwood: parse_tree("Ironwood", response.ironwood())?,
+                })
             })
         })
         .await
