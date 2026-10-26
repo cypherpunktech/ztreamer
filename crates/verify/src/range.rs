@@ -1,7 +1,7 @@
 //! Checks of one range blob against its manifest entry.
 //!
-//! [`check_range`] proves that a blob is the range that the manifest describes and that its
-//! blocks form one chain. It does not rebuild the note commitment trees. The checks run in this
+//! [`RangeBlob::check`] proves that a blob is the range that the manifest describes and that
+//! its blocks form one chain. It does not rebuild the note commitment trees. The checks run in this
 //! order:
 //!
 //! 1. The BLAKE3 digest and the length of the blob equal `blob_digest` and `blob_len`. If not,
@@ -15,6 +15,8 @@
 //!
 //! A failure after step 1 means that the manifest entry and the blob agree, and that the range
 //! is wrong: [`Reject::Rejected`].
+
+use std::fmt;
 
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use ztreamer_indexer::{
@@ -75,6 +77,13 @@ pub enum Check {
     EndTreeSizes,
 }
 
+impl Check {
+    /// The rejection of a range that failed this check at `height`.
+    pub const fn at(self, height: u32) -> Reject {
+        Reject::Rejected { check: self, height }
+    }
+}
+
 /// Why a range was not accepted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum Reject {
@@ -94,66 +103,86 @@ pub enum Reject {
     },
 }
 
-const fn reject(check: Check, height: u32) -> Reject {
-    Reject::Rejected { check, height }
+/// A range blob with the manifest entry that describes it.
+#[derive(Clone, Copy)]
+pub struct RangeBlob<'a> {
+    bytes: &'a [u8],
+    entry: &'a ManifestEntry,
 }
 
-/// Checks `blob` against `entry` with the checks in the module docs.
-///
-/// `previous` is the end of the range before, or `None` for the range at genesis. Returns the
-/// end of this range, for the check of the next range.
-pub fn check_range(
-    blob: &[u8],
-    entry: &ManifestEntry,
-    previous: Option<&RangeLink>,
-) -> Result<RangeLink, Reject> {
-    check_range_with(blob, entry, previous, |_| Ok(()))
+impl<'a> RangeBlob<'a> {
+    /// Pairs the bytes of a range blob with its manifest entry.
+    pub const fn new(bytes: &'a [u8], entry: &'a ManifestEntry) -> Self {
+        Self { bytes, entry }
+    }
+
+    /// The manifest entry of the range.
+    pub const fn entry(&self) -> &'a ManifestEntry {
+        self.entry
+    }
+
+    /// Runs the checks in the module docs.
+    ///
+    /// `previous` is the end of the range before: [`RangeLink::GENESIS`] for the range at
+    /// genesis. Returns the end of this range, for the check of the next range.
+    pub fn check(&self, previous: &RangeLink) -> Result<RangeLink, Reject> {
+        self.check_with(previous, |_| Ok(()))
+    }
+
+    /// [`RangeBlob::check`], and `visit` each record after its link and size checks pass.
+    pub(crate) fn check_with(
+        &self,
+        previous: &RangeLink,
+        mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), Reject>,
+    ) -> Result<RangeLink, Reject> {
+        let entry = self.entry;
+        // Compare the length first: it is free, and the digest reads the whole blob.
+        if u64::try_from(self.bytes.len()) != Ok(entry.blob_len)
+            || BlobDigest(*blake3::hash(self.bytes).as_bytes()) != entry.blob_digest
+        {
+            return Err(Reject::Refetch { start_height: entry.start_height });
+        }
+        let start = entry.start_height;
+        if self.bytes.first() != Some(&entry.range_version) {
+            return Err(Check::RangeVersion.at(start));
+        }
+        let decoder = RangeDecoder::new(self.bytes).map_err(|_| Check::Decode.at(start))?;
+
+        let mut link = *previous;
+        for index in 0..RANGE_SIZE {
+            let height = start.saturating_add(index);
+            let record = decoder.record(index as usize).map_err(|_| Check::Decode.at(height))?;
+            if record.height != height {
+                return Err(Check::StartHeight.at(record.height));
+            }
+            if record.previous_hash != link.end_hash {
+                let check = if index == 0 { Check::StartLink } else { Check::HashChain };
+                return Err(check.at(height));
+            }
+            if link.end_tree_sizes.checked_add(record.additions()) != Some(record.end_tree_sizes) {
+                return Err(Check::TreeSizes.at(height));
+            }
+            visit(&record)?;
+            link = RangeLink::from(&record);
+        }
+
+        if link.end_hash != entry.end_hash {
+            return Err(Check::EndHash.at(entry.end_height));
+        }
+        if link.end_tree_sizes != entry.end_tree_sizes {
+            return Err(Check::EndTreeSizes.at(entry.end_height));
+        }
+        Ok(link)
+    }
 }
 
-/// [`check_range`], and `visit` each record after its link and size checks pass.
-pub(crate) fn check_range_with(
-    blob: &[u8],
-    entry: &ManifestEntry,
-    previous: Option<&RangeLink>,
-    mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), Reject>,
-) -> Result<RangeLink, Reject> {
-    // Compare the length first: it is free, and the digest reads the whole blob.
-    if u64::try_from(blob.len()) != Ok(entry.blob_len)
-        || BlobDigest(*blake3::hash(blob).as_bytes()) != entry.blob_digest
-    {
-        return Err(Reject::Refetch { start_height: entry.start_height });
+impl fmt::Debug for RangeBlob<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RangeBlob")
+            .field("start_height", &self.entry.start_height)
+            .field("len", &self.bytes.len())
+            .finish_non_exhaustive()
     }
-    let start = entry.start_height;
-    if blob.first() != Some(&entry.range_version) {
-        return Err(reject(Check::RangeVersion, start));
-    }
-    let decoder = RangeDecoder::new(blob).map_err(|_| reject(Check::Decode, start))?;
-
-    let mut link = previous.copied().unwrap_or(RangeLink::GENESIS);
-    for index in 0..RANGE_SIZE {
-        let height = start.saturating_add(index);
-        let record = decoder.record(index as usize).map_err(|_| reject(Check::Decode, height))?;
-        if record.height != height {
-            return Err(reject(Check::StartHeight, record.height));
-        }
-        if record.previous_hash != link.end_hash {
-            let check = if index == 0 { Check::StartLink } else { Check::HashChain };
-            return Err(reject(check, height));
-        }
-        if link.end_tree_sizes.checked_add(record.additions()) != Some(record.end_tree_sizes) {
-            return Err(reject(Check::TreeSizes, height));
-        }
-        visit(&record)?;
-        link = RangeLink::from(&record);
-    }
-
-    if link.end_hash != entry.end_hash {
-        return Err(reject(Check::EndHash, entry.end_height));
-    }
-    if link.end_tree_sizes != entry.end_tree_sizes {
-        return Err(reject(Check::EndTreeSizes, entry.end_height));
-    }
-    Ok(link)
 }
 
 /// The manifest entry that describes `blob`, a range of `records`.
@@ -214,8 +243,10 @@ mod tests {
         let (first, second, blob) = second_range();
         let first_blob = encode_range(&first).unwrap();
 
-        let link = check_range(&first_blob, &entry_for(&first, &first_blob), None).unwrap();
-        let end = check_range(&blob, &entry_for(&second, &blob), Some(&link)).unwrap();
+        let link = RangeBlob::new(&first_blob, &entry_for(&first, &first_blob))
+            .check(&RangeLink::GENESIS)
+            .unwrap();
+        let end = RangeBlob::new(&blob, &entry_for(&second, &blob)).check(&link).unwrap();
 
         assert_eq!(link, RangeLink::from(&entry_for(&first, &first_blob)));
         assert_eq!(end.end_hash, hash(1_999));
@@ -231,8 +262,8 @@ mod tests {
 
         let mut flipped = blob.clone();
         flipped[blob.len() / 2] ^= 1;
-        assert_eq!(check_range(&flipped, &entry, Some(&link)), refetch);
-        assert_eq!(check_range(&blob[..blob.len() - 1], &entry, Some(&link)), refetch);
+        assert_eq!(RangeBlob::new(&flipped, &entry).check(&link), refetch);
+        assert_eq!(RangeBlob::new(&blob[..blob.len() - 1], &entry).check(&link), refetch);
     }
 
     #[test]
@@ -242,7 +273,7 @@ mod tests {
         second.swap(500, 501);
         let reordered = assemble(&blob, &second);
 
-        let result = check_range(&reordered, &entry_for(&second, &reordered), Some(&link));
+        let result = RangeBlob::new(&reordered, &entry_for(&second, &reordered)).check(&link);
 
         assert_rejected(result, Check::Decode, 1_500);
     }
@@ -254,7 +285,7 @@ mod tests {
         second[500].previous_hash = hash(7);
         let broken = assemble(&blob, &second);
 
-        let result = check_range(&broken, &entry_for(&second, &broken), Some(&link));
+        let result = RangeBlob::new(&broken, &entry_for(&second, &broken)).check(&link);
 
         assert_rejected(result, Check::HashChain, 1_500);
     }
@@ -266,13 +297,21 @@ mod tests {
         let link = RangeLink::from(first.last().unwrap());
 
         let other_hash = RangeLink { end_hash: hash(7), ..link };
-        assert_rejected(check_range(&blob, &entry, Some(&other_hash)), Check::StartLink, 1_000);
+        assert_rejected(RangeBlob::new(&blob, &entry).check(&other_hash), Check::StartLink, 1_000);
         // Without a previous range, the range must start at genesis.
-        assert_rejected(check_range(&blob, &entry, None), Check::StartLink, 1_000);
+        assert_rejected(
+            RangeBlob::new(&blob, &entry).check(&RangeLink::GENESIS),
+            Check::StartLink,
+            1_000,
+        );
 
         let mut other_start = entry.clone();
         other_start.start_height = 2_000;
-        assert_rejected(check_range(&blob, &other_start, Some(&link)), Check::StartHeight, 1_000);
+        assert_rejected(
+            RangeBlob::new(&blob, &other_start).check(&link),
+            Check::StartHeight,
+            1_000,
+        );
     }
 
     #[test]
@@ -281,7 +320,7 @@ mod tests {
         let mut entry = entry_for(&second, &blob);
         entry.range_version = 2;
 
-        let result = check_range(&blob, &entry, Some(&RangeLink::from(first.last().unwrap())));
+        let result = RangeBlob::new(&blob, &entry).check(&RangeLink::from(first.last().unwrap()));
 
         assert_rejected(result, Check::RangeVersion, 1_000);
     }
@@ -292,7 +331,7 @@ mod tests {
         let mut entry = entry_for(&second, &blob);
         entry.end_hash = hash(7);
 
-        let result = check_range(&blob, &entry, Some(&RangeLink::from(first.last().unwrap())));
+        let result = RangeBlob::new(&blob, &entry).check(&RangeLink::from(first.last().unwrap()));
 
         assert_rejected(result, Check::EndHash, 1_999);
     }
@@ -304,12 +343,12 @@ mod tests {
 
         let mut entry = entry_for(&second, &blob);
         entry.end_tree_sizes.orchard += 1;
-        assert_rejected(check_range(&blob, &entry, Some(&link)), Check::EndTreeSizes, 1_999);
+        assert_rejected(RangeBlob::new(&blob, &entry).check(&link), Check::EndTreeSizes, 1_999);
 
         let smaller =
             RangeLink { end_tree_sizes: TreeSizes { sapling: 0, ..link.end_tree_sizes }, ..link };
         let entry = entry_for(&second, &blob);
-        assert_rejected(check_range(&blob, &entry, Some(&smaller)), Check::TreeSizes, 1_000);
+        assert_rejected(RangeBlob::new(&blob, &entry).check(&smaller), Check::TreeSizes, 1_000);
 
         // A record that claims one more commitment than it holds.
         for record in &mut second[500..] {
@@ -317,6 +356,6 @@ mod tests {
         }
         let blob = encode_range(&second).unwrap();
         let entry = entry_for(&second, &blob);
-        assert_rejected(check_range(&blob, &entry, Some(&link)), Check::TreeSizes, 1_500);
+        assert_rejected(RangeBlob::new(&blob, &entry).check(&link), Check::TreeSizes, 1_500);
     }
 }
