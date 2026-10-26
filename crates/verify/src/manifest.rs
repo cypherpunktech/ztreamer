@@ -28,7 +28,11 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as};
-use zakura_chain::{block, ironwood, orchard, subtree::NoteCommitmentSubtreeIndex};
+use zakura_chain::{
+    block, ironwood, orchard,
+    parameters::{Network, NetworkUpgrade},
+    subtree::NoteCommitmentSubtreeIndex,
+};
 use ztreamer_indexer::{
     codec::TreeSizes,
     index::{
@@ -347,6 +351,18 @@ impl Pool {
             Self::Ironwood => ironwood::tree::Node::try_from(bytes).ok().map(SubtreeNode::Ironwood),
         }
     }
+
+    /// True when the pool is active at `height` on `network`: the network upgrade that starts
+    /// the pool activates at or below `height`. `z_gettreestate` gives a root only for an active
+    /// pool.
+    pub fn is_active(self, network: &Network, height: u32) -> bool {
+        let upgrade = match self {
+            Self::Sapling => NetworkUpgrade::Sapling,
+            Self::Orchard => NetworkUpgrade::Nu5,
+            Self::Ironwood => NetworkUpgrade::Nu6_3,
+        };
+        upgrade.activation_height(network).is_some_and(|activation| activation.0 <= height)
+    }
 }
 
 impl From<&SubtreeNode> for Pool {
@@ -658,5 +674,15 @@ mod tests {
             matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn a_pool_is_active_from_the_upgrade_that_starts_it() {
+        let mainnet = Network::Mainnet;
+
+        assert!(!Pool::Sapling.is_active(&mainnet, 419_199));
+        assert!(Pool::Sapling.is_active(&mainnet, 419_200));
+        assert!(!Pool::Orchard.is_active(&mainnet, 1_687_103));
+        assert!(Pool::Orchard.is_active(&mainnet, 1_687_104));
     }
 }

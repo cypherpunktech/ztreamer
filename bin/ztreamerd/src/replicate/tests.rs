@@ -15,8 +15,12 @@ use hyper::{body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::{task::JoinHandle, time::timeout};
+use tokio::{
+    task::{JoinHandle, JoinSet},
+    time::timeout,
+};
 use tonic::transport::Server;
+use tower::{Service as _, ServiceExt as _};
 use zakura_chain::{
     block::{self, Block},
     serialization::ZcashSerialize as _,
@@ -426,14 +430,104 @@ async fn an_unreachable_node_is_refused_before_a_range_fetch() {
     assert!(!snapshot.server.fetched_a_range());
 }
 
+/// A replica of `snapshot` in `dir` on the embedded node: the flags without `--remote-rpc`.
+async fn embedded_replica(dir: &TempDir, snapshot: &Snapshot) -> (Replica, Arc<Index>) {
+    let flags = [
+        "--index-dir",
+        dir.path().to_str().unwrap(),
+        "--index-map-size",
+        "1073741824",
+        "--replicate-from",
+        &snapshot.url(),
+        "--snapshot-pubkey",
+        snapshot.pubkey.to_str().unwrap(),
+    ];
+    let cli = Cli::parse_from(["ztreamerd"].into_iter().chain(flags)).daemon;
+    assert!(cli.remote.node().unwrap().is_none());
+    let index = cli.open_index(&Network::Mainnet).await.unwrap();
+    (cli.replicate.replica().unwrap().unwrap(), index)
+}
+
+/// An ephemeral mainnet zakura state with `blocks`, committed without the checks of the
+/// verifiers. The first value writes the state: keep it while the state is in use.
+async fn embedded_state(blocks: &[Block]) -> (impl Sized, ReadStateService) {
+    let (mut state, read, _tip, _change) = zakura_state::init(
+        zakura_state::Config::ephemeral(),
+        &Network::Mainnet,
+        block::Height::MAX,
+        0,
+    )
+    .await
+    .unwrap();
+    // Send all commits before the first answer, as `zakura_state::populated_state` does. The
+    // state commits them in order.
+    let mut commits = JoinSet::new();
+    for block in blocks {
+        let block = Arc::new(block.clone());
+        let request = zakura_state::Request::CommitCheckpointVerifiedBlock(block.into());
+        commits.spawn(state.ready().await.unwrap().call(request));
+    }
+    while let Some(commit) = commits.join_next().await {
+        commit.unwrap().unwrap();
+    }
+    (state, read)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_embedded_node_verifies_an_import_of_three_epochs() {
+    let snapshot = Snapshot::new().await;
+    let (_writer, state) = embedded_state(&snapshot.blocks[..=SEALED as usize]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (replica, index) = embedded_replica(&dir, &snapshot).await;
+    let status = replica.new_status();
+
+    let flow = replica
+        .import(&state, &Network::Mainnet, &index, &status, &CancellationToken::new())
+        .await
+        .unwrap();
+
+    assert!(matches!(flow, ControlFlow::Continue(None)), "{flow:?}");
+    assert_eq!(index.state().unwrap().sealed_through(), Some(SEALED));
+    assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
+    let meta = index.range_meta(12_000).unwrap().unwrap();
+    assert_eq!(meta.state, VerifyState::Verified);
+    assert_eq!(meta.verified_by.unwrap().url, "embedded");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_embedded_node_without_the_blocks_gives_no_answer_and_installs_nothing() {
+    let snapshot = Snapshot::new().await;
+    let (_writer, state) = embedded_state(&snapshot.blocks[..1]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (replica, index) = embedded_replica(&dir, &snapshot).await;
+    let status = replica.new_status();
+
+    let error = replica
+        .import(&state, &Network::Mainnet, &index, &status, &CancellationToken::new())
+        .await
+        .unwrap_err();
+
+    assert_cause(&error, "node has no block at height 999");
+    assert_eq!(index.state().unwrap().sealed_through(), None);
+}
+
 #[test]
-fn the_flags_need_the_remote_mode_and_a_key_for_a_snapshot() {
+fn the_embedded_mode_without_the_flag_has_no_import() {
+    let cli = Cli::parse_from(["ztreamerd", "--zakura-config", "zakura.toml"]).daemon;
+
+    assert!(cli.remote.node().unwrap().is_none());
+    assert!(cli.replicate.replica().unwrap().is_none());
+}
+
+#[test]
+fn the_flags_need_a_key_for_a_snapshot() {
     let parse = |flags: &[&str]| {
         Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
     };
     let rpc = ["--remote-rpc", "http://127.0.0.1:8232"];
-    assert!(parse(&["--replicate-from", "https://snapshots.example/mainnet"]).is_err());
     assert!(parse(&["--snapshot-pubkey", "key.pub"]).is_err());
+    let embedded = parse(&["--zakura-config", "zakura.toml", "--replicate-from", "peer:9068"]);
+    assert!(embedded.unwrap().replicate.replica().unwrap().is_some());
     assert!(parse(&[rpc[0], rpc[1], "--replicate-from", "peer"]).is_err());
     assert!(parse(&[rpc[0], rpc[1], "--replicate-from", "peer:9068/path"]).is_err());
 

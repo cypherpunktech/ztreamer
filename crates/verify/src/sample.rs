@@ -7,6 +7,9 @@
 //! compares the record byte for byte with the record in the blob.
 //!
 //! A pruned node has no block bodies below its prune height. The sampler skips these heights.
+//!
+//! [`JsonRpcSampler`] asks a zakura node over JSON-RPC. [`ReadStateSampler`] reads the state of
+//! an embedded zakura node.
 
 use std::{
     panic,
@@ -15,8 +18,9 @@ use std::{
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
+use tower::ServiceExt as _;
 use zakura_chain::block;
-use zakura_state::HashOrHeight;
+use zakura_state::{HashOrHeight, ReadRequest, ReadResponse, ReadStateService};
 use ztreamer_indexer::{
     codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block, types::RawIndexBlock,
 };
@@ -225,13 +229,94 @@ impl Sampler for JsonRpcSampler {
     }
 }
 
+/// A [`Sampler`] that reads the blocks of an embedded zakura node from its state.
+///
+/// ```no_run
+/// use zakura_state::ReadStateService;
+/// use ztreamer_verify::{
+///     attest::NodeError,
+///     sample::{ReadStateSampler, Sampler},
+/// };
+///
+/// # async fn run(state: ReadStateService) -> Result<(), NodeError> {
+/// let sampler = ReadStateSampler::connect(state).await?;
+/// let block = sampler.full_block(3_524_999).await?;
+/// # let _ = block;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct ReadStateSampler {
+    state: ReadStateService,
+    prune_height: AtomicU32,
+}
+
+impl ReadStateSampler {
+    /// Reads the prune height of the state, as `getblockchaininfo` gives it. A state that does
+    /// not prune has the prune height 0.
+    ///
+    /// A pruning node raises its prune height while it runs. When the state has no block at or
+    /// above the known prune height, [`Sampler::full_block`] reads the prune height again.
+    pub async fn connect(state: ReadStateService) -> Result<Self, NodeError> {
+        let sampler = Self { state, prune_height: AtomicU32::new(0) };
+        sampler.refresh_prune_height().await?;
+        Ok(sampler)
+    }
+
+    /// Reads the prune height of the state on the blocking thread pool of the runtime, keeps it
+    /// if it is higher, and returns it.
+    async fn refresh_prune_height(&self) -> Result<u32, NodeError> {
+        let state = self.state.clone();
+        let height = tokio::task::spawn_blocking(move || {
+            state.db().prune_height().map_or(0, |height| height.0)
+        })
+        .await
+        .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()));
+        Ok(self.prune_height.fetch_max(height, Ordering::Relaxed).max(height))
+    }
+}
+
+#[async_trait]
+impl Sampler for ReadStateSampler {
+    /// The block at `height`. Serializes it on the blocking thread pool of the runtime.
+    async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
+        if height < self.prune_height() {
+            return Ok(None);
+        }
+        let request = ReadRequest::Block(HashOrHeight::Height(block::Height(height)));
+        let response = self.state.clone().oneshot(request).await.map_err(NodeError::State)?;
+        let ReadResponse::Block(block) = response else {
+            return Err(NodeError::UnexpectedState("block"));
+        };
+        let Some(block) = block else {
+            // The node pruned the block after the last read of its prune height.
+            return if height < self.refresh_prune_height().await? {
+                Ok(None)
+            } else {
+                Err(NodeError::MissingBlock(height))
+            };
+        };
+        let block = tokio::task::spawn_blocking(move || RawIndexBlock::try_from(&*block))
+            .await
+            .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))?;
+        if block.height.0 != height {
+            return Err(NodeError::Height { expected: height, actual: block.height.0 });
+        }
+        Ok(Some(block))
+    }
+
+    fn prune_height(&self) -> u32 {
+        self.prune_height.load(Ordering::Relaxed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use serde_json::json;
     use zakura_rpc::client::GetBlockchainInfoResponse;
-    use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
+    use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, CONTINUOUS_TESTNET_BLOCKS};
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},
         test_utils::{hash, raw_block},
@@ -242,7 +327,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{epoch::Epochs, range::entry_for};
+    use crate::{epoch::Epochs, range::entry_for, test_utils::TestnetState};
 
     /// The height of the one block with shielded data.
     const SHIELDED: u32 = 500;
@@ -422,5 +507,22 @@ mod tests {
 
         assert!(matches!(&error, NodeError::Rpc(error) if error.is_block_not_found()), "{error:?}");
         assert_eq!(node.seen().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn read_state_sampler_gives_the_stored_bytes_of_each_block() {
+        let state = TestnetState::new().await;
+
+        let sampler = ReadStateSampler::connect(state.read.clone()).await.unwrap();
+        assert_eq!(sampler.prune_height(), 0);
+        for (&height, &bytes) in CONTINUOUS_TESTNET_BLOCKS.iter() {
+            let block = sampler.full_block(height).await.unwrap().unwrap();
+
+            assert_eq!(block, RawIndexBlock::from_bytes(bytes.to_vec()).unwrap());
+            parse_block(&block).unwrap();
+        }
+        let error = sampler.full_block(11).await.unwrap_err();
+
+        assert!(matches!(error, NodeError::MissingBlock(11)), "{error:?}");
     }
 }

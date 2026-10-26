@@ -23,6 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
+zakura-state = { workspace = true, features = ["indexer"] }
 zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 zeroize = "1"
 ztreamer-indexer = { path = "../../crates/indexer" }
@@ -41,8 +42,8 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["fs", "net"] }
+tower = { version = "0.5.3", features = ["util"] }
 zakura-network.workspace = true
-zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../../crates/indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }

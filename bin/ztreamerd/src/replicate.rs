@@ -1,10 +1,12 @@
 //! The `--replicate-from` startup path: a replica imports the sealed ranges of a snapshot or of a
-//! peer, and the `--remote-rpc` node verifies them. Then the daemon indexes the tail and follows
-//! the head, as the remote mode does without an import.
+//! peer, and a node verifies them. The node is the `--remote-rpc` node, or the embedded node when
+//! it is near the chain tip. Then the daemon indexes the tail and follows the head, as it does
+//! without an import.
 //!
 //! Before it fetches a range, [`Replica::import`] refuses:
 //!
-//! - a node that is out of reach, or that runs another chain or genesis block than the index;
+//! - a remote node that is out of reach, or that runs another chain or genesis block than the
+//!   index;
 //! - a manifest whose signature does not verify with `--snapshot-pubkey`;
 //! - a manifest for another network or genesis block than the index;
 //! - a node that prunes the blocks of the heights that the import attests.
@@ -12,8 +14,6 @@
 //! With `--serve-unverified`, the import installs each range of the reference after the chain
 //! check only. Then [`Reattest`] runs the importer while the daemon serves: it proves these
 //! epochs from the blobs in the index.
-//!
-//! Only the remote mode can import: the embedded node has no attestor yet.
 
 use std::{
     fmt, fs,
@@ -33,7 +33,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zakura_chain::parameters::Network;
-use zakura_rpc::client::GetBlockchainInfoResponse;
+use zakura_state::ReadStateService;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
 use ztreamer_remote::{RpcCode, ZakuraClient};
 use ztreamer_service::{
@@ -41,12 +41,12 @@ use ztreamer_service::{
     replica::{ImportSource, ImportState, ReplicaStatus},
 };
 use ztreamer_verify::{
-    attest::JsonRpcAttestor,
+    attest::{JsonRpcAttestor, ReadStateAttestor},
     chain_ok::ChainOkImport,
     fetch::{Fetcher, HttpSource, PeerSource, RangeSource as _, Source},
     importer::{ImportConfig, ImportError, Importer, TrustedNode},
     manifest::Manifest,
-    sample::{JsonRpcSampler, SamplePlan},
+    sample::{JsonRpcSampler, ReadStateSampler, SamplePlan},
 };
 
 /// The time between two `getblockchaininfo` calls while the node is in warm-up.
@@ -57,9 +57,10 @@ const WARMUP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub(crate) struct ReplicateArgs {
     /// Import the sealed ranges from this source before the tail: an http:// or https:// base
     /// URL of a snapshot, or the host:port of a peer that serves the Replicator gRPC service
-    /// without TLS. Give it again for more sources: the first is the reference. Needs
-    /// --remote-rpc: the embedded node has no attestor yet.
-    #[arg(long, value_name = "URL|HOST:PORT", requires = "remote_rpc")]
+    /// without TLS. Give it again for more sources: the first is the reference. The
+    /// --remote-rpc node or the embedded node verifies the ranges. The embedded node starts the
+    /// import when it is near the chain tip.
+    #[arg(long, value_name = "URL|HOST:PORT")]
     replicate_from: Vec<ReplicaSource>,
 
     /// The epochs that the import fetches at the same time, and the epochs that it verifies at
@@ -197,26 +198,24 @@ impl Replica {
     }
 
     /// Imports the epochs of the reference manifest above the verified tip of `index`, checked
-    /// against the node of `client`. Breaks on shutdown. With `--serve-unverified`, it gives the
+    /// against `node`. Breaks on shutdown. With `--serve-unverified`, it gives the
     /// [`Reattest`] to run while the daemon serves.
     ///
     /// The refusals of the module docs come first. An index that is verified at or above the
     /// reference manifest needs no import. On shutdown, the import completes the epoch or the
     /// range that it installs, and stops.
-    pub(crate) async fn import(
+    pub(crate) async fn import<N: ImportNode>(
         &self,
-        client: &ZakuraClient,
+        node: &N,
         network: &Network,
         index: &Arc<Index>,
         status: &ReplicaStatus,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), Option<Reattest>>> {
-        let ControlFlow::Continue(info) = Self::node_info(client, shutdown).await? else {
+        let ControlFlow::Continue(prune_height) = node.prune_height(network, shutdown).await?
+        else {
             return Ok(ControlFlow::Break(()));
         };
-        RemoteBackend::connect(client.clone(), network.clone())
-            .await
-            .wrap_err("check the chain of the remote zakura node")?;
         let mut sources = Vec::with_capacity(self.sources.len());
         let mut manifests = Vec::with_capacity(self.sources.len());
         for address in &self.sources {
@@ -241,17 +240,9 @@ impl Replica {
             info!(?verified, manifest = tip, "the index needs no import");
             return Ok(ControlFlow::Continue(None));
         }
-        Self::check_prune_height(&manifests[0], verified, &info)?;
+        Self::check_prune_height(&manifests[0], verified, prune_height, N::NAME)?;
 
-        let node = TrustedNode {
-            attestor: Arc::new(JsonRpcAttestor::new(client.clone())),
-            sampler: Arc::new(
-                JsonRpcSampler::connect(client.clone())
-                    .await
-                    .wrap_err("read the prune height of the remote zakura node")?,
-            ),
-            id: NodeId { url: client.rpc().url().to_string(), version: String::new() },
-        };
+        let node = node.trusted_node().await?;
         let seed = getrandom::u64().map_err(|error| eyre!("random sample seed: {error}"))?;
         let plan = SamplePlan { per_range: self.verify_sample, seed };
         let config = ImportConfig {
@@ -321,45 +312,6 @@ impl Replica {
         Ok(report)
     }
 
-    /// `getblockchaininfo`, sent again while the node is in warm-up. Refuses a node that gives
-    /// another error, for example a node out of reach. Breaks on shutdown.
-    async fn node_info(
-        client: &ZakuraClient,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>> {
-        loop {
-            let Some(result) = shutdown.run_until_cancelled(client.get_blockchain_info()).await
-            else {
-                return Ok(ControlFlow::Break(()));
-            };
-            match result {
-                Err(error) if error.rpc_code() == Some(RpcCode::IN_WARMUP) => {
-                    info!(%error, "waiting for remote zakura to end its warm-up");
-                }
-                Err(error) if error.is_unsent() => {
-                    let url = client.rpc().url();
-                    return Err(eyre!(error)).wrap_err(format!(
-                        "the remote zakura node at {}:{} is unreachable",
-                        url.host().unwrap_or_default(),
-                        url.port_u16().unwrap_or_default()
-                    ));
-                }
-                result => {
-                    return result
-                        .map(ControlFlow::Continue)
-                        .wrap_err("read the chain of the remote zakura node");
-                }
-            }
-            if shutdown
-                .run_until_cancelled(tokio::time::sleep(WARMUP_POLL_INTERVAL))
-                .await
-                .is_none()
-            {
-                return Ok(ControlFlow::Break(()));
-            }
-        }
-    }
-
     /// Refuses a manifest for another network or genesis block than the index.
     fn check_identity(manifest: &Manifest, network: &Network) -> Result<()> {
         let name = network.to_string();
@@ -378,14 +330,16 @@ impl Replica {
     }
 
     /// Refuses a node that prunes the first height that the import attests: the end of the
-    /// first epoch above `verified`. zakura v1.5.1 gives no tree state below its prune height
-    /// (zakura-core/zakura#1725), and the tail needs the blocks above the snapshot.
+    /// first epoch above `verified`. `node` names the node in the message. zakura v1.5.1 gives
+    /// no tree state below its prune height (zakura-core/zakura#1725), and the tail needs the
+    /// blocks above the snapshot.
     fn check_prune_height(
         manifest: &Manifest,
         verified: Option<u32>,
-        info: &GetBlockchainInfoResponse,
+        prune_height: Option<u32>,
+        node: &str,
     ) -> Result<()> {
-        let Some(prune_height) = info.prune_height().map(|height| height.0) else {
+        let Some(prune_height) = prune_height else {
             return Ok(());
         };
         let first = manifest
@@ -395,9 +349,9 @@ impl Replica {
             .unwrap_or(manifest.sealed_through());
         ensure!(
             first >= prune_height,
-            "the import attests the tree states from height {first} on, but the remote zakura \
-             node keeps block bodies only from height {prune_height}: use a node that does not \
-             prune, or an index that is verified through height {} or above",
+            "the import attests the tree states from height {first} on, but {node} keeps block \
+             bodies only from height {prune_height}: use a node that does not prune, or an index \
+             that is verified through height {} or above",
             prune_height - 1
         );
         Ok(())
@@ -440,6 +394,119 @@ impl Reattest {
         compact.publish_verified(&state);
         self.status.update(|progress| progress.import_state = ImportState::Following);
         Ok(())
+    }
+}
+
+/// The node that verifies an import: the `--remote-rpc` node or the embedded node.
+///
+/// # Implementation
+///
+/// [`ImportNode::prune_height`] refuses a node that cannot verify the import of the index of
+/// `network`, and waits while the node cannot answer yet. [`ImportNode::trusted_node`] gives the
+/// attestor and the sampler of the same node. [`Replica::import`] calls the second method only
+/// when it imports.
+pub(crate) trait ImportNode {
+    /// The node in a refusal message.
+    const NAME: &'static str;
+
+    /// The prune height of the node, `None` for a node that does not prune. Breaks on shutdown.
+    async fn prune_height(
+        &self,
+        network: &Network,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<(), Option<u32>>>;
+
+    /// The attestor, the sampler and the id of the node.
+    async fn trusted_node(&self) -> Result<TrustedNode>;
+}
+
+impl ImportNode for ZakuraClient {
+    const NAME: &'static str = "the remote zakura node";
+
+    /// Reads `getblockchaininfo` again while the node is in warm-up. Refuses a node that gives
+    /// another error, for example a node out of reach, and a node of another chain or genesis
+    /// block than `network`.
+    async fn prune_height(
+        &self,
+        network: &Network,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<(), Option<u32>>> {
+        let info = loop {
+            let Some(result) = shutdown.run_until_cancelled(self.get_blockchain_info()).await
+            else {
+                return Ok(ControlFlow::Break(()));
+            };
+            match result {
+                Err(error) if error.rpc_code() == Some(RpcCode::IN_WARMUP) => {
+                    info!(%error, "waiting for remote zakura to end its warm-up");
+                }
+                Err(error) if error.is_unsent() => {
+                    let url = self.rpc().url();
+                    return Err(eyre!(error)).wrap_err(format!(
+                        "the remote zakura node at {}:{} is unreachable",
+                        url.host().unwrap_or_default(),
+                        url.port_u16().unwrap_or_default()
+                    ));
+                }
+                result => break result.wrap_err("read the chain of the remote zakura node")?,
+            }
+            if shutdown
+                .run_until_cancelled(tokio::time::sleep(WARMUP_POLL_INTERVAL))
+                .await
+                .is_none()
+            {
+                return Ok(ControlFlow::Break(()));
+            }
+        };
+        RemoteBackend::connect(self.clone(), network.clone())
+            .await
+            .wrap_err("check the chain of the remote zakura node")?;
+        Ok(ControlFlow::Continue(info.prune_height().map(|height| height.0)))
+    }
+
+    async fn trusted_node(&self) -> Result<TrustedNode> {
+        Ok(TrustedNode {
+            attestor: Arc::new(JsonRpcAttestor::new(self.clone())),
+            sampler: Arc::new(
+                JsonRpcSampler::connect(self.clone())
+                    .await
+                    .wrap_err("read the prune height of the remote zakura node")?,
+            ),
+            id: NodeId { url: self.rpc().url().to_string(), version: String::new() },
+        })
+    }
+}
+
+impl ImportNode for ReadStateService {
+    const NAME: &'static str = "the embedded zakura node";
+
+    /// Reads the prune height of the state on a blocking thread. The embedded node runs the
+    /// network of the index, thus there is no chain to check.
+    async fn prune_height(
+        &self,
+        _network: &Network,
+        _shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<(), Option<u32>>> {
+        let state = self.clone();
+        let prune_height = tokio::task::spawn_blocking(move || state.db().prune_height())
+            .await
+            .wrap_err("prune height task panicked")?;
+        Ok(ControlFlow::Continue(prune_height.map(|height| height.0)))
+    }
+
+    async fn trusted_node(&self) -> Result<TrustedNode> {
+        Ok(TrustedNode {
+            attestor: Arc::new(ReadStateAttestor::new(self.clone())),
+            sampler: Arc::new(
+                ReadStateSampler::connect(self.clone())
+                    .await
+                    .wrap_err("read the prune height of the embedded zakura node")?,
+            ),
+            id: NodeId {
+                url: "embedded".to_owned(),
+                version: zakurad::application::build_version().to_string(),
+            },
+        })
     }
 }
 

@@ -31,11 +31,12 @@ metrics = "0.24"
 tokio = { version = "1", features = ["macros", "rt"] }
 tokio-stream = "0.1"
 tonic = "0.14.6"
+tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1"
 webpki-roots = "1"
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
-zakura-state.workspace = true
+zakura-state = { workspace = true, features = ["indexer"] }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }

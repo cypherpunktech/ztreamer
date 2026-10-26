@@ -1,5 +1,5 @@
-//! Test fixtures: an index with `range_meta` rows, its snapshot directory, and an HTTP server
-//! for that directory.
+//! Test fixtures: an index with `range_meta` rows, its snapshot directory, an HTTP server for
+//! that directory, and a zakura state with blocks.
 
 use std::{
     convert::Infallible,
@@ -22,12 +22,23 @@ use tokio::{
     sync::{mpsc, watch},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use zakura_chain::{block, parameters::Network};
+use tower::ServiceExt as _;
+use zakura_chain::{
+    block::{self, Block},
+    parameters::{
+        Network,
+        testnet::{self, ConfiguredActivationHeights},
+    },
+    serialization::ZcashDeserializeInto as _,
+    subtree::NoteCommitmentSubtree,
+};
+use zakura_state::{DiskWriteBatch, ReadStateService};
+use zakura_test::vectors::CONTINUOUS_TESTNET_BLOCKS;
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     index::{
         Index, IndexState, RANGE_SIZE,
-        range_meta::{BlobDigest, ManifestEntry},
+        range_meta::{BlobDigest, ManifestEntry, SubtreeNode},
     },
     parser::parse_block,
     test_utils::{populate, raw_block},
@@ -35,9 +46,82 @@ use ztreamer_indexer::{
 use ztreamer_service::{InProcessBackend, RangeMetaFiller, ServingSnapshot};
 
 use crate::{
-    manifest::Manifest,
+    manifest::{Manifest, Pool},
     snapshot::{Latest, RangePath, SIGNATURE_SUFFIX},
 };
+
+/// The height where Sapling activates on the network of [`TestnetState`].
+pub(crate) const SAPLING_HEIGHT: u32 = 2;
+
+/// An ephemeral zakura state with the continuous testnet blocks of `zakura-test`, heights 0 to
+/// 10. Its network is a testnet where Sapling activates at [`SAPLING_HEIGHT`] and Orchard at
+/// height 11, above the blocks. Ironwood does not activate.
+pub(crate) struct TestnetState {
+    pub(crate) read: ReadStateService,
+    pub(crate) blocks: Vec<Block>,
+    /// The service that writes the state. The state stops when it drops.
+    _state: Box<dyn Send>,
+}
+
+impl TestnetState {
+    pub(crate) async fn new() -> Self {
+        // The testnet blocks do not obey the NU5 rules, thus NU5 activates above them.
+        let heights = ConfiguredActivationHeights {
+            sapling: Some(SAPLING_HEIGHT),
+            nu5: Some(11),
+            ..ConfiguredActivationHeights::default()
+        };
+        let network = testnet::Parameters::build()
+            .with_activation_heights(heights)
+            .unwrap()
+            .clear_funding_streams()
+            .with_network_name("custom_testnet")
+            .unwrap()
+            .to_network()
+            .unwrap();
+        let blocks: Vec<Block> = CONTINUOUS_TESTNET_BLOCKS
+            .values()
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, read, _tip, _change) =
+            zakura_state::init(zakura_state::Config::ephemeral(), &network, block::Height::MAX, 0)
+                .await
+                .unwrap();
+        for block in &blocks {
+            let block = Arc::new(block.clone());
+            (&mut state)
+                .oneshot(zakura_state::Request::CommitCheckpointVerifiedBlock(block.into()))
+                .await
+                .unwrap();
+        }
+        Self { read, blocks, _state: Box::new(state) }
+    }
+
+    /// Writes `roots` as the completed subtrees 0, 1, ... of their pools, with end height 10.
+    pub(crate) fn insert_subtrees(&self, roots: &[SubtreeNode]) {
+        let db = self.read.db();
+        let mut batch = DiskWriteBatch::new();
+        let end = block::Height(10);
+        for (position, root) in roots.iter().enumerate() {
+            let pool = Pool::from(root);
+            let before = roots[..position].iter().filter(|other| Pool::from(*other) == pool);
+            let index = u16::try_from(before.count()).unwrap();
+            match *root {
+                SubtreeNode::Sapling(node) => {
+                    batch.insert_sapling_subtree(db, &NoteCommitmentSubtree::new(index, end, node));
+                }
+                SubtreeNode::Orchard(node) => {
+                    batch.insert_orchard_subtree(db, &NoteCommitmentSubtree::new(index, end, node));
+                }
+                SubtreeNode::Ironwood(node) => {
+                    batch
+                        .insert_ironwood_subtree(db, &NoteCommitmentSubtree::new(index, end, node));
+                }
+            }
+        }
+        db.write_batch(batch).unwrap();
+    }
+}
 
 /// The seed of the key that signs a [`Snapshot`].
 pub(crate) const SEED: [u8; 32] = [7; 32];

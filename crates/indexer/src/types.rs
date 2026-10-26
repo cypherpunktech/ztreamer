@@ -1,8 +1,10 @@
 //! Compact block and transaction types produced by the parser and stored by the index.
 
+use std::io;
+
 use zakura_chain::{
     block::{self, Block},
-    serialization::{SerializationError, ZcashDeserialize as _},
+    serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
 
@@ -28,6 +30,9 @@ pub enum RawBlockError {
     /// The block has no coinbase transaction with a height.
     #[error("coinbase height is missing")]
     CoinbaseHeight,
+    /// The block does not serialize.
+    #[error("block could not be serialized: {0}")]
+    Serialize(#[from] io::Error),
 }
 
 impl RawIndexBlock {
@@ -40,6 +45,19 @@ impl RawIndexBlock {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, RawBlockError> {
         let block = Block::zcash_deserialize(bytes.as_slice())?;
         let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
+        let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
+        Ok(Self { height, hash: block.hash(), bytes, txids })
+    }
+}
+
+impl TryFrom<&Block> for RawIndexBlock {
+    type Error = RawBlockError;
+
+    /// Serializes a block, for example a block from the state of an embedded node. The height
+    /// comes from the coinbase input.
+    fn try_from(block: &Block) -> Result<Self, RawBlockError> {
+        let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
+        let bytes = block.zcash_serialize_to_vec()?;
         let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
         Ok(Self { height, hash: block.hash(), bytes, txids })
     }
@@ -106,6 +124,8 @@ impl ParsedCompactBlock {
 
 #[cfg(test)]
 mod tests {
+    use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
+
     use super::*;
     use crate::test_utils::{mixed_records, parsed};
 
@@ -126,5 +146,16 @@ mod tests {
         let before = TreeSizes { sapling: u32::MAX, ..TreeSizes::default() };
 
         assert!(parsed(record).into_record(before).is_none());
+    }
+
+    #[test]
+    fn a_serialized_block_is_the_block_from_its_bytes() {
+        let bytes = BLOCK_MAINNET_949496_BYTES.to_vec();
+        let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
+
+        let raw = RawIndexBlock::try_from(&block).unwrap();
+
+        assert_eq!(raw, RawIndexBlock::from_bytes(bytes).unwrap());
+        assert_eq!(raw.height, block::Height(949_496));
     }
 }

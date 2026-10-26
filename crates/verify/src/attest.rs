@@ -13,6 +13,10 @@
 //! [`JsonRpcAttestor`] asks a zakura node over JSON-RPC. `z_gettreestate` takes 0.2 to 2.6 s and
 //! the node does not cache it, so the attestor keeps the answers that it gave: a retry of an
 //! epoch makes no new call.
+//!
+//! [`ReadStateAttestor`] reads the state of an embedded zakura node through its
+//! `ReadStateService`. It gives the same values as [`JsonRpcAttestor`] on the same node, because
+//! it reads the zakura types that the RPC prints.
 
 use std::{
     collections::BTreeMap,
@@ -20,9 +24,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use tower::ServiceExt as _;
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
-use zakura_state::HashOrHeight;
+use zakura_state::{BoxError, HashOrHeight, ReadRequest, ReadResponse, ReadStateService};
 use ztreamer_indexer::{
     codec::CodecError,
     frontier::{FromRpc, RpcDecodeError},
@@ -96,6 +101,24 @@ pub enum NodeError {
     /// The record of the node block does not encode.
     #[error("record of the node block does not encode")]
     Encode(#[from] CodecError),
+    /// A read of the state of an embedded node failed.
+    #[error("zakura state read failed: {0}")]
+    State(#[source] BoxError),
+    /// The state of an embedded node gave an answer of another kind than the request.
+    #[error("zakura state gave no {0} answer")]
+    UnexpectedState(&'static str),
+    /// The best chain of the node has no block at the height.
+    #[error("node has no block at height {0}")]
+    MissingBlock(u32),
+    /// The node has no tree of an active pool at the height, for example because it pruned
+    /// the tree.
+    #[error("node has no {pool:?} tree at height {height}")]
+    MissingTree {
+        /// The pool of the tree.
+        pool: Pool,
+        /// The height of the tree.
+        height: u32,
+    },
 }
 
 /// Why [`Epoch::attest`] or [`Epoch::sample`](crate::epoch::Epoch::sample) did not accept an
@@ -389,6 +412,134 @@ impl Attestor for JsonRpcAttestor {
     }
 }
 
+/// An [`Attestor`] that reads the state of an embedded zakura node.
+///
+/// It gives the values of [`JsonRpcAttestor`] for the same node. `z_gettreestate` and
+/// `z_getsubtreesbyindex` print the zakura types that this attestor reads, and
+/// [`JsonRpcAttestor`] reads the printed bytes back into these types. See
+/// [`ztreamer_indexer::frontier`] for the byte orders. A root is `None` when its pool is not
+/// active at the height, as in `z_gettreestate`. A read takes less time than a JSON-RPC call,
+/// thus the attestor keeps no answers.
+///
+/// ```no_run
+/// use zakura_state::ReadStateService;
+/// use ztreamer_verify::attest::{Attestor, NodeError, ReadStateAttestor};
+///
+/// # async fn run(state: ReadStateService) -> Result<(), NodeError> {
+/// let attestor = ReadStateAttestor::new(state);
+/// let roots = attestor.tree_roots(3_524_999).await?;
+/// # let _ = roots;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug)]
+pub struct ReadStateAttestor {
+    state: ReadStateService,
+}
+
+impl ReadStateAttestor {
+    /// An attestor over `state`, the state of the embedded node.
+    pub const fn new(state: ReadStateService) -> Self {
+        Self { state }
+    }
+
+    /// The answer of the state to `request`.
+    async fn read(&self, request: ReadRequest) -> Result<ReadResponse, NodeError> {
+        self.state.clone().oneshot(request).await.map_err(NodeError::State)
+    }
+
+    /// The root of the `pool` tree after the block `hash` at `height`, or `None` when the pool
+    /// is not active at `height`. `root` takes the root from the answer to `request`, and gives
+    /// `None` for an answer of another kind.
+    async fn pool_root<R>(
+        &self,
+        pool: Pool,
+        height: u32,
+        request: ReadRequest,
+        root: impl FnOnce(ReadResponse) -> Option<Option<R>>,
+    ) -> Result<Option<R>, NodeError> {
+        if !pool.is_active(&self.state.db().network(), height) {
+            return Ok(None);
+        }
+        let root = root(self.read(request).await?)
+            .ok_or(NodeError::UnexpectedState("note commitment tree"))?;
+        root.map(Some).ok_or(NodeError::MissingTree { pool, height })
+    }
+}
+
+#[async_trait]
+impl Attestor for ReadStateAttestor {
+    async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError> {
+        match self.read(ReadRequest::BestChainBlockHash(block::Height(height))).await? {
+            ReadResponse::BlockHash(hash) => hash.ok_or(NodeError::MissingBlock(height)),
+            _ => Err(NodeError::UnexpectedState("block hash")),
+        }
+    }
+
+    /// Reads the trees of the block that [`Attestor::block_hash`] gives, as `z_gettreestate`
+    /// does.
+    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
+        let hash = HashOrHeight::Hash(self.block_hash(height).await?);
+        let sapling = self.pool_root(Pool::Sapling, height, ReadRequest::SaplingTree(hash), |r| {
+            let ReadResponse::SaplingTree(tree) = r else { return None };
+            Some(tree.map(|tree| tree.root()))
+        });
+        let orchard = self.pool_root(Pool::Orchard, height, ReadRequest::OrchardTree(hash), |r| {
+            let ReadResponse::OrchardTree(tree) = r else { return None };
+            Some(tree.map(|tree| tree.root()))
+        });
+        let ironwood =
+            self.pool_root(Pool::Ironwood, height, ReadRequest::IronwoodTree(hash), |r| {
+                let ReadResponse::IronwoodTree(tree) = r else { return None };
+                Some(tree.map(|tree| tree.root()))
+            });
+        Ok(PoolRoots {
+            sapling: sapling.await?,
+            orchard: orchard.await?,
+            ironwood: ironwood.await?,
+        })
+    }
+
+    async fn subtree_roots(
+        &self,
+        pool: Pool,
+        start: NoteCommitmentSubtreeIndex,
+        count: u16,
+    ) -> Result<Vec<SubtreeNode>, NodeError> {
+        let (start_index, limit) = (start, Some(NoteCommitmentSubtreeIndex(count)));
+        let request = match pool {
+            Pool::Sapling => ReadRequest::SaplingSubtrees { start_index, limit },
+            Pool::Orchard => ReadRequest::OrchardSubtrees { start_index, limit },
+            Pool::Ironwood => ReadRequest::IronwoodSubtrees { start_index, limit },
+        };
+        let roots: BTreeMap<_, _> = match (pool, self.read(request).await?) {
+            (Pool::Sapling, ReadResponse::SaplingSubtrees(subtrees)) => subtrees
+                .into_iter()
+                .map(|(index, subtree)| (index, SubtreeNode::Sapling(subtree.root)))
+                .collect(),
+            (Pool::Orchard, ReadResponse::OrchardSubtrees(subtrees)) => subtrees
+                .into_iter()
+                .map(|(index, subtree)| (index, SubtreeNode::Orchard(subtree.root)))
+                .collect(),
+            (Pool::Ironwood, ReadResponse::IronwoodSubtrees(subtrees)) => subtrees
+                .into_iter()
+                .map(|(index, subtree)| (index, SubtreeNode::Ironwood(subtree.root)))
+                .collect(),
+            _ => return Err(NodeError::UnexpectedState("subtree")),
+        };
+        (0..count)
+            .map(|offset| {
+                let index = start
+                    .0
+                    .checked_add(offset)
+                    .map(NoteCommitmentSubtreeIndex)
+                    .ok_or(NodeError::MissingSubtree { pool, index: start })?;
+                roots.get(&index).copied().ok_or(NodeError::MissingSubtree { pool, index })
+            })
+            .collect()
+    }
+}
+
 /// Reads the `finalRoot` of `pool` in the byte order of the pool. See
 /// [`ztreamer_indexer::frontier`]. A pool with no `finalState` is not active, and has no root.
 /// It is a free function because it is generic over the root type of the pool.
@@ -448,7 +599,7 @@ impl<K: Ord + Copy, V: Copy> Answers<K, V> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use zakura_chain::{orchard, sapling};
+    use zakura_chain::{ironwood, orchard, sapling};
     use ztreamer_indexer::{
         codec::{TreeSizes, encode_range},
         index::{
@@ -466,6 +617,7 @@ mod tests {
     use crate::{
         epoch::{Epochs, synthetic_entries},
         range::entry_for,
+        test_utils::{SAPLING_HEIGHT, TestnetState},
     };
 
     const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
@@ -792,5 +944,165 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// The subtree roots of [`TestnetState::insert_subtrees`]: Sapling 0 to 2, Orchard 0 and
+    /// Ironwood 0.
+    fn state_subtrees() -> [SubtreeNode; 5] {
+        [
+            sapling_node(1),
+            sapling_node(2),
+            sapling_node(3),
+            SubtreeNode::Orchard(orchard::tree::Node::try_from([1; 32]).unwrap()),
+            SubtreeNode::Ironwood(ironwood::tree::Node::try_from([2; 32]).unwrap()),
+        ]
+    }
+
+    #[tokio::test]
+    async fn read_state_attestor_gives_the_best_chain_hashes() {
+        let state = TestnetState::new().await;
+        let attestor = ReadStateAttestor::new(state.read.clone());
+
+        for (height, block) in (0..).zip(&state.blocks) {
+            assert_eq!(attestor.block_hash(height).await.unwrap(), block.hash());
+        }
+        let error = attestor.block_hash(11).await.unwrap_err();
+
+        assert!(matches!(error, NodeError::MissingBlock(11)), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn read_state_attestor_gives_a_root_for_each_active_pool() {
+        let state = TestnetState::new().await;
+        let attestor = ReadStateAttestor::new(state.read.clone());
+        // The blocks have no shielded outputs. Orchard and Ironwood are not active.
+        let active = PoolRoots {
+            sapling: Some(sapling::tree::NoteCommitmentTree::default().root()),
+            orchard: None,
+            ironwood: None,
+        };
+
+        assert_eq!(attestor.tree_roots(SAPLING_HEIGHT - 1).await.unwrap(), PoolRoots::default());
+        assert_eq!(attestor.tree_roots(SAPLING_HEIGHT).await.unwrap(), active);
+        assert_eq!(attestor.tree_roots(10).await.unwrap(), active);
+        let error = attestor.tree_roots(11).await.unwrap_err();
+        assert!(matches!(error, NodeError::MissingBlock(11)), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn read_state_attestor_gives_the_subtree_roots_by_index() {
+        let state = TestnetState::new().await;
+        state.insert_subtrees(&state_subtrees());
+        let attestor = ReadStateAttestor::new(state.read.clone());
+        let [_, sapling_1, sapling_2, orchard_0, ironwood_0] = state_subtrees();
+        let index = NoteCommitmentSubtreeIndex;
+
+        let sapling = attestor.subtree_roots(Pool::Sapling, index(1), 2).await.unwrap();
+        let orchard = attestor.subtree_roots(Pool::Orchard, index(0), 1).await.unwrap();
+        let ironwood = attestor.subtree_roots(Pool::Ironwood, index(0), 1).await.unwrap();
+        let past_the_last = attestor.subtree_roots(Pool::Sapling, index(2), 2).await.unwrap_err();
+        let none = attestor.subtree_roots(Pool::Orchard, index(1), 1).await.unwrap_err();
+
+        assert_eq!(sapling, [sapling_1, sapling_2]);
+        assert_eq!(orchard, [orchard_0]);
+        assert_eq!(ironwood, [ironwood_0]);
+        assert!(
+            matches!(
+                past_the_last,
+                NodeError::MissingSubtree {
+                    pool: Pool::Sapling,
+                    index: NoteCommitmentSubtreeIndex(3)
+                }
+            ),
+            "{past_the_last:?}"
+        );
+        assert!(
+            matches!(
+                none,
+                NodeError::MissingSubtree {
+                    pool: Pool::Orchard,
+                    index: NoteCommitmentSubtreeIndex(1)
+                }
+            ),
+            "{none:?}"
+        );
+    }
+
+    /// The `z_getsubtreesbyindex` answer of `state` for `pool` from index 0, printed as zakura
+    /// v1.5.1 prints it: a Sapling root as `to_bytes`, an Orchard or Ironwood root as
+    /// `bytes_in_display_order`.
+    async fn printed_subtrees(state: &TestnetState, pool: Pool) -> Value {
+        let (start_index, limit) = (NoteCommitmentSubtreeIndex(0), None);
+        let request = match pool {
+            Pool::Sapling => ReadRequest::SaplingSubtrees { start_index, limit },
+            Pool::Orchard => ReadRequest::OrchardSubtrees { start_index, limit },
+            Pool::Ironwood => ReadRequest::IronwoodSubtrees { start_index, limit },
+        };
+        let roots: Vec<_> = match state.read.clone().oneshot(request).await.unwrap() {
+            ReadResponse::SaplingSubtrees(subtrees) => {
+                subtrees.values().map(|subtree| hex::encode(subtree.root.to_bytes())).collect()
+            }
+            ReadResponse::OrchardSubtrees(subtrees) => subtrees
+                .values()
+                .map(|subtree| hex::encode(subtree.root.bytes_in_display_order()))
+                .collect(),
+            ReadResponse::IronwoodSubtrees(subtrees) => subtrees
+                .values()
+                .map(|subtree| hex::encode(subtree.root.bytes_in_display_order()))
+                .collect(),
+            response => panic!("unexpected response {response:?}"),
+        };
+        let subtrees: Vec<_> =
+            roots.into_iter().map(|root| json!({ "root": root, "end_height": 10 })).collect();
+        json!({ "pool": pool.as_str(), "start_index": 0, "subtrees": subtrees })
+    }
+
+    #[tokio::test]
+    async fn json_rpc_attestor_reads_the_values_of_the_read_state_attestor() {
+        let state = TestnetState::new().await;
+        state.insert_subtrees(&state_subtrees());
+        // The `z_gettreestate` answer at height 10, printed as zakura v1.5.1 prints it.
+        let request = ReadRequest::SaplingTree(HashOrHeight::Height(block::Height(10)));
+        let ReadResponse::SaplingTree(Some(tree)) =
+            state.read.clone().oneshot(request).await.unwrap()
+        else {
+            panic!("the state has the Sapling tree at height 10");
+        };
+        let treestate = json!({
+            "hash": state.blocks[10].hash().to_string(),
+            "height": 10,
+            "time": 0,
+            "sapling": { "commitments": {
+                "finalRoot": hex::encode(tree.root().bytes_in_display_order()),
+                "finalState": hex::encode(tree.to_rpc_bytes()),
+            } },
+            "orchard": { "commitments": {} },
+            "ironwood": { "commitments": {} },
+        });
+        let mut subtrees = BTreeMap::new();
+        for pool in Pool::ALL {
+            subtrees.insert(pool.as_str(), printed_subtrees(&state, pool).await);
+        }
+        let node = MockNode::start(move |_, seen| match seen.body["method"].as_str().unwrap() {
+            "z_gettreestate" => Reply::Result(treestate.clone()),
+            "z_getsubtreesbyindex" => {
+                Reply::Result(subtrees[seen.body["params"][0].as_str().unwrap()].clone())
+            }
+            method => panic!("unexpected method {method}"),
+        })
+        .await;
+        let remote =
+            JsonRpcAttestor::new(ZakuraClient::new(RpcClient::new(node.config()).unwrap()));
+        let embedded = ReadStateAttestor::new(state.read.clone());
+        let start = NoteCommitmentSubtreeIndex(0);
+
+        assert_eq!(remote.tree_roots(10).await.unwrap(), embedded.tree_roots(10).await.unwrap());
+        for (pool, count) in [(Pool::Sapling, 3), (Pool::Orchard, 1), (Pool::Ironwood, 1)] {
+            assert_eq!(
+                remote.subtree_roots(pool, start, count).await.unwrap(),
+                embedded.subtree_roots(pool, start, count).await.unwrap(),
+                "{pool:?}"
+            );
+        }
     }
 }

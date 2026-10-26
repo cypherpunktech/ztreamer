@@ -229,12 +229,27 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             result = ready_rx => result.wrap_err("Zakura stopped before readiness")?,
         };
         let client = node::NodeClient::from_services(services);
+        let state = client.read_state();
         let sources = NodeSources {
             tail: client.database(),
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        let hooks = ServiceHooks { p2p: Some(p2p.clone()), replica: None, reattest: None };
+        let status = replica.as_ref().map(replicate::Replica::new_status);
+        let mut reattest = None;
+        if let (Some(replica), Some(status)) = (&replica, &status) {
+            // The embedded node attests the import only near the chain tip: below it, the node
+            // does not have the blocks of the snapshot yet.
+            if sources.wait_ready(&shutdown).await?.is_break() {
+                return Ok(());
+            }
+            let import = replica.import(&state, &network, &index, status, &shutdown);
+            let ControlFlow::Continue(task) = import.await? else {
+                return Ok(());
+            };
+            reattest = task;
+        }
+        let hooks = ServiceHooks { p2p: Some(p2p.clone()), replica: status, reattest };
         run_application(cli, grpc_server, index, &network, hooks, sources, shutdown.clone()).await
     };
 
