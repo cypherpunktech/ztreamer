@@ -12,7 +12,7 @@ use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_indexer::index::{
-    Index, IndexState,
+    IndexState,
     range_meta::{Frontiers, RangeMeta, VerifyState},
 };
 
@@ -40,9 +40,6 @@ pub(crate) struct EpochImport<S> {
     first_epoch: usize,
     /// The start frontiers of the first epoch.
     first_start_frontiers: Frontiers,
-    /// The position of the first epoch that the index does not have. The epochs from
-    /// `first_epoch` to this epoch have `ChainOk` rows.
-    first_epoch_to_fetch: usize,
     /// One permit for each run of [`Epoch::verify`]: `import_workers` permits.
     verify_permits: Semaphore,
     metrics: ImportMetrics,
@@ -54,7 +51,6 @@ impl<S: RangeSource + 'static> EpochImport<S> {
         manifest: Manifest,
         first_epoch: usize,
         first_start_frontiers: Frontiers,
-        sealed_through: Option<u32>,
     ) -> Self {
         let epoch_offsets = manifest
             .epochs()
@@ -64,10 +60,6 @@ impl<S: RangeSource + 'static> EpochImport<S> {
                 Some(epoch_offset)
             })
             .collect();
-        let first_epoch_to_fetch = manifest
-            .epochs()
-            .take_while(|epoch| sealed_through.is_some_and(|sealed| epoch.end_height() <= sealed))
-            .count();
         let verify_permits = Semaphore::new(importer.config.import_workers.get());
         let metrics = ImportMetrics::new();
         Self {
@@ -76,7 +68,6 @@ impl<S: RangeSource + 'static> EpochImport<S> {
             epoch_offsets,
             first_epoch,
             first_start_frontiers,
-            first_epoch_to_fetch,
             verify_permits,
             metrics,
         }
@@ -112,12 +103,6 @@ impl<S: RangeSource + 'static> EpochImport<S> {
             .expect("`MAX_BLOB_BYTES_BEFORE_INSTALL` fits in a `u32`")
     }
 
-    /// Returns `true` if the epoch at `at` was installed before the import, with
-    /// [`VerifyState::ChainOk`] rows.
-    pub(crate) const fn was_installed_before_import(&self, at: usize) -> bool {
-        at < self.first_epoch_to_fetch
-    }
-
     /// Fetches, verifies, attests and samples the epoch at `at`, and gives its
     /// [`VerifyState::Verified`] rows.
     pub(crate) async fn fetch_and_verify(
@@ -134,26 +119,10 @@ impl<S: RangeSource + 'static> EpochImport<S> {
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
         let started = Instant::now();
         let entries = self.manifest_epoch(at).entries();
-        let blobs = if self.was_installed_before_import(at) {
-            let starts: Vec<_> = entries.iter().map(|entry| entry.start_height).collect();
-            let read = move |index: &Index| {
-                starts.into_iter().map(|start| index.read_sealed_range_bytes(start)).collect()
-            };
-            let blobs: Vec<_> = self.importer.blocking(read).await?;
-            entries
-                .iter()
-                .zip(blobs)
-                .map(|(entry, blob)| {
-                    let start = entry.start_height;
-                    blob.map(Bytes::from).ok_or(ImportError::MissingBlob { start })
-                })
-                .collect::<Result<_, _>>()?
-        } else {
-            stream::iter(entries)
-                .then(|entry| self.importer.sources.fetch_blob(entry))
-                .try_collect()
-                .await?
-        };
+        let blobs = stream::iter(entries)
+            .then(|entry| self.importer.sources.fetch_blob(entry))
+            .try_collect()
+            .await?;
         self.metrics.record_stage_seconds(EpochStage::Fetch, started);
         Ok(blobs)
     }
@@ -249,30 +218,14 @@ impl<S: RangeSource + 'static> EpochImport<S> {
         Ok(rows.collect())
     }
 
-    /// Installs the rows of the epoch at `at`, or marks the rows of an installed epoch
-    /// verified. Returns the index state after the last range.
-    pub(crate) async fn install_rows(
-        &self,
-        at: usize,
-        rows: VerifiedRows,
-    ) -> Result<IndexState, ImportError> {
-        let installed_before_import = self.was_installed_before_import(at);
+    /// Installs each range of an epoch with its row. Returns the index state after the last
+    /// range.
+    pub(crate) async fn install_rows(&self, rows: VerifiedRows) -> Result<IndexState, ImportError> {
         let state = self
             .importer
             .blocking(move |index| {
-                rows.into_iter().try_fold(None, |_, (blob, mut meta)| {
-                    let start = meta.entry.start_height;
-                    let state = if installed_before_import {
-                        // The row keeps `epoch_end` from the manifest that installed it. A
-                        // manifest that ended inside this epoch marks its last range.
-                        if let Some(row) = index.range_meta(start)? {
-                            meta.entry.epoch_end = row.entry.epoch_end;
-                        }
-                        index.advance_verified_through(start, &meta)
-                    } else {
-                        index.install_sealed_range(start, &blob, &meta)
-                    };
-                    state.map(Some)
+                rows.iter().try_fold(None, |_, (blob, meta)| {
+                    index.install_sealed_range(meta.entry.start_height, blob, meta).map(Some)
                 })
             })
             .await?;

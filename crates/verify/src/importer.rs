@@ -4,29 +4,26 @@
 //! [`Importer::run`] reads the manifest of each source. Each manifest must give the same blob
 //! digest for each entry of the shortest manifest, else the import stops with
 //! [`ImportError::SourcesDisagree`]. The import uses the shortest manifest. It refuses a
-//! manifest for another network or genesis block, and an index that is verified at or above
-//! the manifest. Then it starts the epochs after the verified tip of the index in height order,
-//! at most two for each of the [`ImportConfig::import_workers`] at a time. The work on one
-//! epoch is:
+//! manifest for another network or genesis block, and an index that is sealed at or above the
+//! manifest. Then it starts the epochs after the sealed tip of the index in height order, at
+//! most two for each of the [`ImportConfig::import_workers`] at a time. The work on one epoch
+//! is:
 //!
 //! 1. Take its part of a byte budget of [`MAX_BLOB_BYTES_BEFORE_INSTALL`], in height order.
 //!    The epoch keeps it until its install.
 //! 2. Fetch its blobs. Each blob fetch asks the sources in turn, and starts at the next source
 //!    after the first source of the fetch before. A wrong digest or another error moves the
-//!    fetch to the next source. When no source sends a blob, the import stops. An epoch at or
-//!    below the sealed tip is installed already, with [`VerifyState::ChainOk`] rows: read its
-//!    blobs from the index, not from a source.
+//!    fetch to the next source. When no source sends a blob, the import stops.
 //! 3. Run [`Epoch::verify`] on the blocking thread pool. At most `import_workers` epochs do
 //!    this at the same time.
 //! 4. Run [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`] at the same
 //!    time. Thus the node calls of an epoch overlap the verification of the next epoch.
 //!
 //! The importer takes the verified epochs in height order, and installs each one before it
-//! takes the next. It installs each range of a fetched epoch with
-//! [`Index::install_sealed_range`] and a [`VerifyState::Verified`] row. It marks each range of
-//! an installed epoch verified with [`Index::advance_verified_through`].
+//! takes the next. It installs each range with [`Index::install_sealed_range`] and a
+//! [`VerifyState::Verified`] row.
 //!
-//! The start frontiers of the first epoch come from the `range_meta` row of the last verified
+//! The start frontiers of the first epoch come from the `range_meta` row of the last sealed
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
 //! node does not attest. The start frontiers of each other epoch are the frontiers of the
 //! manifest entry before it. [`Epoch::verify`] of the epoch before rebuilds them byte for byte,
@@ -39,7 +36,6 @@
 //! [`Epoch::verify`]: crate::epoch::Epoch::verify
 //! [`Epoch::attest`]: crate::epoch::Epoch::attest
 //! [`Epoch::sample`]: crate::epoch::Epoch::sample
-//! [`VerifyState::ChainOk`]: ztreamer_indexer::index::range_meta::VerifyState::ChainOk
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
 
 mod epoch_import;
@@ -128,18 +124,10 @@ pub struct ImportReport {
 }
 
 impl ImportReport {
-    /// Adds the install of `epoch`. `fetched_from_source` is `false` for an epoch that was
-    /// installed with `ChainOk` rows before the import.
-    fn add_installed_epoch(
-        &mut self,
-        epoch: &Epoch<'_>,
-        fetched_from_source: bool,
-        state: &IndexState,
-    ) {
-        if fetched_from_source {
-            self.epochs += 1;
-            self.ranges += epoch.entries().len();
-        }
+    /// Adds the install of `epoch`.
+    fn add_installed_epoch(&mut self, epoch: &Epoch<'_>, state: &IndexState) {
+        self.epochs += 1;
+        self.ranges += epoch.entries().len();
         self.sealed_through = state.sealed_through();
         self.verified_through = state.verified_through();
         info!(end_height = epoch.end_height(), ranges = self.ranges, "imported epoch");
@@ -186,29 +174,23 @@ pub enum ImportError {
         /// The genesis hash of the index.
         index: block::Hash,
     },
-    /// The index is verified at or above the manifest.
-    #[error("index is verified through {index}, at or above the manifest ({manifest})")]
+    /// The index is sealed at or above the manifest.
+    #[error("index is sealed through {index}, at or above the manifest ({manifest})")]
     Ahead {
-        /// The verified tip of the index.
+        /// The sealed tip of the index.
         index: u32,
         /// The sealed tip of the manifest.
         manifest: u32,
     },
-    /// The sealed or the verified tip of the index is not the end of an epoch of the manifest.
+    /// The sealed tip of the index is not the end of an epoch of the manifest.
     #[error("index tip {height} is inside an epoch of the manifest")]
     EpochBoundary {
-        /// The sealed or the verified tip of the index.
+        /// The sealed tip of the index.
         height: u32,
     },
-    /// The last verified range of the index has no `range_meta` row, thus no frontiers.
+    /// The last sealed range of the index has no `range_meta` row, thus no frontiers.
     #[error("sealed range {start} has no range_meta row")]
     MissingRow {
-        /// The first height of the range.
-        start: u32,
-    },
-    /// A sealed range of the index has no blob.
-    #[error("sealed range {start} has no blob")]
-    MissingBlob {
         /// The first height of the range.
         start: u32,
     },
@@ -286,7 +268,7 @@ impl<S: RangeSource + 'static> Importer<S> {
         Self { sources: Sources::new(sources), node, index, config }
     }
 
-    /// Imports the epochs of the manifest after the verified tip of the index, as the module
+    /// Imports the epochs of the manifest after the sealed tip of the index, as the module
     /// docs give.
     ///
     /// When `shutdown` becomes `true`, the importer completes the epoch that it installs, and
@@ -299,28 +281,22 @@ impl<S: RangeSource + 'static> Importer<S> {
         let manifest = self.sources.fetch_agreed_manifest().await?;
         self.check_identity(&manifest)?;
         let state = self.blocking(|index| index.state()).await?;
-        let (sealed, verified) = (state.sealed_through(), state.verified_through());
+        let sealed = state.sealed_through();
         let tip = manifest.sealed_through();
-        if let Some(index) = verified.filter(|&verified| verified >= tip) {
+        if let Some(index) = sealed.filter(|&sealed| sealed >= tip) {
             return Err(ImportError::Ahead { index, manifest: tip });
         }
-        let after = |height: Option<u32>| {
-            manifest.epochs().position(|epoch| epoch.previous().map(|e| e.end_height) == height)
-        };
-        let first_epoch = after(verified)
-            .ok_or(ImportError::EpochBoundary { height: verified.unwrap_or_default() })?;
-        if let Some(sealed) = sealed.filter(|&sealed| sealed < tip && after(Some(sealed)).is_none())
-        {
-            return Err(ImportError::EpochBoundary { height: sealed });
-        }
-        let first_start_frontiers = self.frontiers_after_verified_tip(verified).await?;
+        let first_epoch = manifest
+            .epochs()
+            .position(|epoch| epoch.previous().map(|entry| entry.end_height) == sealed)
+            .ok_or(ImportError::EpochBoundary { height: sealed.unwrap_or_default() })?;
+        let first_start_frontiers = self.frontiers_after_sealed_tip(sealed).await?;
         let mut report = ImportReport {
             sealed_through: sealed,
-            verified_through: verified,
+            verified_through: state.verified_through(),
             ..ImportReport::default()
         };
-        let epoch_import =
-            EpochImport::new(self, manifest, first_epoch, first_start_frontiers, sealed);
+        let epoch_import = EpochImport::new(self, manifest, first_epoch, first_start_frontiers);
         let epoch_import = Arc::new(epoch_import);
         let blob_byte_budget = Arc::new(Semaphore::new(MAX_BLOB_BYTES_BEFORE_INSTALL as usize));
         let stop_signal = async move {
@@ -352,11 +328,10 @@ impl<S: RangeSource + 'static> Importer<S> {
         // the install of each epoch below it.
         let mut next_epoch = epoch_import.epochs_to_import().start;
         while let Some((at, rows, _budget_permit)) = epochs.try_next().await? {
-            let fetched_from_source = !epoch_import.was_installed_before_import(at);
-            let install = epoch_import.install_rows(at, rows);
+            let install = epoch_import.install_rows(rows);
             let state = install.instrument(epoch_import.epoch_span(at)).await?;
             let epoch = epoch_import.manifest_epoch(at);
-            report.add_installed_epoch(&epoch, fetched_from_source, &state);
+            report.add_installed_epoch(&epoch, &state);
             next_epoch = at + 1;
         }
         // Only the shutdown signal ends the epochs early: an error returns above.
@@ -378,16 +353,16 @@ impl<S: RangeSource + 'static> Importer<S> {
         Ok(())
     }
 
-    /// The frontiers after the verified tip: the frontiers of the row of the last verified
-    /// range, or empty trees for an index with no verified range.
-    async fn frontiers_after_verified_tip(
+    /// The frontiers after the sealed tip: the frontiers of the row of the last sealed range,
+    /// or empty trees for an empty index.
+    async fn frontiers_after_sealed_tip(
         &self,
-        verified: Option<u32>,
+        sealed: Option<u32>,
     ) -> Result<Frontiers, ImportError> {
-        let Some(verified) = verified else {
+        let Some(sealed) = sealed else {
             return Ok(Frontiers::default());
         };
-        let start = verified + 1 - RANGE_SIZE;
+        let start = sealed + 1 - RANGE_SIZE;
         self.blocking(move |index| index.range_meta(start))
             .await?
             .map(|meta| meta.entry.frontiers)
@@ -417,9 +392,7 @@ mod tests {
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_indexer::{
         codec::{RangeDecoder, encode_range},
-        index::range_meta::{
-            Attested, ManifestEntry, PoolRoots, RangeMeta, SubtreeNode, VerifyState,
-        },
+        index::range_meta::{Attested, ManifestEntry, PoolRoots, SubtreeNode, VerifyState},
         test_utils::raw_block,
         types::RawIndexBlock,
     };
@@ -681,35 +654,6 @@ mod tests {
         assert_eq!((report.epochs, report.ranges), (2, 15));
         assert_eq!(import.blob_requests() - requests_before_restart, 15);
         import.assert_target_has_source_blobs();
-    }
-
-    #[tokio::test]
-    async fn chain_ok_ranges_are_attested_again_from_the_index() {
-        let import = Import::new(RANGES).await;
-        for entry in &import.snapshots[0].manifest.entries()[..10] {
-            let start = entry.start_height;
-            let blob = import.source.index.read_sealed_range_bytes(start).unwrap().unwrap();
-            // An older manifest ended at 4,999, and marked its last range as an epoch end.
-            let epoch_end = entry.epoch_end || start == 4_000;
-            let meta = RangeMeta {
-                entry: ManifestEntry { epoch_end, ..entry.clone() },
-                state: VerifyState::ChainOk,
-                verified_by: None,
-                verified_at: None,
-                attested: None,
-                sampled_heights: Vec::new(),
-            };
-            import.target.install_sealed_range(start, &blob, &meta).unwrap();
-        }
-
-        let report = import.run().await.unwrap();
-
-        assert_eq!((report.epochs, report.ranges), (2, 15));
-        assert_eq!(import.blob_requests(), 15);
-        import.assert_target_has_source_blobs();
-        let meta = import.target.range_meta(3_000).unwrap().unwrap();
-        assert_eq!(meta.state, VerifyState::Verified);
-        assert!(meta.attested.is_some());
     }
 
     #[tokio::test]
