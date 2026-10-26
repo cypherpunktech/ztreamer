@@ -19,7 +19,7 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 
-use crate::{RpcClient, RpcConfig, RpcError};
+use crate::{CallOptions, RpcClient, RpcConfig, RpcError};
 
 /// A zakura JSON-RPC method that [`ZakuraClient`] calls.
 ///
@@ -31,6 +31,8 @@ pub enum Method {
     GetBlockchainInfo,
     /// `getbestblockhash`.
     GetBestBlockHash,
+    /// `getblockcount`.
+    GetBlockCount,
     /// `getblockhash`.
     GetBlockHash,
     /// `getblock`.
@@ -55,9 +57,10 @@ pub enum Method {
 
 impl Method {
     /// All the methods.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::GetBlockchainInfo,
         Self::GetBestBlockHash,
+        Self::GetBlockCount,
         Self::GetBlockHash,
         Self::GetBlock,
         Self::ZGetTreestate,
@@ -75,6 +78,7 @@ impl Method {
         match self {
             Self::GetBlockchainInfo => "getblockchaininfo",
             Self::GetBestBlockHash => "getbestblockhash",
+            Self::GetBlockCount => "getblockcount",
             Self::GetBlockHash => "getblockhash",
             Self::GetBlock => "getblock",
             Self::ZGetTreestate => "z_gettreestate",
@@ -171,6 +175,11 @@ impl ZakuraClient {
         self.call(Method::GetBestBlockHash, ()).await
     }
 
+    /// `getblockcount`: the height of the tip. This is the cheapest call that gives the tip.
+    pub async fn get_block_count(&self) -> Result<block::Height, RpcError> {
+        self.call(Method::GetBlockCount, ()).await.map(block::Height)
+    }
+
     /// `getblockhash`: the hash of the best-chain block at `height`.
     pub async fn get_block_hash(
         &self,
@@ -232,11 +241,19 @@ impl ZakuraClient {
     }
 
     /// `sendrawtransaction`: sends a serialized transaction to the mempool of the node.
+    ///
+    /// This call retries only when the request did not reach the node
+    /// ([`CallOptions::unsent_retries`]). After a timeout, the node can have the transaction
+    /// already, and a second attempt then gets the error "transaction already exists in
+    /// mempool".
     pub async fn send_raw_transaction(
         &self,
         transaction: &[u8],
     ) -> Result<SendRawTransactionResponse, RpcError> {
-        self.call(Method::SendRawTransaction, (HexData(transaction.to_vec()),)).await
+        let params = (HexData(transaction.to_vec()),);
+        self.rpc
+            .call_with(Method::SendRawTransaction.name(), params, CallOptions::unsent_retries())
+            .await
     }
 
     /// `getaddresstxids`: the ids of the transactions that touch the addresses.
@@ -286,7 +303,7 @@ mod tests {
         }
         assert_eq!(Method::GetBlockchainInfo.name(), "getblockchaininfo");
         assert_eq!(Method::ZGetSubtreesByIndex.name(), "z_getsubtreesbyindex");
-        assert_eq!(Method::from_name("getblockcount"), None);
+        assert_eq!(Method::from_name("getpeerinfo"), None);
     }
 
     #[test]

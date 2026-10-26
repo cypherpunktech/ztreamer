@@ -17,6 +17,7 @@ pub mod test_utils;
 
 pub use backend::{BackendError, InProcessBackend, StateBackend};
 pub use range_meta_fill::RangeMetaFiller;
+pub use remote::RemoteBackend;
 pub use replicate::ReplicatorService;
 pub use service::{
     CompactService, HeadFollowerConfig, HeadFollowerError, Readiness, ServingSnapshot,

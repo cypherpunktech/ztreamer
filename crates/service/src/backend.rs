@@ -20,7 +20,7 @@ use sapling_crypto::Node as SaplingNode;
 use tonic::Status;
 use tower::ServiceExt as _;
 use zakura_chain::{
-    amount::{Amount, NonNegative},
+    amount::{self, Amount, NonNegative},
     block::{self, Block},
     ironwood, orchard,
     parameters::Network,
@@ -46,6 +46,13 @@ pub enum BackendError {
     /// The backend answered with something it should not have. Maps to `INTERNAL`.
     #[error("{0}")]
     Unexpected(String),
+}
+
+/// A backend answer with an amount out of range is an answer that it should not have sent.
+impl From<amount::Error> for BackendError {
+    fn from(error: amount::Error) -> Self {
+        Self::Unexpected(format!("backend sent an amount out of range: {error}"))
+    }
 }
 
 impl From<BackendError> for Status {
