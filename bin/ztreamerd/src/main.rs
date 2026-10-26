@@ -18,7 +18,7 @@ use clap::{Args, Parser, Subcommand};
 use eyre::{Result, WrapErr, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::transport::{Identity, Server, ServerTlsConfig, server::Router};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
@@ -127,11 +127,6 @@ struct DaemonArgs {
     /// snapshot source.
     #[arg(long)]
     fill_range_meta: bool,
-
-    /// Replicator gRPC listener. It serves the sealed ranges that have a `range_meta` row to a
-    /// replica, with the TLS settings of the CompactTxStreamer server. Off when not set.
-    #[arg(long, value_name = "ADDR")]
-    replicate_listen: Option<SocketAddr>,
 
     #[command(flatten)]
     remote: remote::RemoteArgs,
@@ -277,7 +272,7 @@ impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
 /// process.
 async fn run_application<T, H, B>(
     cli: DaemonArgs,
-    grpc_server: Server,
+    mut grpc_server: Server,
     index: Arc<Index>,
     network: &Network,
     p2p: Option<Arc<P2pCompactService>>,
@@ -306,7 +301,7 @@ where
     }
 
     let filler_index = cli.fill_range_meta.then(|| Arc::clone(&index));
-    let replicate_index = cli.replicate_listen.map(|_| Arc::clone(&index));
+    let replicate_index = Arc::clone(&index);
     let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
         .with_ping_enabled(cli.ping_very_insecure);
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
@@ -316,22 +311,13 @@ where
         p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     }
 
-    let extras = Extras {
-        filler: filler_index.map(|index| {
-            RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe())
-        }),
-        replicator: replicate_index
-            .map(|index| ReplicatorService::new(index, compact.subscribe(), network)),
-    };
-    serve(compact, head, pipeline, grpc_server, &cli, extras, &shutdown).await
-}
-
-/// The optional tasks that run beside the head follower and the CompactTxStreamer server.
-struct Extras<F> {
-    /// The `range_meta` filler, with `--fill-range-meta`.
-    filler: Option<F>,
-    /// The Replicator service, with `--replicate-listen`.
-    replicator: Option<ReplicatorService>,
+    let filler = filler_index
+        .map(|index| RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe()));
+    let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
+    let grpc = grpc_server
+        .add_service(CompactTxStreamerServer::new(compact.clone()))
+        .add_service(ReplicatorServer::new(replicator));
+    serve(compact, head, pipeline, grpc, &cli, filler, &shutdown).await
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -405,19 +391,19 @@ async fn reconcile_head(
     }
 }
 
-/// Runs the head follower and gRPC server until shutdown or until either task stops. If the
-/// filler is set, runs it beside them and stops it with them. If the Replicator is set, its
-/// server runs in the gRPC task, and the task stops when either server stops.
+/// Runs the head follower and the gRPC server until shutdown or until either task stops. The
+/// server serves CompactTxStreamer and Replicator on one listener. If `filler` is set, runs it
+/// beside them and stops it with them.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
-    mut grpc_server: Server,
+    grpc: Router,
     cli: &DaemonArgs,
-    extras: Extras<impl Future<Output = ()> + Send + 'static>,
+    filler: Option<impl Future<Output = ()> + Send + 'static>,
     shutdown: &CancellationToken,
 ) -> Result<()> {
-    let filler = extras.filler.map(tokio::spawn);
+    let filler = filler.map(tokio::spawn);
     let (server_shutdown, _) = watch::channel(false);
     let mut follower = tokio::spawn({
         let compact = compact.clone();
@@ -433,23 +419,11 @@ async fn serve(
         let receiver = server_shutdown.subscribe();
         let address = cli.grpc_listen;
         let tls = cli.tls_cert.is_some();
-        let replicate = extras.replicator.zip(cli.replicate_listen).map(|(replicator, address)| {
-            info!(%address, tls, "serving Replicator gRPC");
-            grpc_server
-                .clone()
-                .add_service(ReplicatorServer::new(replicator))
-                .serve_with_shutdown(address, shutdown_requested(server_shutdown.subscribe()))
-        });
         async move {
-            info!(%address, tls, "serving CompactTxStreamer gRPC");
-            let streamer = grpc_server
-                .add_service(CompactTxStreamerServer::new(compact))
-                .serve_with_shutdown(address, shutdown_requested(receiver));
-            match replicate {
-                Some(replicate) => tokio::try_join!(streamer, replicate).map(drop),
-                None => streamer.await,
-            }
-            .wrap_err("gRPC server failed")
+            info!(%address, tls, "serving CompactTxStreamer and Replicator gRPC");
+            grpc.serve_with_shutdown(address, shutdown_requested(receiver))
+                .await
+                .wrap_err("gRPC server failed")
         }
     });
 
@@ -521,11 +495,12 @@ mod tests {
         assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
     }
 
+    /// The Replicator shares the CompactTxStreamer listener, so it has no listener flag.
     #[test]
-    fn replicate_listen_is_off_by_default() {
-        assert_eq!(Cli::parse_from(["ztreamerd"]).daemon.replicate_listen, None);
-        let cli = Cli::parse_from(["ztreamerd", "--replicate-listen", "127.0.0.1:9068"]);
-        assert_eq!(cli.daemon.replicate_listen, Some(SocketAddr::from(([127, 0, 0, 1], 9068))));
+    fn replicate_listen_is_not_a_flag() {
+        let error =
+            Cli::try_parse_from(["ztreamerd", "--replicate-listen", "127.0.0.1:9068"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]

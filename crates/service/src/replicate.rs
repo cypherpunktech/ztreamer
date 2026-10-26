@@ -39,9 +39,15 @@ const MANIFEST_VERSION: u32 = 1;
 
 /// Serves the sealed ranges of an index over the Replicator gRPC service.
 ///
+/// `ztreamerd` serves it on the CompactTxStreamer listener:
+///
 /// ```ignore
 /// let replicator = ReplicatorService::new(index, compact.subscribe(), &network);
-/// Server::builder().add_service(ReplicatorServer::new(replicator)).serve(address).await?;
+/// Server::builder()
+///     .add_service(CompactTxStreamerServer::new(compact))
+///     .add_service(ReplicatorServer::new(replicator))
+///     .serve(address)
+///     .await?;
 /// ```
 #[derive(Clone, Debug)]
 pub struct ReplicatorService {
@@ -182,18 +188,21 @@ impl Replicator for ReplicatorService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::fixtures;
+    use crate::{CompactService, test_utils::fixtures};
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{
         Code,
         transport::{Channel, Server},
     };
+    use zakura_chain::block;
     use ztreamer_indexer::index::range_meta::{
         BlobDigest, Frontiers, ManifestEntry as Entry, RangeMeta,
     };
-    use ztreamer_protocol::replicate::{
-        replicator_client::ReplicatorClient, replicator_server::ReplicatorServer,
+    use ztreamer_protocol::{
+        proto::{BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
+        replicate::{replicator_client::ReplicatorClient, replicator_server::ReplicatorServer},
+        wire::compact_tx_streamer_server::CompactTxStreamerServer,
     };
 
     /// Five sealed ranges. Ranges 0, 1,000 and 2,000 have rows, range 3,000 has none, and the
@@ -251,13 +260,34 @@ mod tests {
             Self { index, service, generation: state.generation(), snapshots, _dir: dir }
         }
 
-        /// Serves the fixture on a free local port and connects a client to it.
-        async fn client(&self) -> ReplicatorClient<Channel> {
+        /// Serves CompactTxStreamer and the fixture's Replicator on one free local port, as
+        /// `ztreamerd` does, and returns the endpoint.
+        async fn serve(&self) -> String {
+            let (_state, read, _tip, _change) = zakura_state::init(
+                zakura_state::Config::ephemeral(),
+                &Network::Mainnet,
+                block::Height::MAX,
+                0,
+            )
+            .await
+            .unwrap();
+            let compact = CompactService::new(
+                Arc::clone(&self.index),
+                self.index.state().unwrap(),
+                "main",
+                read,
+            );
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let endpoint = format!("http://{}", listener.local_addr().unwrap());
-            let server = Server::builder().add_service(ReplicatorServer::new(self.service.clone()));
+            let server = Server::builder()
+                .add_service(CompactTxStreamerServer::new(compact))
+                .add_service(ReplicatorServer::new(self.service.clone()));
             tokio::spawn(server.serve_with_incoming(TcpListenerStream::new(listener)));
-            ReplicatorClient::connect(endpoint).await.unwrap()
+            endpoint
+        }
+
+        async fn client(&self) -> ReplicatorClient<Channel> {
+            ReplicatorClient::connect(self.serve().await).await.unwrap()
         }
     }
 
@@ -296,6 +326,22 @@ mod tests {
                 generation: fixture.generation,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn one_listener_serves_both_services() {
+        let fixture = Fixture::new();
+        let endpoint = fixture.serve().await;
+        let mut streamer = CompactTxStreamerClient::connect(endpoint.clone()).await.unwrap();
+        let block = streamer
+            .get_block(BlockId { height: 4_000, hash: Vec::new() })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(block.height, 4_000);
+        let mut replicator = ReplicatorClient::connect(endpoint).await.unwrap();
+        let info = replicator.get_export_info(Empty {}).await.unwrap().into_inner();
+        assert_eq!(info.generation, fixture.generation);
     }
 
     #[tokio::test]
