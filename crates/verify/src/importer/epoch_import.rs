@@ -22,7 +22,6 @@ use super::{
 };
 use crate::{
     epoch::{Epoch, EpochProof, Epochs},
-    fetch::RangeSource,
     manifest::Manifest,
 };
 
@@ -31,8 +30,8 @@ pub(crate) type VerifiedRows = Vec<(Bytes, RangeMeta)>;
 
 /// The import of the epochs of one manifest: the importer, the manifest, and the first epoch to
 /// import. The futures of all epochs use one `EpochImport`.
-pub(crate) struct EpochImport<S> {
-    importer: Importer<S>,
+pub(crate) struct EpochImport {
+    importer: Importer,
     manifest: Manifest,
     /// The position of the first entry of each epoch of the manifest.
     epoch_offsets: Vec<usize>,
@@ -45,9 +44,9 @@ pub(crate) struct EpochImport<S> {
     metrics: ImportMetrics,
 }
 
-impl<S: RangeSource + 'static> EpochImport<S> {
+impl EpochImport {
     pub(crate) fn new(
-        importer: Importer<S>,
+        importer: Importer,
         manifest: Manifest,
         first_epoch: usize,
         first_start_frontiers: Frontiers,

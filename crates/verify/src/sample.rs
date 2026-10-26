@@ -6,7 +6,8 @@
 //! asks the node for the full block at each height, parses it with the parser of the indexer, and
 //! compares the record byte for byte with the record in the blob.
 //!
-//! A pruned node has no block bodies below its prune height. The sampler skips these heights.
+//! A pruned node has no block bodies below its prune height. The sampler gives no block at these
+//! heights, and [`Epoch::sample`] skips them.
 
 use std::{
     panic,
@@ -33,15 +34,11 @@ use crate::{
 /// # Implementation
 ///
 /// Give the best-chain block at a height. Return `None` when the source does not store the body
-/// of the block, and an error when a call fails. [`Sampler::prune_height`] is the lowest height
-/// whose body the source stores: [`Epoch::sample`] does not ask below it.
+/// of the block, and an error when a call fails. [`Epoch::sample`] skips a height with no block.
 #[async_trait]
 pub trait Sampler: Send + Sync {
     /// The full block at `height`, or `None` when the source does not store its body.
     async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError>;
-
-    /// The lowest height whose block body the source stores.
-    fn prune_height(&self) -> u32;
 }
 
 /// How [`Epoch::sample`] picks the heights to compare.
@@ -79,10 +76,10 @@ impl Epoch<'_> {
     /// Compares the records at the heights that `plan` picks with the full blocks of `sampler`.
     ///
     /// `blobs` holds one blob per entry, in order; another count is [`Reject::BlobCount`]. The
-    /// method skips the heights below [`Sampler::prune_height`], and the heights for which the
-    /// sampler has no block. It parses each full block with [`parse_block`], adds the tree
-    /// sizes before the block, and compares the encoded record with the record in the blob. It
-    /// returns the compared heights in ascending order, for `sampled_heights` in `range_meta`.
+    /// method skips the heights for which the sampler has no block. It parses each full block
+    /// with [`parse_block`], adds the tree sizes before the block, and compares the encoded
+    /// record with the record in the blob. It returns the compared heights in ascending order,
+    /// for `sampled_heights` in `range_meta`.
     ///
     /// Run it after [`Epoch::verify`] on a Tokio runtime. It does not check the blob digests,
     /// and it parses and encodes the blocks on the blocking thread pool of the runtime.
@@ -113,16 +110,12 @@ impl Epoch<'_> {
             let (entries, blobs) = (self.entries().len(), blobs.len());
             return Err(Reject::BlobCount { entries, blobs }.into());
         }
-        let prune_height = sampler.prune_height();
         let mut sampled = Vec::new();
         for (entry, blob) in self.entries().iter().zip(blobs) {
             let start = entry.start_height;
             let decoder = RangeDecoder::new(blob.as_ref()).map_err(|_| Check::Decode.at(start))?;
             for offset in plan.offsets(start) {
                 let height = start.saturating_add(offset);
-                if height < prune_height {
-                    continue;
-                }
                 let record =
                     decoder.record(offset as usize).map_err(|_| Check::Decode.at(height))?;
                 let node = |source| EpochError::Node { height, source };
@@ -192,6 +185,11 @@ impl JsonRpcSampler {
         let height = info.prune_height().map_or(0, |height| height.0);
         Ok(self.prune_height.fetch_max(height, Ordering::Relaxed).max(height))
     }
+
+    /// The last read prune height of the node.
+    fn prune_height(&self) -> u32 {
+        self.prune_height.load(Ordering::Relaxed)
+    }
 }
 
 #[async_trait]
@@ -222,10 +220,6 @@ impl Sampler for JsonRpcSampler {
         }
         Ok(Some(block))
     }
-
-    fn prune_height(&self) -> u32 {
-        self.prune_height.load(Ordering::Relaxed)
-    }
 }
 
 #[cfg(test)]
@@ -250,7 +244,8 @@ mod tests {
     /// The height of the one block with shielded data.
     const SHIELDED: u32 = 500;
 
-    /// Full blocks from a table. A call below the prune height panics.
+    /// Full blocks from a table. A call below the prune height gives no block, as a pruned node
+    /// does.
     struct FakeSampler {
         blocks: BTreeMap<u32, RawIndexBlock>,
         prune_height: u32,
@@ -259,12 +254,7 @@ mod tests {
     #[async_trait]
     impl Sampler for FakeSampler {
         async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
-            assert!(height >= self.prune_height, "call for {height} below the prune height");
-            Ok(self.blocks.get(&height).cloned())
-        }
-
-        fn prune_height(&self) -> u32 {
-            self.prune_height
+            Ok(self.blocks.get(&height).filter(|_| height >= self.prune_height).cloned())
         }
     }
 
@@ -351,7 +341,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn heights_below_the_prune_height_are_skipped() {
+    async fn heights_with_no_block_are_skipped() {
         let heights = sample(&records(), 600, RANGE_SIZE as usize, 7).await.unwrap();
 
         assert_eq!(heights, (600..RANGE_SIZE).collect::<Vec<_>>());

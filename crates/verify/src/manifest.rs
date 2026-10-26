@@ -44,8 +44,8 @@ pub const MANIFEST_VERSION: u32 = 1;
 
 /// A snapshot manifest that obeys the rules in the module docs.
 ///
-/// The fields are private. Each way to get a manifest checks the rules: [`Manifest::from_json`],
-/// serde, and [`ManifestBuilder::build`]. Thus a `Manifest` is always valid.
+/// The fields are private. Each way to get a manifest checks the rules: [`Manifest::new`],
+/// [`Manifest::from_json`] and serde. Thus a `Manifest` is always valid.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(try_from = "ManifestFields")]
 pub struct Manifest(ManifestFields);
@@ -61,45 +61,6 @@ struct ManifestFields {
     manifest_version: u32,
     #[serde_as(as = "Vec<EntryJson>")]
     entries: Vec<ManifestEntry>,
-}
-
-/// Builds a [`Manifest`] whose version and `sealed_through` agree with its entries.
-///
-/// ```
-/// use zakura_chain::block;
-/// use ztreamer_indexer::index::range_meta::ManifestEntry;
-/// use ztreamer_verify::manifest::{Manifest, ManifestError};
-///
-/// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
-///     Manifest::builder("Mainnet", genesis).entries(entries).build()
-/// }
-/// ```
-#[derive(Clone, Debug)]
-pub struct ManifestBuilder {
-    network: String,
-    genesis_hash: block::Hash,
-    entries: Vec<ManifestEntry>,
-}
-
-impl ManifestBuilder {
-    /// Sets the entries: one per sealed range, in height order from genesis.
-    pub fn entries(mut self, entries: Vec<ManifestEntry>) -> Self {
-        self.entries = entries;
-        self
-    }
-
-    /// Builds the manifest at [`MANIFEST_VERSION`], with `sealed_through` at the end of the last
-    /// entry, and checks the rules.
-    pub fn build(self) -> Result<Manifest, ManifestError> {
-        ManifestFields {
-            network: self.network,
-            genesis_hash: self.genesis_hash,
-            sealed_through: self.entries.last().map_or(0, |entry| entry.end_height),
-            manifest_version: MANIFEST_VERSION,
-            entries: self.entries,
-        }
-        .try_into()
-    }
 }
 
 /// A manifest that does not parse or does not obey the rules in the module docs.
@@ -160,9 +121,32 @@ pub enum ManifestError {
 }
 
 impl Manifest {
-    /// Starts a [`ManifestBuilder`] for `network` with the genesis block hash.
-    pub fn builder(network: impl Into<String>, genesis_hash: block::Hash) -> ManifestBuilder {
-        ManifestBuilder { network: network.into(), genesis_hash, entries: Vec::new() }
+    /// The manifest of `entries`, one per sealed range in height order from genesis, for
+    /// `network` with the genesis block hash. It is at [`MANIFEST_VERSION`], with
+    /// `sealed_through` at the end of the last entry, and it obeys the rules.
+    ///
+    /// ```
+    /// use zakura_chain::block;
+    /// use ztreamer_indexer::index::range_meta::ManifestEntry;
+    /// use ztreamer_verify::manifest::{Manifest, ManifestError};
+    ///
+    /// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
+    ///     Manifest::new("Mainnet", genesis, entries)
+    /// }
+    /// ```
+    pub fn new(
+        network: impl Into<String>,
+        genesis_hash: block::Hash,
+        entries: Vec<ManifestEntry>,
+    ) -> Result<Self, ManifestError> {
+        ManifestFields {
+            network: network.into(),
+            genesis_hash,
+            sealed_through: entries.last().map_or(0, |entry| entry.end_height),
+            manifest_version: MANIFEST_VERSION,
+            entries,
+        }
+        .try_into()
     }
 
     /// Parses a manifest and checks the rules.
@@ -183,11 +167,6 @@ impl Manifest {
     /// The last height of the last sealed range.
     pub const fn sealed_through(&self) -> u32 {
         self.0.sealed_through
-    }
-
-    /// The manifest format version, [`MANIFEST_VERSION`].
-    pub const fn manifest_version(&self) -> u32 {
-        self.0.manifest_version
     }
 
     /// One entry per sealed range, in height order from genesis.
@@ -496,7 +475,7 @@ mod tests {
         entries[1].frontiers = entries[0].frontiers.clone();
         entries[0].blob_digest = BlobDigest([7; 32]);
         entries[0].blob_len = 121_034_512;
-        Manifest::builder("Mainnet", hash(0)).entries(entries).build().unwrap()
+        Manifest::new("Mainnet", hash(0), entries).unwrap()
     }
 
     /// The fields of [`two_entry_manifest`], to break one rule at a time.
@@ -515,7 +494,7 @@ mod tests {
 
         assert_eq!(Manifest::from_json(&json).unwrap(), manifest);
         assert_eq!(manifest.sealed_through(), 1_999);
-        assert_eq!(manifest.manifest_version(), MANIFEST_VERSION);
+        assert_eq!(manifest.0.manifest_version, MANIFEST_VERSION);
     }
 
     #[test]

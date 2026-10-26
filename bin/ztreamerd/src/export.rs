@@ -122,9 +122,7 @@ impl SnapshotDir {
             .ok_or_else(|| eyre!("the index has no range_meta row for the range at genesis"))?;
         // `ztreamer_verify::epoch::Epochs` closes an epoch at the last entry of a manifest.
         last.epoch_end = true;
-        let manifest = Manifest::builder(network.to_string(), network.genesis_hash())
-            .entries(entries)
-            .build()
+        let manifest = Manifest::new(network.to_string(), network.genesis_hash(), entries)
             .wrap_err("the range_meta rows do not make a valid manifest")?;
         let manifest_path = format!("manifests/{}.json", now.format("%Y-%m-%dT%H%M%SZ"));
         ensure!(
@@ -414,10 +412,9 @@ mod tests {
 
         let bytes = fs::read(out.path().join(manifest_path)).unwrap();
         let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
-        let expected = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
-            .entries(closed(entries.clone()))
-            .build()
-            .unwrap();
+        let expected =
+            Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), closed(entries.clone()))
+                .unwrap();
         assert_eq!(manifest, expected);
         assert_eq!(manifest.sealed_through(), 2_999);
         let json: Value = serde_json::from_slice(&bytes).unwrap();

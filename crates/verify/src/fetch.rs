@@ -1,7 +1,7 @@
 //! Sources of sealed ranges: a snapshot over HTTP, or a peer over the Replicator gRPC service.
 //!
-//! A [`RangeSource`] gives what its export holds, the [`Manifest`], and the bytes of one range
-//! blob from a byte offset. [`Source`] holds one of the two implementations:
+//! A [`RangeSource`] gives the [`Manifest`] of its export, and the bytes of one range blob from
+//! a byte offset. The two implementations are:
 //!
 //! - [`HttpSource`] reads a snapshot directory that `ztreamerd export-snapshot` wrote, below a
 //!   base URL, in the layout of [`crate::snapshot`]. It reads [`Latest`], then the manifest
@@ -17,7 +17,7 @@
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
 //! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
 
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -136,14 +136,6 @@ impl FetchError {
     }
 }
 
-/// What the export of a source holds.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ExportInfo {
-    /// The last height of the last sealed range, or `None` when no range is sealed. A peer can
-    /// list fewer ranges.
-    pub sealed_through: Option<u32>,
-}
-
 /// A source of sealed ranges.
 ///
 /// # Implementation
@@ -151,12 +143,10 @@ pub struct ExportInfo {
 /// Give the manifest only after its checks pass: a [`Manifest`] is always valid, and a signed
 /// source must verify its signatures first. [`RangeSource::fetch_blob`] sends the bytes of the
 /// blob from `offset` to its end, and an error when the transfer stops early. It does not check
-/// the digest: [`Fetcher::blob`] does.
+/// the digest: [`Fetcher::blob`] does. [`Fetcher`] and the importer hold a source as a
+/// `Box<dyn RangeSource>`.
 #[async_trait]
 pub trait RangeSource: Send + Sync {
-    /// What the export of the source holds.
-    async fn export_info(&self) -> Result<ExportInfo, FetchError>;
-
     /// The manifest of the source.
     async fn manifest(&self) -> Result<Manifest, FetchError>;
 
@@ -168,72 +158,35 @@ pub trait RangeSource: Send + Sync {
     ) -> Result<BlobStream, FetchError>;
 }
 
-/// A source of sealed ranges: a snapshot over HTTP, or a peer over gRPC.
-#[derive(Clone, Debug)]
-pub enum Source {
-    /// A snapshot directory below a base URL.
-    Http(Box<HttpSource>),
-    /// A ztreamer that serves the Replicator gRPC service.
-    Peer(PeerSource),
-}
-
-#[async_trait]
-impl RangeSource for Source {
-    async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-        match self {
-            Self::Http(source) => source.export_info().await,
-            Self::Peer(source) => source.export_info().await,
-        }
-    }
-
-    async fn manifest(&self) -> Result<Manifest, FetchError> {
-        match self {
-            Self::Http(source) => source.manifest().await,
-            Self::Peer(source) => source.manifest().await,
-        }
-    }
-
-    async fn fetch_blob(
-        &self,
-        entry: &ManifestEntry,
-        offset: u64,
-    ) -> Result<BlobStream, FetchError> {
-        match self {
-            Self::Http(source) => source.fetch_blob(entry, offset).await,
-            Self::Peer(source) => source.fetch_blob(entry, offset).await,
-        }
-    }
-}
-
 /// Reads complete blobs from a source, and checks the length and the digest of each blob.
 ///
 /// ```no_run
 /// use ed25519_dalek::VerifyingKey;
-/// use ztreamer_verify::fetch::{FetchError, Fetcher, HttpSource, Source};
+/// use ztreamer_verify::fetch::{FetchError, Fetcher, HttpSource};
 ///
 /// # async fn run(key: VerifyingKey) -> Result<(), FetchError> {
 /// let source = HttpSource::new("https://snapshots.example/mainnet".parse().unwrap(), key)?;
-/// let fetcher = Fetcher::new(Source::Http(Box::new(source)));
+/// let fetcher = Fetcher::new(Box::new(source));
 /// let manifest = fetcher.manifest().await?;
 /// let blob = fetcher.blob(&manifest.entries()[0]).await?;
 /// # let _ = blob;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
-pub struct Fetcher<S = Source> {
-    source: S,
+pub struct Fetcher {
+    source: Box<dyn RangeSource>,
 }
 
-impl<S: RangeSource> Fetcher<S> {
-    /// A fetcher of the blobs of `source`.
-    pub const fn new(source: S) -> Self {
-        Self { source }
+impl fmt::Debug for Fetcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Fetcher").finish_non_exhaustive()
     }
+}
 
-    /// What the export of the source holds.
-    pub async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-        self.source.export_info().await
+impl Fetcher {
+    /// A fetcher of the blobs of `source`.
+    pub fn new(source: Box<dyn RangeSource>) -> Self {
+        Self { source }
     }
 
     /// The manifest of the source.
@@ -365,11 +318,6 @@ impl HttpSource {
 
 #[async_trait]
 impl RangeSource for HttpSource {
-    async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-        let latest = self.latest().await?;
-        Ok(ExportInfo { sealed_through: Some(latest.sealed_through) })
-    }
-
     async fn manifest(&self) -> Result<Manifest, FetchError> {
         let latest = self.latest().await?;
         let bytes = self.signed(&latest.manifest).await?;
@@ -473,11 +421,6 @@ impl PeerSource {
 
 #[async_trait]
 impl RangeSource for PeerSource {
-    async fn export_info(&self) -> Result<ExportInfo, FetchError> {
-        let info = self.client.clone().get_export_info(replicate::Empty {}).await?.into_inner();
-        Ok(ExportInfo { sealed_through: info.sealed_through })
-    }
-
     /// Builds the manifest from the listed ranges: the ranges that follow each other from
     /// genesis, up to the last one that closes an epoch.
     async fn manifest(&self) -> Result<Manifest, FetchError> {
@@ -501,7 +444,7 @@ impl RangeSource for PeerSource {
         }
         let closed = entries.iter().rposition(|entry| entry.epoch_end).map_or(0, |at| at + 1);
         entries.truncate(closed);
-        Ok(Manifest::builder(info.network, block::Hash(genesis_hash)).entries(entries).build()?)
+        Ok(Manifest::new(info.network, block::Hash(genesis_hash), entries)?)
     }
 
     async fn fetch_blob(
@@ -556,9 +499,7 @@ mod tests {
 
         fn fetcher(&self, seed: [u8; 32]) -> Fetcher {
             let key = SigningKey::from_bytes(&seed).verifying_key();
-            Fetcher::new(Source::Http(Box::new(
-                HttpSource::new(self.server.base.clone(), key).unwrap(),
-            )))
+            Fetcher::new(Box::new(HttpSource::new(self.server.base.clone(), key).unwrap()))
         }
 
         fn blob(&self, start: u32) -> Vec<u8> {
@@ -572,8 +513,6 @@ mod tests {
         let fetcher = http.fetcher(SEED);
 
         assert_eq!(fetcher.manifest().await.unwrap(), http.snapshot.manifest);
-        let info = fetcher.export_info().await.unwrap();
-        assert_eq!(info.sealed_through, Some(RANGES * RANGE_SIZE - 1));
         let entry = &http.snapshot.manifest.entries()[3];
         assert_eq!(fetcher.blob(entry).await.unwrap(), http.blob(3_000));
     }
@@ -648,7 +587,6 @@ mod tests {
         let mut expected = source.entries();
         expected.truncate(10);
         assert_eq!(manifest.entries(), expected);
-        assert_eq!(peer.export_info().await.unwrap().sealed_through, Some(11_999));
         let entry = &manifest.entries()[2];
         let blob = source.index.read_sealed_range_bytes(2_000).unwrap().unwrap();
         let mut tail = Vec::new();
@@ -657,7 +595,7 @@ mod tests {
             tail.extend_from_slice(&chunk.unwrap());
         }
         assert_eq!(tail, blob[100..]);
-        assert_eq!(Fetcher::new(Source::Peer(peer)).blob(entry).await.unwrap(), blob);
+        assert_eq!(Fetcher::new(Box::new(peer)).blob(entry).await.unwrap(), blob);
     }
 
     /// A source index and a [`PeerServer`] for it with `stream_limit` streams.
@@ -672,7 +610,7 @@ mod tests {
             let source = SourceIndex::new(RANGES).await;
             let server = PeerServer::start(&source, stream_limit).await;
             let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
-            Self { source, server, fetcher: Fetcher::new(Source::Peer(peer)) }
+            Self { source, server, fetcher: Fetcher::new(Box::new(peer)) }
         }
 
         /// Fetches the blobs of the first ten ranges at the same time, and checks each one.

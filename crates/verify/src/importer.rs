@@ -57,7 +57,7 @@ use self::{epoch_import::EpochImport, sources::Sources};
 use crate::{
     attest::{Attestor, EpochError, NodeError},
     epoch::Epoch,
-    fetch::{FetchError, RangeSource, Source},
+    fetch::{FetchError, RangeSource},
     manifest::Manifest,
     range::Reject,
     sample::{SamplePlan, Sampler},
@@ -234,12 +234,12 @@ impl ImportError {
 /// use tokio::sync::watch;
 /// use ztreamer_indexer::index::Index;
 /// use ztreamer_verify::{
-///     fetch::Source,
+///     fetch::RangeSource,
 ///     importer::{ImportConfig, ImportError, ImportReport, Importer, TrustedNode},
 /// };
 ///
 /// # async fn run(
-/// #     sources: Vec<Source>,
+/// #     sources: Vec<Box<dyn RangeSource>>,
 /// #     node: TrustedNode,
 /// #     index: Arc<Index>,
 /// #     config: ImportConfig,
@@ -250,17 +250,17 @@ impl ImportError {
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Importer<S = Source> {
-    sources: Sources<S>,
+pub struct Importer {
+    sources: Sources,
     node: TrustedNode,
     index: Arc<Index>,
     config: ImportConfig,
 }
 
-impl<S: RangeSource + 'static> Importer<S> {
+impl Importer {
     /// An importer of the ranges of `sources` into `index`, checked against `node`.
     pub fn new(
-        sources: Vec<S>,
+        sources: Vec<Box<dyn RangeSource>>,
         node: TrustedNode,
         index: Arc<Index>,
         config: ImportConfig,
@@ -464,10 +464,6 @@ mod tests {
         async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
             Ok(Some(raw_block(height)))
         }
-
-        fn prune_height(&self) -> u32 {
-            0
-        }
     }
 
     /// A source index, signed snapshots of it over HTTP, and an empty target index.
@@ -531,14 +527,15 @@ mod tests {
         fn importer(&self, attestor: Arc<FakeAttestor>, network: Network) -> Importer {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
             let sources = self.servers.iter().map(|server| {
-                Source::Http(Box::new(HttpSource::new(server.base.clone(), key).unwrap()))
+                let source = HttpSource::new(server.base.clone(), key).unwrap();
+                Box::new(source) as Box<dyn RangeSource>
             });
             self.importer_with_sources(sources.collect(), attestor, network)
         }
 
         fn importer_with_sources(
             &self,
-            sources: Vec<Source>,
+            sources: Vec<Box<dyn RangeSource>>,
             attestor: Arc<FakeAttestor>,
             network: Network,
         ) -> Importer {
@@ -629,7 +626,7 @@ mod tests {
         let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
         let (_stop, shutdown) = watch::channel(false);
         let importer = import.importer_with_sources(
-            vec![Source::Peer(peer)],
+            vec![Box::new(peer)],
             import.fake_attestor(None),
             Network::Mainnet,
         );

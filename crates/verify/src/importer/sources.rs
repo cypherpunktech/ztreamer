@@ -17,15 +17,15 @@ use crate::{
 
 /// The sources of one import, in the order of the caller.
 #[derive(Debug)]
-pub(crate) struct Sources<S> {
+pub(crate) struct Sources {
     /// The fetcher of each source, and its `ztreamer.replicate.bytes_fetched_total`.
-    fetchers: Vec<(Fetcher<S>, Counter)>,
+    fetchers: Vec<(Fetcher, Counter)>,
     /// The count of blob fetches. It selects the first source that a fetch asks.
     blob_fetch_count: AtomicUsize,
 }
 
-impl<S: RangeSource> Sources<S> {
-    pub(crate) fn new(sources: Vec<S>) -> Self {
+impl Sources {
+    pub(crate) fn new(sources: Vec<Box<dyn RangeSource>>) -> Self {
         let fetchers = sources
             .into_iter()
             .enumerate()

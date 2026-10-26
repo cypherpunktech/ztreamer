@@ -125,10 +125,8 @@ impl Snapshot {
 
     pub(crate) fn export(source: &SourceIndex) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
-            .entries(source.entries())
-            .build()
-            .unwrap();
+        let manifest =
+            Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), source.entries()).unwrap();
         for sub in ["ranges", "manifests"] {
             fs::create_dir(dir.path().join(sub)).unwrap();
         }
@@ -146,10 +144,7 @@ impl Snapshot {
     /// an epoch.
     pub(crate) fn keep_first_ranges(&mut self, ranges: usize) {
         let entries = self.manifest.entries()[..ranges].to_vec();
-        self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
-            .entries(entries)
-            .build()
-            .unwrap();
+        self.manifest = Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), entries).unwrap();
         self.write_manifest_and_latest();
     }
 
@@ -175,10 +170,7 @@ impl Snapshot {
         entry.blob_digest = BlobDigest::hash(blob);
         entry.blob_len = blob.len() as u64;
         fs::write(self.range_path(entry), blob).unwrap();
-        self.manifest = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
-            .entries(entries)
-            .build()
-            .unwrap();
+        self.manifest = Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), entries).unwrap();
         self.write_signed(Self::MANIFEST, &serde_json::to_vec(&self.manifest).unwrap());
     }
 

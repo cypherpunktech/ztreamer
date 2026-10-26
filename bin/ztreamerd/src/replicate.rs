@@ -25,7 +25,7 @@ use ztreamer_remote::ZakuraClient;
 use ztreamer_service::RemoteBackend;
 use ztreamer_verify::{
     attest::JsonRpcAttestor,
-    fetch::{HttpSource, PeerSource, Source},
+    fetch::{HttpSource, PeerSource, RangeSource},
     importer::{ImportConfig, ImportError, Importer, TrustedNode},
     sample::{JsonRpcSampler, SamplePlan},
     snapshot::SNAPSHOT_PUBKEY,
@@ -97,13 +97,15 @@ impl fmt::Display for ReplicaSource {
 
 impl ReplicaSource {
     /// The source of ranges at this address. `key` signs a snapshot. A peer gets a connection.
-    async fn connect(&self, key: VerifyingKey) -> Result<Source> {
+    async fn connect(&self, key: VerifyingKey) -> Result<Box<dyn RangeSource>> {
         match self {
-            Self::Snapshot(base) => Ok(Source::Http(Box::new(HttpSource::new(base.clone(), key)?))),
-            Self::Peer(endpoint) => PeerSource::connect(endpoint.clone())
-                .await
-                .map(Source::Peer)
-                .wrap_err_with(|| format!("connect to the peer {self}")),
+            Self::Snapshot(base) => Ok(Box::new(HttpSource::new(base.clone(), key)?)),
+            Self::Peer(endpoint) => {
+                let peer = PeerSource::connect(endpoint.clone())
+                    .await
+                    .wrap_err_with(|| format!("connect to the peer {self}"))?;
+                Ok(Box::new(peer))
+            }
         }
     }
 }
