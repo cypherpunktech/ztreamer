@@ -58,7 +58,7 @@ impl From<&ManifestEntry> for RangeLink {
 
 /// A check that a range can fail after its digest matches. [`Check::StartFrontier`] to
 /// [`Check::SubtreeRoots`] are the checks of [`Epoch::verify`](crate::epoch::Epoch::verify).
-/// The `Attested` checks are the checks of [`attest_epoch`](crate::attest::attest_epoch).
+/// The `Attested` checks are the checks of [`Epoch::attest`](crate::epoch::Epoch::attest).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Check {
     /// The blob format version is not `range_version`.

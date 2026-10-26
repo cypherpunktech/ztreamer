@@ -1,7 +1,7 @@
 //! Attestation: the node confirms what an epoch rebuilt.
 //!
 //! [`Epoch::verify`](crate::epoch::Epoch::verify) proves that the ranges of an epoch agree with
-//! the manifest. [`attest_epoch`] then asks the node about the end of the epoch, once: the block
+//! the manifest. [`Epoch::attest`] then asks the node about the end of the epoch, once: the block
 //! hash, the three tree roots, and the root of each subtree that the epoch completed. When all
 //! answers agree, it returns the [`Attested`] record that the importer keeps in `range_meta`.
 //!
@@ -32,9 +32,9 @@ use crate::{
 /// The most answers of each kind that a [`JsonRpcAttestor`] keeps.
 pub const CACHE_CAPACITY: usize = 1024;
 
-/// Why an [`Attestor`] gave no answer.
+/// Why a node gave no answer.
 #[derive(Debug, thiserror::Error)]
-pub enum AttestError {
+pub enum NodeError {
     /// The call to the node failed.
     #[error(transparent)]
     Rpc(#[from] RpcError),
@@ -73,7 +73,7 @@ pub enum AttestError {
     },
 }
 
-/// Why [`attest_epoch`] did not attest an epoch.
+/// Why [`Epoch::attest`] did not attest an epoch.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochError {
     /// A range of the epoch is wrong, or a blob must be fetched again.
@@ -86,7 +86,7 @@ pub enum EpochError {
         height: u32,
         /// Why the node gave no answer.
         #[source]
-        source: AttestError,
+        source: NodeError,
     },
 }
 
@@ -94,79 +94,82 @@ pub enum EpochError {
 ///
 /// # Implementation
 ///
-/// Give the answers of the best chain. Return an [`AttestError`] when there is no answer, not a
-/// default value: [`attest_epoch`] rejects a range on an answer that does not agree. A root is
+/// Give the answers of the best chain. Return an [`NodeError`] when there is no answer, not a
+/// default value: [`Epoch::attest`] rejects a range on an answer that does not agree. A root is
 /// `None` when the pool is not active at the height. An implementation may cache its answers,
 /// because the answers at a height below the tip do not change.
 #[async_trait]
 pub trait Attestor: Send + Sync {
     /// The hash of the best-chain block at `height`.
-    async fn block_hash(&self, height: u32) -> Result<block::Hash, AttestError>;
+    async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError>;
 
     /// The three note commitment tree roots after the block at `height`.
-    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, AttestError>;
+    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError>;
 
     /// The root of the completed subtree `index` of `pool`.
     async fn subtree_root(
         &self,
         pool: Pool,
         index: NoteCommitmentSubtreeIndex,
-    ) -> Result<SubtreeNode, AttestError>;
+    ) -> Result<SubtreeNode, NodeError>;
 }
 
-/// Compares `proof` with the answers of `attestor` at the end of `epoch`.
-///
-/// The function compares the end hash of the last entry, the three roots of `proof`, and each
-/// subtree root that the epoch completed. A wrong subtree root rejects at the end height of the
-/// entry that lists it. It returns the answers as an [`Attested`] record for the last entry of
-/// the epoch.
-///
-/// ```
-/// use ztreamer_verify::{
-///     attest::{Attestor, EpochError, attest_epoch},
-///     epoch::Epoch,
-/// };
-/// use ztreamer_indexer::index::range_meta::{Attested, Frontiers};
-///
-/// # async fn run(
-/// #     epoch: Epoch<'_>,
-/// #     blobs: Vec<Vec<u8>>,
-/// #     start: Frontiers,
-/// #     node: &dyn Attestor,
-/// # ) -> Result<Attested, EpochError> {
-/// let proof = epoch.verify(&blobs, &start)?;
-/// attest_epoch(&proof, &epoch, node).await
-/// # }
-/// ```
-pub async fn attest_epoch(
-    proof: &EpochProof,
-    epoch: &Epoch<'_>,
-    attestor: &dyn Attestor,
-) -> Result<Attested, EpochError> {
-    let height = epoch.end_height();
-    let node = |source| EpochError::Node { height, source };
+impl Epoch<'_> {
+    /// Compares `proof`, the result of [`Epoch::verify`], with the answers of `attestor` at the
+    /// end of the epoch.
+    ///
+    /// The method compares [`Epoch::end_hash`], the three roots of `proof`, and each subtree
+    /// root that the epoch completed. A wrong subtree root rejects at the end height of the entry
+    /// that lists it. It returns the answers as an [`Attested`] record for the last entry of the
+    /// epoch.
+    ///
+    /// ```
+    /// use ztreamer_indexer::index::range_meta::{Attested, Frontiers};
+    /// use ztreamer_verify::{
+    ///     attest::{Attestor, EpochError},
+    ///     epoch::Epoch,
+    /// };
+    ///
+    /// # async fn run(
+    /// #     epoch: Epoch<'_>,
+    /// #     blobs: Vec<Vec<u8>>,
+    /// #     start: Frontiers,
+    /// #     node: &dyn Attestor,
+    /// # ) -> Result<Attested, EpochError> {
+    /// let proof = epoch.verify(&blobs, &start)?;
+    /// epoch.attest(&proof, node).await
+    /// # }
+    /// ```
+    pub async fn attest(
+        &self,
+        proof: &EpochProof,
+        attestor: &dyn Attestor,
+    ) -> Result<Attested, EpochError> {
+        let height = self.end_height();
+        let node = |source| EpochError::Node { height, source };
 
-    let end_hash = attestor.block_hash(height).await.map_err(node)?;
-    if epoch.entries().last().map(|entry| entry.end_hash) != Some(end_hash) {
-        return Err(Check::AttestedHash.at(height).into());
-    }
-    let roots = attestor.tree_roots(height).await.map_err(node)?;
-    if roots != proof.roots {
-        return Err(Check::AttestedRoots.at(height).into());
-    }
-    for completed in &proof.completed {
-        let root = attestor
-            .subtree_root(Pool::of(&completed.root), completed.index)
-            .await
-            .map_err(node)?;
-        if root != completed.root {
-            let entry =
-                epoch.entries().iter().find(|entry| entry.subtree_roots.contains(completed));
-            let height = entry.map_or(height, |entry| entry.end_height);
-            return Err(Check::AttestedSubtree.at(height).into());
+        let end_hash = attestor.block_hash(height).await.map_err(node)?;
+        if end_hash != self.end_hash() {
+            return Err(Check::AttestedHash.at(height).into());
         }
+        let roots = attestor.tree_roots(height).await.map_err(node)?;
+        if roots != proof.roots {
+            return Err(Check::AttestedRoots.at(height).into());
+        }
+        for completed in &proof.completed {
+            let root = attestor
+                .subtree_root(Pool::from(&completed.root), completed.index)
+                .await
+                .map_err(node)?;
+            if root != completed.root {
+                let entry =
+                    self.entries().iter().find(|entry| entry.subtree_roots.contains(completed));
+                let height = entry.map_or(height, |entry| entry.end_height);
+                return Err(Check::AttestedSubtree.at(height).into());
+            }
+        }
+        Ok(Attested { end_hash, roots, subtree_roots: proof.completed.clone() })
     }
-    Ok(Attested { end_hash, roots, subtree_roots: proof.completed.clone() })
 }
 
 /// An [`Attestor`] that asks a zakura node over JSON-RPC, and keeps the answers.
@@ -203,7 +206,7 @@ impl JsonRpcAttestor {
 
 #[async_trait]
 impl Attestor for JsonRpcAttestor {
-    async fn block_hash(&self, height: u32) -> Result<block::Hash, AttestError> {
+    async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError> {
         self.hashes
             .get_or_ask(height, || async {
                 Ok(self.node.get_block_hash(block::Height(height)).await?.hash())
@@ -211,14 +214,14 @@ impl Attestor for JsonRpcAttestor {
             .await
     }
 
-    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, AttestError> {
+    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
         self.roots
             .get_or_ask(height, || async {
                 let state =
                     self.node.z_get_treestate(HashOrHeight::Height(block::Height(height))).await?;
                 let actual = state.height().0;
                 if actual != height {
-                    return Err(AttestError::Height { expected: height, actual });
+                    return Err(NodeError::Height { expected: height, actual });
                 }
                 Ok(PoolRoots {
                     sapling: final_root(
@@ -242,29 +245,29 @@ impl Attestor for JsonRpcAttestor {
         &self,
         pool: Pool,
         index: NoteCommitmentSubtreeIndex,
-    ) -> Result<SubtreeNode, AttestError> {
+    ) -> Result<SubtreeNode, NodeError> {
         self.subtrees
             .get_or_ask((pool, index), || async {
                 let one = Some(NoteCommitmentSubtreeIndex(1));
-                let response = self.node.z_get_subtrees_by_index(pool.name(), index, one).await?;
+                let response = self.node.z_get_subtrees_by_index(pool.as_str(), index, one).await?;
                 let subtree = response
                     .subtrees()
                     .first()
                     .filter(|_| response.start_index() == index)
-                    .ok_or(AttestError::MissingSubtree { pool, index })?;
+                    .ok_or(NodeError::MissingSubtree { pool, index })?;
                 hex::decode(&subtree.root)
                     .ok()
                     .and_then(|bytes| bytes.try_into().ok())
                     .and_then(|bytes| pool.subtree_node(bytes))
-                    .ok_or(AttestError::SubtreeRoot { pool, index })
+                    .ok_or(NodeError::SubtreeRoot { pool, index })
             })
             .await
     }
 }
 
 /// Reads a `finalRoot` in the byte order of `pool`. See [`ztreamer_indexer::frontier`].
-fn final_root<R: FromRpc>(pool: Pool, root: Option<&[u8]>) -> Result<Option<R>, AttestError> {
-    root.map(R::from_rpc_bytes).transpose().map_err(|source| AttestError::Root { pool, source })
+fn final_root<R: FromRpc>(pool: Pool, root: Option<&[u8]>) -> Result<Option<R>, NodeError> {
+    root.map(R::from_rpc_bytes).transpose().map_err(|source| NodeError::Root { pool, source })
 }
 
 /// Answers that a node gave, by key. The map drops its lowest key when it is full.
@@ -282,9 +285,9 @@ impl<K: Ord, V: Copy> Answers<K, V> {
     }
 
     /// The answer for `key`. If the map does not have it, `ask` gives it and the map keeps it.
-    async fn get_or_ask<F>(&self, key: K, ask: impl FnOnce() -> F) -> Result<V, AttestError>
+    async fn get_or_ask<F>(&self, key: K, ask: impl FnOnce() -> F) -> Result<V, NodeError>
     where
-        F: Future<Output = Result<V, AttestError>>,
+        F: Future<Output = Result<V, NodeError>>,
     {
         let known = self.map().get(&key).copied();
         if let Some(value) = known {
@@ -350,17 +353,17 @@ mod tests {
         }
     }
 
-    fn no_answer() -> AttestError {
-        AttestError::Rpc(RpcError::Config("no answer".to_owned()))
+    fn no_answer() -> NodeError {
+        NodeError::Rpc(RpcError::Config("no answer".to_owned()))
     }
 
     #[async_trait]
     impl Attestor for FakeAttestor {
-        async fn block_hash(&self, height: u32) -> Result<block::Hash, AttestError> {
+        async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError> {
             self.hashes.get(&height).copied().ok_or_else(no_answer)
         }
 
-        async fn tree_roots(&self, height: u32) -> Result<PoolRoots, AttestError> {
+        async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
             self.roots.get(&height).copied().ok_or_else(no_answer)
         }
 
@@ -368,7 +371,7 @@ mod tests {
             &self,
             pool: Pool,
             index: NoteCommitmentSubtreeIndex,
-        ) -> Result<SubtreeNode, AttestError> {
+        ) -> Result<SubtreeNode, NodeError> {
             self.subtrees.get(&(pool, index)).copied().ok_or_else(no_answer)
         }
     }
@@ -384,7 +387,7 @@ mod tests {
             roots: roots(),
             completed: vec![completed],
         };
-        attest_epoch(&proof, &Epochs::new(&entries).next().unwrap(), attestor).await
+        Epochs::new(&entries).next().unwrap().attest(&proof, attestor).await
     }
 
     fn assert_rejected(result: Result<Attested, EpochError>, check: Check, height: u32) {
@@ -503,10 +506,7 @@ mod tests {
 
         let error = attestor.tree_roots(2_999).await.unwrap_err();
 
-        assert!(
-            matches!(error, AttestError::Height { expected: 2_999, actual: 2_998 }),
-            "{error:?}"
-        );
+        assert!(matches!(error, NodeError::Height { expected: 2_999, actual: 2_998 }), "{error:?}");
     }
 
     #[tokio::test]
@@ -517,7 +517,7 @@ mod tests {
         let error = attestor.subtree_root(Pool::Sapling, other).await.unwrap_err();
 
         assert!(
-            matches!(error, AttestError::MissingSubtree { pool: Pool::Sapling, index } if index == other),
+            matches!(error, NodeError::MissingSubtree { pool: Pool::Sapling, index } if index == other),
             "{error:?}"
         );
     }

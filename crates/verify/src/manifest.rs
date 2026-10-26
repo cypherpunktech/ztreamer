@@ -325,20 +325,11 @@ pub enum Pool {
 
 impl Pool {
     /// The name of the pool in the manifest and in `z_getsubtreesbyindex`.
-    pub const fn name(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Sapling => "sapling",
             Self::Orchard => "orchard",
             Self::Ironwood => "ironwood",
-        }
-    }
-
-    /// The pool of a subtree root.
-    pub const fn of(node: &SubtreeNode) -> Self {
-        match node {
-            SubtreeNode::Sapling(_) => Self::Sapling,
-            SubtreeNode::Orchard(_) => Self::Orchard,
-            SubtreeNode::Ironwood(_) => Self::Ironwood,
         }
     }
 
@@ -351,6 +342,17 @@ impl Pool {
             }
             Self::Orchard => orchard::tree::Node::try_from(bytes).ok().map(SubtreeNode::Orchard),
             Self::Ironwood => ironwood::tree::Node::try_from(bytes).ok().map(SubtreeNode::Ironwood),
+        }
+    }
+}
+
+impl From<&SubtreeNode> for Pool {
+    /// The pool of a subtree root.
+    fn from(node: &SubtreeNode) -> Self {
+        match node {
+            SubtreeNode::Sapling(_) => Self::Sapling,
+            SubtreeNode::Orchard(_) => Self::Orchard,
+            SubtreeNode::Ironwood(_) => Self::Ironwood,
         }
     }
 }

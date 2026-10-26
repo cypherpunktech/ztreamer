@@ -13,7 +13,7 @@
 use std::iter::FusedIterator;
 
 use pasta_curves::{group::ff::PrimeField, pallas};
-use zakura_chain::{ironwood, orchard, sapling};
+use zakura_chain::{block, ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     frontier::{FromRpc, RpcDecodeError},
@@ -53,6 +53,11 @@ impl<'a> Epoch<'a> {
     /// The last height of the epoch. The node attests the tree roots at this height.
     pub const fn end_height(&self) -> u32 {
         self.entries.last().expect("an epoch is never empty").end_height
+    }
+
+    /// The hash of the last block of the epoch. The node attests it at [`Epoch::end_height`].
+    pub const fn end_hash(&self) -> block::Hash {
+        self.entries.last().expect("an epoch is never empty").end_hash
     }
 
     /// The note commitments that the epoch adds, over all three pools.
