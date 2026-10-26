@@ -20,8 +20,9 @@
 //! ```
 //!
 //! Block hashes are hex in display order, as the node prints them. A frontier is the hex of the
-//! `zcashd` RPC tree encoding; an empty string means that the pool was not active. A subtree root
-//! is the hex of the pool's byte order, as `z_getsubtreesbyindex` prints it.
+//! `zcashd` RPC tree encoding. An empty string means that the pool is not active; an active pool
+//! with an empty tree has the encoding of the empty tree. A subtree root is the hex of the pool's
+//! byte order, as `z_getsubtreesbyindex` prints it.
 //!
 //! The entries convert to [`ManifestEntry`], so that the indexer stays free of serde.
 
@@ -37,6 +38,9 @@ use ztreamer_indexer::{
 };
 
 use crate::epoch::{Epoch, epochs};
+
+/// The manifest format version that this crate reads.
+pub const MANIFEST_VERSION: u32 = 1;
 
 /// A snapshot manifest.
 #[serde_as]
@@ -62,6 +66,20 @@ pub enum ManifestError {
     /// The JSON does not parse into a manifest.
     #[error("manifest JSON is not valid")]
     Json(#[from] serde_json::Error),
+    /// The manifest format version is not [`MANIFEST_VERSION`].
+    #[error("unsupported manifest version {version}")]
+    Version {
+        /// The version in the manifest.
+        version: u32,
+    },
+    /// `sealed_through` is not the last height of the last entry.
+    #[error("sealed_through {sealed_through} is not the end of the last entry ({last_end:?})")]
+    SealedThrough {
+        /// The `sealed_through` of the manifest.
+        sealed_through: u32,
+        /// The last height of the last entry, or `None` when the manifest has no entries.
+        last_end: Option<u32>,
+    },
     /// The entry does not start one height after the previous entry, or at genesis.
     #[error("entry {index} starts at {start_height}, not after the previous entry")]
     Discontiguous {
@@ -79,6 +97,13 @@ pub enum ManifestError {
     /// A tree size of the entry is smaller than in the previous entry.
     #[error("entry {index} has a smaller tree than the previous entry")]
     TreeSizes {
+        /// The position of the entry in the manifest.
+        index: usize,
+    },
+    /// A frontier of the entry is empty, but the same frontier of the previous entry is not. An
+    /// empty frontier means that the pool is not active, and a pool does not become inactive.
+    #[error("entry {index} has an empty frontier for a pool that is active")]
+    PoolInactive {
         /// The position of the entry in the manifest.
         index: usize,
     },
@@ -100,12 +125,27 @@ impl Manifest {
         Ok(manifest)
     }
 
-    /// Checks that the entries are one aligned range each, contiguous from genesis, with tree
-    /// sizes that do not decrease, and that `epoch_end` agrees with [`epochs`].
+    /// Checks that:
+    ///
+    /// - the version is [`MANIFEST_VERSION`];
+    /// - the entries are one aligned range each, contiguous from genesis, with tree sizes that
+    ///   do not decrease, and with no pool that becomes inactive;
+    /// - `sealed_through` is the last height of the last entry;
+    /// - `epoch_end` agrees with [`epochs`].
     pub fn validate(&self) -> Result<(), ManifestError> {
+        if self.manifest_version != MANIFEST_VERSION {
+            return Err(ManifestError::Version { version: self.manifest_version });
+        }
         self.entries.iter().enumerate().try_fold(None, |previous, (index, entry)| {
             check_link(index, previous, entry).map(|()| Some(entry))
         })?;
+        let last_end = self.entries.last().map(|entry| entry.end_height);
+        if last_end != Some(self.sealed_through) {
+            return Err(ManifestError::SealedThrough {
+                sealed_through: self.sealed_through,
+                last_end,
+            });
+        }
         epochs(&self.entries)
             .iter()
             .flat_map(|epoch| {
@@ -146,7 +186,22 @@ fn check_link(
     {
         return Err(ManifestError::TreeSizes { index });
     }
+    if previous.is_some_and(|previous| pool_deactivates(&previous.frontiers, &entry.frontiers)) {
+        return Err(ManifestError::PoolInactive { index });
+    }
     Ok(())
+}
+
+/// Whether a pool has a frontier in `before` and none in `after`.
+///
+/// An empty frontier means that the pool is not active: `z_gettreestate` gives no tree for it.
+/// An active pool always has a frontier, also when its tree is empty. A pool does not become
+/// inactive, so `true` means that `after` is wrong.
+pub(crate) fn pool_deactivates(before: &Frontiers, after: &Frontiers) -> bool {
+    let deactivates = |before: &[u8], after: &[u8]| !before.is_empty() && after.is_empty();
+    deactivates(&before.sapling, &after.sapling)
+        || deactivates(&before.orchard, &after.orchard)
+        || deactivates(&before.ironwood, &after.ironwood)
 }
 
 /// The JSON form of a [`ManifestEntry`].
@@ -330,6 +385,7 @@ mod tests {
                 root: SubtreeNode::Ironwood(ironwood::tree::Node::try_from([3; 32]).unwrap()),
             },
         ];
+        entries[1].frontiers = entries[0].frontiers.clone();
         entries[0].blob_digest = BlobDigest([7; 32]);
         entries[0].blob_len = 121_034_512;
         Manifest {
@@ -423,6 +479,39 @@ mod tests {
     }
 
     #[test]
+    fn a_wrong_version_or_sealed_through_is_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.manifest_version = 2;
+        let error = manifest.validate().unwrap_err();
+        assert!(matches!(error, ManifestError::Version { version: 2 }), "{error:?}");
+
+        let mut manifest = two_entry_manifest();
+        manifest.sealed_through = 2_999;
+        let error = manifest.validate().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ManifestError::SealedThrough { sealed_through: 2_999, last_end: Some(1_999) }
+            ),
+            "{error:?}"
+        );
+
+        manifest.entries.clear();
+        let error = manifest.validate().unwrap_err();
+        assert!(matches!(error, ManifestError::SealedThrough { last_end: None, .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_pool_that_becomes_inactive_is_refused() {
+        let mut manifest = two_entry_manifest();
+        manifest.entries[1].frontiers.orchard.clear();
+
+        let error = manifest.validate().unwrap_err();
+
+        assert!(matches!(error, ManifestError::PoolInactive { index: 1 }), "{error:?}");
+    }
+
+    #[test]
     fn a_wrong_epoch_end_is_refused() {
         let mut manifest = two_entry_manifest();
         manifest.entries[0].epoch_end = true;
@@ -433,6 +522,7 @@ mod tests {
         );
 
         manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+        manifest.sealed_through = 11_999;
         manifest.entries[9].epoch_end = false;
         let error = manifest.validate().unwrap_err();
         assert!(matches!(error, ManifestError::EpochEnd { index: 9, expected: true }), "{error:?}");
