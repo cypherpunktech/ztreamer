@@ -1,0 +1,12 @@
+Oct 26 16:32:24 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:24.268608Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.297612Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.298334Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/var/lib/ztreamer/cache/state/v29/mainnet"
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.304792Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.305020Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/var/lib/ztreamer/cache/state/v29/mainnet"
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.305981Z  INFO zakura_state::service: waiting for the block write task to finish
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.356201Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+Oct 26 16:32:31 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:31.356387Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+Oct 26 16:32:37 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:32:37.360037Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+Oct 26 16:32:39 torvus-ovh systemd[1]: ztreamer.service: Deactivated successfully.
+Oct 26 16:32:39 torvus-ovh systemd[1]: Stopped ztreamer.service - Ztreamer light-wallet server with embedded archive Zakura mainnet node.
+Oct 26 16:32:39 torvus-ovh systemd[1]: ztreamer.service: Consumed 1h 40min 660ms CPU time over 3d 20h 48min 24.123s wall clock time, 16G memory peak.

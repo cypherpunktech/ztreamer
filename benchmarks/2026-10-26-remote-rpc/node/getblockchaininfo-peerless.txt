@@ -1,0 +1,1 @@
+{'chain': 'main', 'blocks': 3531461, 'bestblockhash': '000000000003995179a2e195a755c9a28b1d7c4eadfc6b0082d7e85af2c7f132', 'verificationprogress': 0.9999983009893623, 'initial_block_download_complete': None, 'pruned': False, 'pruneheight': None}

@@ -1,0 +1,8 @@
+[2m2026-10-26T16:51:26.394019Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Trying to open metrics endpoint at 127.0.0.1:19999...
+[2m2026-10-26T16:51:26.394870Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Opened metrics endpoint at 127.0.0.1:19999
+[2m2026-10-26T16:51:26.488675Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m using remote zakura [3mnetwork[0m[2m=[0mMainnet [3mhost[0m[2m=[0m"127.0.0.1" [3mport[0m[2m=[0m18232
+[2m2026-10-26T16:51:26.491009Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura is ready [3mbest[0m[2m=[0m3531472
+[2m2026-10-26T16:51:26.491126Z[0m [32m INFO[0m [2mztreamerd[0m[2m:[0m syncing historical compact index
+[2m2026-10-26T16:51:26.491888Z[0m [32m INFO[0m [2mztreamerd[0m[2m:[0m historical compact index complete [3mheight[0m[2m=[0m3531451 [3melapsed_seconds[0m[2m=[0m0.00075765
+[2m2026-10-26T16:51:26.537132Z[0m [32m INFO[0m [2mztreamerd[0m[2m:[0m serving CompactTxStreamer gRPC [3maddress[0m[2m=[0m127.0.0.1:19067 [3mtls[0m[2m=[0mfalse
+[2m2026-10-26T17:22:50.503799Z[0m [32m INFO[0m [2mztreamerd::lifecycle[0m[2m:[0m shutting down node and application

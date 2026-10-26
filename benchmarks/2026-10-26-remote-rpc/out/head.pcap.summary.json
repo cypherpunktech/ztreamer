@@ -1,0 +1,1 @@
+{"totals": {"requests": 7320, "methods": {"getblockchaininfo": 1888, "getblockhash": 2731, "getblock": 2701}, "request_bytes": 2076929, "response_bytes": 364934388, "first_t": 1793033486.489104, "last_t": 1793035369.537954}}

@@ -1,0 +1,819 @@
+Thank you for running a mainnet zakurad 1.5.1+gaf944f5194ef node!
+You're helping to strengthen the network and contributing to a social good :)
+2026-10-26T16:48:29.373072Z  INFO zakurad::components::tracing::component: started tracing component filter="info" TRACING_STATIC_MAX_LEVEL=LevelFilter::TRACE LOG_STATIC_MAX_LEVEL=Trace
+2026-10-26T16:48:29.373094Z  INFO zakurad::application: Diagnostic metadata:
+version: 1.5.1+gaf944f5194ef
+Zcash network: Mainnet
+running state version: 29.1.0+indexer
+initial disk state version: 29.1.0+indexer
+features: indexer,metrics_exporter_prometheus,prometheus
+branch: main
+git commit: af944f5194ef2e9921bc96af017629450375013c
+commit timestamp: 2026-09-30T03:44:25+04:00
+target triple: x86_64-unknown-linux-gnu
+rust compiler: 1.99.0
+rust release date: 2026-09-28
+optimization level: 3
+debug checks: false
+2026-10-26T16:48:29.373098Z  INFO zakurad::application: Using config file at: "/var/tmp/ztreamer-bench/zakura-node-peers.toml"
+2026-10-26T16:48:29.373100Z  INFO zakurad::application: ZakuradConfig { consensus: Config { checkpoint_sync: true, vct_fast_sync: None }, metrics: Config { endpoint_addr: None }, network: Config { listen_addr: 0.0.0.0:8233, external_addr: None, network: Mainnet, initial_mainnet_peers: {"dnsseed.str4d.xyz:8233", "dnsseed.z.cash:8233", "mainnet.seeder.shieldedinfra.net:8233", "mainnet.seeder.zfnd.org:8233"}, initial_testnet_peers: {"dnsseed.testnet.z.cash:18233", "testnet.seeder.zfnd.org:18233"}, cache_dir: IsEnabled(false), identity_dir: "/var/lib/ztreamer/.zakura", zakura_node_secret_key: None, p2p_stack: Default, zakura: ZakuraConfig { bootstrap_peers: ["1398f62c6d1a457c51ba6a4b5f3dbd2f69fca93216218dc8997e416bd17d93ca@165.22.54.66:8234", "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618@104.131.184.123:8234", "9ec67ad6834bc2ca0d659c240e042d3446c37cabcc092b527d459c87d938b4a4@159.65.183.89:8234", "bd3dc5d2a3d44c6bf90e364bf446231dbf9737e38a562ccf9e91ea631ea59b22@143.244.184.176:8234", "14ab98fa0c4b07d40119e1dbc9f3c36d20c8f226ae5ba4216218a2034f148e57@159.203.38.10:8234", "681d21b18644cd82ec13256a97f92bec1fff815683ef6f65dc7c993f098a4fe5@64.227.44.93:8234", "058b3f20dc9bef7bb447f94d7663d793cfbc036720f97e52d7f13661b21818e1@161.35.156.226:8234", "291323d78eb7186c3fa225ef5e305e95363e0ef06d42dca91bd4ef0254aed1ae@139.59.64.115:8234", "85e425233a68697d4be91dd5d542305a8a327cd06d992d53c0913cef2fa75084@168.144.173.250:8234"], listen_addr: Some(0.0.0.0:8234), nat_traversal: false, max_connections: 256, max_connections_per_ip: 16, max_pending_handshakes: 32, stream_open_rate_per_second: 32, message_rate_per_second: 2048, trace_dir: None, header_sync: ZakuraHeaderSyncConfig { max_headers_per_response: 1000, status_refresh_interval: 30s, peer_limits: ServicePeerLimits { max_inbound_peers: 256, max_outbound_peers: 256, inbound_queue_depth: 128, outbound_queue_depth: 128, max_pending_escalations: 32 }, max_unproductive_header_requests: 3, unproductive_peer_cooldown: 60s, anchor_height: None, anchor_hash: None }, block_sync: ZakuraBlockSyncConfig { replace_legacy_syncer: false, max_blocks_per_response: 1, max_inflight_requests: 32000, initial_inflight_requests: 64, max_response_bytes: 33554432, max_inflight_block_bytes: 6442450944, max_reorder_lookahead_bytes: 1610612736, floor_peer_avoid_cooldown: 8s, max_submitted_block_applies: 401, request_timeout: 8s, floor_rescue_timeout: 2s, no_progress_peer_cooldown: 180s, initial_block_probe_requests: 1, max_requests_without_block_progress: 64, status_refresh_interval: 30s, size_deviation_tolerance: 200, bbr_cwnd_gain_percent: 300, bbr_probe_bw_gain_percent: 125, bbr_probe_rtt_interval: 10s, bbr_probe_rtt_duration: 200ms, bbr_rtprop_window: 10s, bbr_delivery_rate_window: 10s, bbr_startup_growth_percent: 200, bbr_min_cwnd: 4, bbr_min_cwnd_bytes: 2524288, bbr_delay_gradient_percent: 150, bbr_reliability_weight_percent: 100, bbr_cwnd_unit: Bytes, floor_bypass_slots: 2, peer_limits: ServicePeerLimits { max_inbound_peers: 256, max_outbound_peers: 256, inbound_queue_depth: 128, outbound_queue_depth: 128, max_pending_escalations: 32 } }, dev_network: None }, peerset_initial_target_size: 100, crawl_new_peer_interval: 61s, max_connections_per_ip: 1, expose_peer_addresses: false }, state: Config { cache_dir: "/var/lib/ztreamer/cache", ephemeral: false, should_backup_non_finalized_state: true, repair_zakura_header_store_on_startup: false, enable_zakura_header_seed_from_committed_blocks: false, checkpoint_sync: true, vct_fast_sync: true, historical_frontier_artifact: None, delete_old_database: true, storage_mode: Archive, debug_stop_at_height: None, debug_validity_check_interval: None, debug_skip_non_finalized_state_backup_task: false }, tracing: Config { inner: InnerConfig { use_color: false, force_use_color: false, filter: None, buffer_limit: 128000, endpoint_addr: None, flamegraph: None, progress_bar: None, log_file: None, use_journald: false, opentelemetry_endpoint: None, opentelemetry_service_name: None, opentelemetry_sample_percent: None } }, sync: Config { download_concurrency_limit: 100, checkpoint_verify_concurrency_limit: 1000, full_verify_concurrency_limit: 20, zakura_block_apply_concurrency_limit: 32, parallel_cpu_threads: 8, debug_skip_regtest_genesis_self_seed: false, debug_blocksync_throughput_target_height: None }, mempool: Config { tx_cost_limit: 80000000, max_transaction_bytes: 250000, eviction_memory_time: 3600s, debug_enable_at_height: None, max_datacarrier_bytes: Some(83) }, rpc: Config { listen_addr: Some(127.0.0.1:18232), admin_listen_addr: None, indexer_listen_addr: None, indexer_tls: None, parallel_cpu_threads: 0, debug_force_finished_sync: false, cookie_dir: "/var/tmp/ztreamer-bench/cookie", cookie_file_name: ".cookie", enable_cookie_auth: true, max_response_body_size: 52428800, tls: None }, mining: Config { miner_address: None, extra_coinbase_data: None, miner_memo: None, internal_miner: false, optimistic_block_inventory: true }, health: Config { listen_addr: None, min_connected_peers: 1, ready_max_blocks_behind: 2, enforce_on_test_networks: false, ready_max_tip_age: 300s }, zcashd_compat: Config { enabled: false, manage_zcashd: false, zcashd_source: Path, zcashd_path: None, zcashd_datadir: None, zcashd_extra_args: [], p2p_connect_addr: None, block_gossip_peer_ips: [], startup_delay: 1s, restart_backoff: 2s, restart_backoff_max: 300s, restart_reset_after: 3600s, shutdown_grace_period: 300s } }
+2026-10-26T16:48:29.373162Z  INFO {zakurad="af944f5194ef2e9921bc96af017629450375013c" net="Main"}: zakurad::application: initialized rayon thread pool for CPU-bound tasks num_threads=8
+2026-10-26T16:48:29.374102Z  INFO zakurad::commands::start: Starting zakurad
+2026-10-26T16:48:29.374233Z  WARN zakurad::commands::start: TCP slow-start-after-idle is enabled, which resets TCP's congestion window between block requests and significantly reduces single-peer throughput for block propagation. Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation setting="net.ipv4.tcp_slow_start_after_idle"
+2026-10-26T16:48:29.374245Z  INFO zakurad::commands::start: initializing node state
+2026-10-26T16:48:29.378259Z  INFO zakurad::commands::start: opening database, this may take a few minutes
+2026-10-26T16:48:29.378430Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: trying to open current database format running_version=29.1.0+indexer
+2026-10-26T16:48:29.806405Z  INFO zakura_state::service::finalized_state::disk_db: Opened Zakura state cache at /var/lib/ztreamer/cache/state/v29/mainnet
+2026-10-26T16:48:29.812359Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by a previous Zakura instance is current and valid running_version=29.1.0+indexer
+2026-10-26T16:48:29.813218Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: started checking/adding indexes for spending tx ids
+2026-10-26T16:50:52.595348Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: finished checking/adding indexes for spending tx ids
+2026-10-26T16:50:56.774972Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-26T16:50:56.775208Z  INFO zakura_state::service::finalized_state::vct: VCT: exact header auxiliary source enabled by default handoff_height=3490665
+2026-10-26T16:50:56.788835Z  INFO zakura_state::service: loaded historical frontier artifact source_path="embedded Mainnet historical frontier artifact" entries=2293 spacing=0
+2026-10-26T16:50:56.789639Z  INFO zakura_state::service::non_finalized_state: restoring non-finalized blocks from backup and spawning backup task backup_dir_path="/var/lib/ztreamer/cache/non_finalized_state/mainnet"
+2026-10-26T16:50:58.663949Z  INFO zakura_state::service::non_finalized_state: restored blocks from non-finalized backup cache num_blocks_restored=1000
+2026-10-26T16:50:58.667433Z  INFO zakura_state::service: loaded Zakura state cache chain_tip=Some((block::Hash("000000000003995179a2e195a755c9a28b1d7c4eadfc6b0082d7e85af2c7f132"), Height(3531461)))
+2026-10-26T16:50:58.722362Z  INFO zakura_state::service: starting legacy chain check
+2026-10-26T16:50:58.722396Z  INFO zakura_state::service: cached state consensus branch is valid: no legacy chain found
+2026-10-26T16:50:58.722533Z  INFO zakurad::commands::start: logging database metrics on startup
+2026-10-26T16:50:58.732030Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Disk Size: 283.4 GB
+2026-10-26T16:50:58.732037Z  INFO zakura_state::service::finalized_state::disk_db: Total Live Data Disk Size: 282.8 GB
+2026-10-26T16:50:58.732038Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Memory Size: 108.5 KB
+2026-10-26T16:50:58.732047Z  INFO zakurad::commands::start::zakura::coordinator: sync apply lifecycle changed apply_phase="native" apply_epoch=0
+2026-10-26T16:50:58.732052Z  INFO zakurad::commands::start: initializing network
+2026-10-26T16:50:58.732551Z  INFO open_listener{addr=0.0.0.0:8233}: zakura_network::peer_set::initialize: Trying to open Zcash protocol endpoint at 0.0.0.0:8233...
+2026-10-26T16:50:58.733078Z  INFO open_listener{addr=0.0.0.0:8233}: zakura_network::peer_set::initialize: Opened Zcash protocol endpoint at 0.0.0.0:8233
+2026-10-26T16:50:58.735633Z  INFO zakura_network::address_book_updater: starting the address book updater
+2026-10-26T16:50:58.877375Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="mainnet.seeder.zfnd.org:8233" remote_ip_count=25
+2026-10-26T16:50:58.930456Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="dnsseed.str4d.xyz:8233" remote_ip_count=3
+2026-10-26T16:50:58.991385Z  INFO add_initial_peers: zakura_network::config: resolved seed peer IP addresses seed="dnsseed.z.cash:8233" remote_ip_count=7
+2026-10-26T16:51:03.741601Z  INFO add_initial_peers: zakura_network::config: DNS timeout resolving peer IP addresses host="mainnet.seeder.shieldedinfra.net:8233" e=Elapsed(())
+2026-10-26T16:51:03.741620Z  INFO add_initial_peers: zakura_network::config: Seed peer DNS resolution failed, checking for addresses from other seed peers host="mainnet.seeder.shieldedinfra.net:8233" attempts=1
+2026-10-26T16:51:03.741992Z  INFO add_initial_peers: zakura_network::peer_set::initialize: connecting to initial peer set ipv4_peer_count=34 ipv6_peer_count=0
+2026-10-26T16:51:03.955800Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=1 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:03.963837Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=2 peer=v4redacted:8233 e=Connection refused (os error 111)
+2026-10-26T16:51:04.140827Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=3 peer=v4redacted:8233 e=Peer closed connection
+2026-10-26T16:51:04.188241Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=4 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170150)
+2026-10-26T16:51:04.192903Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=5 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:04.372539Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=6 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:04.653950Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=7 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:04.720035Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=8 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:04.731185Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=9 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:04.827485Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=10 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170150)
+2026-10-26T16:51:05.116192Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=0 errors=11 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.129426Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=12 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.228338Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=13 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.372810Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=14 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.591028Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=1 errors=15 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.886547Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=16 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:05.928274Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=17 peer=v4redacted:8233 e=Connection refused (os error 111)
+2026-10-26T16:51:05.960666Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=18 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:06.109616Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=3 errors=19 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:06.203785Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=20 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:06.469461Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=21 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:06.582361Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=22 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:06.585546Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=23 peer=v4redacted:8233 e=Peer closed connection
+2026-10-26T16:51:06.635586Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=24 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:07.000250Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=4 errors=25 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:07.101518Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=26 peer=v4redacted:8233 e=Peer offered obsolete version: Version(170140)
+2026-10-26T16:51:07.360259Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=27 peer=v4redacted:8233 e=Serialization error: io error: Connection reset by peer (os error 104)
+2026-10-26T16:51:08.243837Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=28 peer=v4redacted:8233 e=request timed out
+2026-10-26T16:51:09.744564Z  INFO add_initial_peers: zakura_network::peer_set::initialize: an initial peer connection failed successes=5 errors=29 peer=v4redacted:8233 e=request timed out
+2026-10-26T16:51:09.744718Z  INFO add_initial_peers: zakura_network::peer_set::initialize: finished connecting to initial seed and disk cache peers handshake_success_total=5 handshake_error_total=29 outbound_connections=5
+2026-10-26T16:51:09.745002Z  INFO zakura_network::peer_set::initialize: sending initial request for peers active_initial_peer_count=5
+2026-10-26T16:51:09.748452Z  INFO zakurad::commands::start: initializing verifiers
+2026-10-26T16:51:09.748483Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: starting state checkpoint validation
+2026-10-26T16:51:09.748597Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: starting the peer address crawler crawl_new_peer_interval=61s outbound_connections=5
+2026-10-26T16:51:09.748626Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: initializing block verifier router tip=Some((Height(3531461), block::Hash("000000000003995179a2e195a755c9a28b1d7c4eadfc6b0082d7e85af2c7f132"))) max_checkpoint_height=Height(3490665)
+2026-10-26T16:51:09.748643Z  INFO zakurad::commands::start: initializing syncer
+2026-10-26T16:51:09.748733Z  INFO zakurad::commands::start: initializing mempool
+2026-10-26T16:51:09.748752Z  INFO zakurad::commands::start: fully initializing inbound peer request handler
+2026-10-26T16:51:09.752102Z  INFO zakura_rpc::server::cookie: RPC auth cookie written to disk
+2026-10-26T16:51:09.752417Z  INFO zakura_rpc::server: Opened RPC endpoint at 127.0.0.1:18232
+2026-10-26T16:51:09.752428Z  WARN zakurad::commands::start: configure an indexer_listen_addr to start the indexer RPC server
+2026-10-26T16:51:09.752431Z  INFO zakurad::commands::start: spawning block gossip task
+2026-10-26T16:51:09.752434Z  INFO zakurad::commands::start: spawning mempool queue checker task
+2026-10-26T16:51:09.752436Z  INFO zakurad::commands::start: spawning mempool transaction gossip task
+2026-10-26T16:51:09.752438Z  INFO zakurad::commands::start: spawning delete old databases task
+2026-10-26T16:51:09.752443Z  INFO zakurad::commands::start: spawning progress logging task
+2026-10-26T16:51:09.752442Z  INFO zakurad::components::sync::gossip: initializing block gossip task
+2026-10-26T16:51:09.752445Z  INFO zakurad::commands::start: initializing health endpoints
+2026-10-26T16:51:09.752449Z  INFO zakurad::commands::start: spawning end of support checking task
+2026-10-26T16:51:09.752448Z  INFO zakura_state::config: checking for old database versions db_kind="state"
+2026-10-26T16:51:09.752449Z  INFO zakurad::components::mempool::queue_checker: initializing mempool queue checker task
+2026-10-26T16:51:09.752453Z  INFO zakurad::commands::start: spawning mempool crawler task
+2026-10-26T16:51:09.752456Z  INFO zakurad::commands::start: spawning syncer task
+2026-10-26T16:51:09.752456Z  INFO zakurad::components::mempool::gossip: initializing transaction gossip task
+2026-10-26T16:51:09.752461Z  INFO zakurad::commands::start: spawned initial Zakura tasks
+2026-10-26T16:51:09.752461Z  INFO zakurad::components::sync::end_of_support: Starting end of support task
+2026-10-26T16:51:09.752469Z  INFO zakurad::components::mempool::crawler: initializing mempool crawler task
+2026-10-26T16:51:09.752473Z  WARN zakurad::components::sync::progress: chain tip metrics channel closed err=SendError { .. }
+2026-10-26T16:51:09.752731Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531461))
+2026-10-26T16:51:09.752823Z  INFO zakura_state::config: finished old database version cleanup task
+2026-10-26T16:51:09.833527Z  INFO zakurad::components::sync::gossip: height=Height(3531461) request=AdvertiseBlock(block::Hash("000000000003995179a2e195a755c9a28b1d7c4eadfc6b0082d7e85af2c7f132"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:09.835723Z  INFO zakurad::components::mempool: activating mempool tip_height=Height(3531461) reason="estimated close to the network tip"
+2026-10-26T16:51:09.913116Z  INFO sync:try_to_sync{header_runtime_status=None}:obtain_tips{checkpoint_bootstrap=false}: zakura_consensus::primitives::halo2: built Orchard Action verifying key and armed its prepared zero-check version=PostNu6_3 prepared=false
+2026-10-26T16:51:09.916712Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:51:10.187357Z  INFO zakurad::components::sync::gossip: height=Height(3531462) request=AdvertiseBlock(block::Hash("0000000000100686248179c538df7c7f92e4d72473a477b285f8cdff7afc90f9"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.198603Z  INFO zakurad::components::sync::gossip: height=Height(3531463) request=AdvertiseBlock(block::Hash("000000000041ce13fdb0505263fb361412c7a756c385dd1f8086eeff8b839869"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.204648Z  INFO zakurad::components::sync::gossip: height=Height(3531464) request=AdvertiseBlock(block::Hash("000000000016fc93bd0cd01ed5e8ff731f02a76fdb1b15326795da1a691b3c9c"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.212582Z  INFO zakurad::components::sync::gossip: height=Height(3531465) request=AdvertiseBlock(block::Hash("00000000006198c272669b3891abd11707a859716a1a1c257587d063867fc787"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.219862Z  INFO zakurad::components::sync::gossip: height=Height(3531466) request=AdvertiseBlock(block::Hash("000000000054bfe6b87077cf64f0388623d1fcc3077d1415bc0272b6250db857"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.224829Z  INFO zakurad::components::sync::gossip: height=Height(3531467) request=AdvertiseBlock(block::Hash("00000000004b934ad90305af1eb7b496bfb7565b63534310d9bbc17b217fdfc9"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.229551Z  INFO zakurad::components::sync::gossip: height=Height(3531468) request=AdvertiseBlock(block::Hash("00000000002b97658240f8ccc4ef5ab135e948225c02bfe0af17e00f678de64d"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.238239Z  INFO zakurad::components::sync::gossip: height=Height(3531469) request=AdvertiseBlock(block::Hash("0000000000645184cd1c6b9cabfb5e44cac9af9692f9c2a68050f9c22d6c8299"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.241517Z  INFO zakurad::components::sync::gossip: height=Height(3531470) request=AdvertiseBlock(block::Hash("00000000004aeb0e955fa03114c730eaabb1bc33f80c66c28a60482f8188d3e9"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.247272Z  INFO zakurad::components::sync::gossip: height=Height(3531471) request=AdvertiseBlock(block::Hash("00000000002c3de99c1aa66613689b01261cc558bef51f307a7db5bc7f7996d6"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:10.248402Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:51:10.248412Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531472))
+2026-10-26T16:51:10.249455Z  INFO zakurad::components::sync::gossip: height=Height(3531472) request=AdvertiseBlock(block::Hash("0000000000179d43b1b1e74325eccd41587944235c387d6ab1bd430dacad357d"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:51:11.278233Z  INFO init_with_transaction_state{config=Config { checkpoint_sync: true, vct_fast_sync: None } network=Mainnet}: zakura_consensus::router: finished state checkpoint validation
+2026-10-26T16:51:11.917443Z  INFO zakurad::components::mempool: resetting mempool: switched best chain, skipped blocks, or activated network upgrade tip_height=Height(3531472)
+2026-10-26T16:51:11.917474Z  INFO zakurad::components::mempool: activating mempool tip_height=Height(3531472) reason="chain tip reset"
+2026-10-26T16:51:11.917478Z  INFO zakurad::components::mempool: re-verifying mempool transactions after a chain fork transactions=3
+2026-10-26T16:51:11.968777Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(2) changes=1
+2026-10-26T16:51:13.970320Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(2) changes=2
+2026-10-26T16:51:18.967311Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:51:19.754102Z  INFO zakurad::components::sync::end_of_support: Checking if Zakura release is inside support range ...
+2026-10-26T16:51:19.754114Z  WARN zakurad::components::sync::end_of_support: Your Zakura release is too old and it will stop running at block 3532995. 
+Release name: 1.5.1, Estimated release height: 3498435 
+Hint: Download and install the latest Zakura release from: https://github.com/zakura-core/zakura/releases/latest
+2026-10-26T16:51:20.249688Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531472))
+2026-10-26T16:51:21.626342Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:51:26.251273Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:51:26.251286Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531472))
+2026-10-26T16:51:27.640553Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=23 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=57
+2026-10-26T16:51:36.252374Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531472))
+2026-10-26T16:51:42.253870Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:51:42.253883Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531472))
+2026-10-26T16:51:48.582456Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:51:52.254603Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531472))
+2026-10-26T16:51:55.494020Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:51:58.256137Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:51:58.256152Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531472))
+2026-10-26T16:52:00.257110Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(2) changes=2
+2026-10-26T16:52:02.258308Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:08.256575Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531472))
+2026-10-26T16:52:08.989903Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000005283a3c55165738d08a2e79079c8d17aae978b06a6bfa564b52738 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531473)
+2026-10-26T16:52:08.990965Z  INFO zakurad::components::sync::gossip: height=Height(3531473) request=AdvertiseBlock(block::Hash("00000000005283a3c55165738d08a2e79079c8d17aae978b06a6bfa564b52738"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:52:09.764394Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531473) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=0s
+2026-10-26T16:52:10.041081Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: queued download of hash behind our chain tip
+2026-10-26T16:52:10.041102Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531473))
+2026-10-26T16:52:10.750689Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=7 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=73
+2026-10-26T16:52:11.186354Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:20.041615Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531473))
+2026-10-26T16:52:23.719786Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:26.043379Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:52:26.043394Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531473))
+2026-10-26T16:52:30.826152Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:32.827999Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:36.044597Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531473))
+2026-10-26T16:52:42.046514Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:52:42.046530Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531473))
+2026-10-26T16:52:45.361349Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:52:52.047848Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531473))
+2026-10-26T16:52:58.048664Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:52:58.048678Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531473))
+2026-10-26T16:53:08.049614Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531473))
+2026-10-26T16:53:09.778070Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531473) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m
+2026-10-26T16:53:11.750107Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=7 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=73
+2026-10-26T16:53:12.595545Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:14.050514Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:53:14.050530Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531473))
+2026-10-26T16:53:18.992823Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000000af49eb672395f8aa0cc983a362bb062fd3e6963f611282d95a17f source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531474)
+2026-10-26T16:53:18.993888Z  INFO zakurad::components::sync::gossip: height=Height(3531474) request=AdvertiseBlock(block::Hash("00000000000af49eb672395f8aa0cc983a362bb062fd3e6963f611282d95a17f"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:53:19.381111Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:24.052111Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531474))
+2026-10-26T16:53:26.103968Z  INFO {peer=v4redacted:55463 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000054f7f3a57d0078d298ea5a914987a6ca85e58c1c370fd45b216bf2 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531475)
+2026-10-26T16:53:26.105042Z  INFO zakurad::components::sync::gossip: height=Height(3531475) request=AdvertiseBlock(block::Hash("000000000054f7f3a57d0078d298ea5a914987a6ca85e58c1c370fd45b216bf2"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:53:26.507968Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:30.052439Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:53:30.052454Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531475))
+2026-10-26T16:53:37.919600Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:40.053472Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531475))
+2026-10-26T16:53:43.259062Z  INFO {peer=v4redacted:1733 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000163ad6695f28a1338af8ef20c4de60d4a1d3c0e478547a5dde0dab source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531476)
+2026-10-26T16:53:43.260125Z  INFO zakurad::components::sync::gossip: height=Height(3531476) request=AdvertiseBlock(block::Hash("0000000000163ad6695f28a1338af8ef20c4de60d4a1d3c0e478547a5dde0dab"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:53:45.164753Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:46.054991Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:53:46.055005Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531476))
+2026-10-26T16:53:48.056015Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:53:56.056238Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531476))
+2026-10-26T16:54:02.019729Z  INFO {peer=v4redacted:47270 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000015813608339da816785b9155ef89e7c589e674b24fc1adc61085c7 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531477)
+2026-10-26T16:54:02.020802Z  INFO zakurad::components::sync::gossip: height=Height(3531477) request=AdvertiseBlock(block::Hash("000000000015813608339da816785b9155ef89e7c589e674b24fc1adc61085c7"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:54:02.058205Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:54:02.058219Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531477))
+2026-10-26T16:54:09.790035Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531477) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=5s
+2026-10-26T16:54:10.895191Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:54:12.058880Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531477))
+2026-10-26T16:54:12.750263Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=14 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=66
+2026-10-26T16:54:18.060414Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:54:18.060429Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531477))
+2026-10-26T16:54:18.098699Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:54:25.329834Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:54:28.062048Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531477))
+2026-10-26T16:54:29.336083Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:54:34.064172Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:54:34.064184Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531477))
+2026-10-26T16:54:40.579304Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:54:44.064489Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531477))
+2026-10-26T16:54:50.065535Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:54:50.065549Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531477))
+2026-10-26T16:54:51.046068Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:55:00.066515Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531477))
+2026-10-26T16:55:06.068224Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:55:06.068238Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531477))
+2026-10-26T16:55:09.802085Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531477) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 5s
+2026-10-26T16:55:13.107391Z  INFO {peer=v4redacted:54919 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000056be947c44a166d9c474dd9f738716bf3ee28f0a14980f273c698 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531478)
+2026-10-26T16:55:13.108468Z  INFO zakurad::components::sync::gossip: height=Height(3531478) request=AdvertiseBlock(block::Hash("0000000000056be947c44a166d9c474dd9f738716bf3ee28f0a14980f273c698"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:55:13.749797Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=8 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=72
+2026-10-26T16:55:16.069120Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:55:22.071137Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:55:22.071151Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:55:30.654793Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:55:32.072124Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:55:38.073393Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:55:38.073406Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:55:48.074823Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:55:54.075809Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:55:54.075823Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:56:02.447157Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:56:04.076858Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:56:09.813691Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531478) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=55s
+2026-10-26T16:56:10.078375Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:56:10.078391Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:56:10.947518Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:56:13.745025Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:56:14.749826Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=11 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=69
+2026-10-26T16:56:20.079757Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:56:24.169312Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:56:26.080984Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:56:26.080998Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:56:36.082347Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:56:42.083975Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:56:42.083991Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:56:52.084487Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:56:55.404792Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:56:58.086302Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:56:58.086316Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:57:01.817440Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:03.859794Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:08.087915Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:57:09.826803Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531478) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 55s
+2026-10-26T16:57:10.141089Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:14.088633Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:57:14.088648Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:57:15.750090Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=8 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=72
+2026-10-26T16:57:17.882591Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:24.090252Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531478))
+2026-10-26T16:57:30.091941Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:57:30.091955Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531478))
+2026-10-26T16:57:32.316494Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:35.325238Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000005bceeea376100c59223bb221f1928fbb87335da90b9d3a0888a3c8 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531479)
+2026-10-26T16:57:35.327330Z  INFO zakurad::components::sync::gossip: height=Height(3531479) request=AdvertiseBlock(block::Hash("00000000005bceeea376100c59223bb221f1928fbb87335da90b9d3a0888a3c8"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:57:38.466458Z  INFO {peer=v4redacted:53192 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000071d455228265663fa6499e5024a844645c6e48c2b85d9100ce2ba8 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531480)
+2026-10-26T16:57:38.467529Z  INFO zakurad::components::sync::gossip: height=Height(3531480) request=AdvertiseBlock(block::Hash("000000000071d455228265663fa6499e5024a844645c6e48c2b85d9100ce2ba8"), None) log_msg="sending committed block broadcast"
+2026-10-26T16:57:39.416027Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}: zakurad::components::mempool: resetting mempool: switched best chain, skipped blocks, or activated network upgrade tip_height=Height(3531480)
+2026-10-26T16:57:39.416070Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}: zakurad::components::mempool: activating mempool tip_height=Height(3531480) reason="chain tip reset"
+2026-10-26T16:57:39.416077Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}: zakurad::components::mempool: re-verifying mempool transactions after a chain fork transactions=11
+2026-10-26T16:57:39.420700Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:40.092625Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:57:46.093648Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:57:46.093661Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:57:46.803943Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:53.080775Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:57:55.081610Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(2) changes=1
+2026-10-26T16:57:56.095234Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:57:57.083346Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=2
+2026-10-26T16:58:02.097428Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:58:02.097442Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:58:05.335202Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:58:09.839240Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531480) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=30s
+2026-10-26T16:58:12.098531Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:58:15.011213Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:58:16.806308Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=10 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=70
+2026-10-26T16:58:18.100155Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:58:18.100169Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:58:22.614889Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:58:28.100689Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:58:29.119129Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:58:34.102046Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:58:34.102059Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:58:44.102849Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:58:47.509565Z  INFO zakura_network::peer::handshake: peer with inconsistent version services and version address services remote.services=PeerServices(0x0) remote_address_services=PeerServices(NODE_NETWORK) remote.user_agent="/zcash-seeder:0.01/"
+2026-10-26T16:58:50.103471Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:58:50.103487Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:58:51.865912Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:59:00.105294Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:59:06.107137Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:59:06.107150Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:59:09.851632Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531480) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 30s
+2026-10-26T16:59:16.108370Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:59:17.949719Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T16:59:22.109556Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:59:22.109569Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:59:25.920209Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T16:59:32.110408Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:59:38.111849Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:59:38.111863Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T16:59:48.113134Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T16:59:54.115019Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T16:59:54.115034Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:00:04.115484Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:00:09.863629Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531480) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=2m 30s
+2026-10-26T17:00:10.117053Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:00:10.117064Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:00:10.551405Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:12.553192Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:17.587536Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:18.750306Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=10 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=70
+2026-10-26T17:00:20.118011Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:00:20.149029Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:26.119634Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:00:26.119648Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:00:28.120808Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:30.818312Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:32.932302Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:35.079571Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:00:36.120454Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:00:42.122176Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:00:42.122188Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:00:52.123281Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:00:58.124434Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:00:58.124447Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:01:00.950298Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:08.125689Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:01:08.253674Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:09.878080Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531480) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=3m 30s
+2026-10-26T17:01:14.126382Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:01:14.126396Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531480))
+2026-10-26T17:01:16.424754Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:19.755262Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=31 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=49
+2026-10-26T17:01:22.271103Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:24.127945Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531480))
+2026-10-26T17:01:28.685260Z  INFO {peer=v4redacted:8233 connection_kind="Out"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000001808d220a4126017f35d9f62d2efa74134669fa1a088e704c83f08 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531481)
+2026-10-26T17:01:28.687329Z  INFO zakurad::components::sync::gossip: height=Height(3531481) request=AdvertiseBlock(block::Hash("00000000001808d220a4126017f35d9f62d2efa74134669fa1a088e704c83f08"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:01:30.065275Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:30.129192Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:01:30.129202Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531481))
+2026-10-26T17:01:32.080895Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:39.466068Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:40.129797Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531481))
+2026-10-26T17:01:46.130661Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:01:46.130675Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531481))
+2026-10-26T17:01:53.346567Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000004788cf4503d8e4ced8b1de56b7fede63aed21d03adf2c23855056e source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531482)
+2026-10-26T17:01:53.347629Z  INFO zakurad::components::sync::gossip: height=Height(3531482) request=AdvertiseBlock(block::Hash("00000000004788cf4503d8e4ced8b1de56b7fede63aed21d03adf2c23855056e"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:01:55.890139Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:01:56.131647Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:02:02.133300Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:02:02.133314Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:02:05.860342Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:02:09.889927Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531482) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=15s
+2026-10-26T17:02:12.134419Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:02:18.135962Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:02:18.135976Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:02:19.543977Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:02:20.749786Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=10 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=70
+2026-10-26T17:02:26.639419Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:02:28.136987Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:02:34.138366Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:02:34.138378Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:02:44.139548Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:02:47.700808Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:02:50.140568Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:02:50.140581Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:02:52.141694Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:00.142221Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:03:06.143817Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:03:06.143830Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:03:06.304501Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:09.386500Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:09.901530Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531482) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 15s
+2026-10-26T17:03:16.144501Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:03:21.749949Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=31 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=49
+2026-10-26T17:03:22.145913Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:03:22.145928Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:03:32.147304Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:03:38.149026Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:03:38.149038Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:03:38.189979Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:45.354646Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:48.150166Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:03:49.767225Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:03:54.152018Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:03:54.152033Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:03:56.152540Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:04:04.153304Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:04:09.915147Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531482) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=2m 15s
+2026-10-26T17:04:10.154791Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:04:10.154807Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:04:11.024146Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:04:20.156337Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:04:22.313305Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:04:22.749446Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=10 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=70
+2026-10-26T17:04:26.158188Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:04:26.158201Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:04:29.338163Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:04:36.158725Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:04:42.160315Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:04:42.160329Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:04:52.161897Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:04:58.163110Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:04:58.163125Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:05:08.164204Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:05:09.929340Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531482) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=3m 15s
+2026-10-26T17:05:14.164808Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:05:14.164822Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:05:23.749779Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=30 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=50
+2026-10-26T17:05:24.166329Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:05:30.168130Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:05:30.168144Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:05:30.955257Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:05:32.956553Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:05:40.168521Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531482))
+2026-10-26T17:05:46.169517Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:05:46.169530Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531482))
+2026-10-26T17:05:48.682422Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000001cd4d60067dcf63c84a7368751151eb72de1c76eeb79de7c0491f8 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531483)
+2026-10-26T17:05:48.683484Z  INFO zakurad::components::sync::gossip: height=Height(3531483) request=AdvertiseBlock(block::Hash("00000000001cd4d60067dcf63c84a7368751151eb72de1c76eeb79de7c0491f8"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:05:56.170622Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:06:02.171583Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:06:02.171597Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:06:09.943544Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531483) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=20s
+2026-10-26T17:06:10.885082Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:06:12.172801Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:06:18.174286Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:06:18.174300Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:06:21.843970Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:06:24.750320Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=12 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=68
+2026-10-26T17:06:28.174609Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:06:34.176312Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:06:34.176325Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:06:44.178346Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:06:49.838958Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:06:50.180219Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:06:50.180230Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:06:58.311596Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:00.181116Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:07:04.831741Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:06.181912Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:07:06.181926Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:07:09.956432Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531483) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 20s
+2026-10-26T17:07:12.389659Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:14.494641Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:16.183190Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:07:16.495549Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:22.184326Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:07:22.184340Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531483))
+2026-10-26T17:07:26.595130Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:07:26.975348Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:28.977218Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:31.542264Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:32.185819Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531483))
+2026-10-26T17:07:36.377061Z  INFO {peer=v4redacted:55463 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000053c8f942c68032416cb206efc89af0a7f7e99817d0c69e00a47f76 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531484)
+2026-10-26T17:07:36.378128Z  INFO zakurad::components::sync::gossip: height=Height(3531484) request=AdvertiseBlock(block::Hash("000000000053c8f942c68032416cb206efc89af0a7f7e99817d0c69e00a47f76"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:07:37.898473Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:38.186619Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:07:38.186632Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:07:41.690209Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:07:48.187546Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:07:54.188781Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:07:54.188793Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:08:04.190250Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:08:04.220832Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:09.969997Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531484) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=30s
+2026-10-26T17:08:10.192388Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:08:10.192400Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:08:11.535396Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:13.536802Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:18.682876Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:20.193494Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:08:22.584732Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:25.639252Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:26.194668Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:08:26.194681Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:08:26.750515Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=12 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=68
+2026-10-26T17:08:32.348068Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:34.484131Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:36.195620Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:08:42.197067Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:08:42.197079Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:08:47.396817Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:52.197835Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:08:54.368474Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:08:58.199152Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:08:58.199165Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:09:00.199608Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:09:02.931456Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:09:08.200299Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:09:09.982834Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531484) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 30s
+2026-10-26T17:09:10.696719Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:09:14.201725Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:09:14.201741Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:09:24.203265Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:09:28.287046Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:09:29.630968Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:09:30.204641Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:09:30.204654Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:09:40.206068Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:09:42.571570Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:09:46.207403Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:09:46.207417Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:09:56.208386Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:09:58.817131Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:02.209449Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:10:02.209462Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:10:09.995431Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531484) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=2m 30s
+2026-10-26T17:10:11.478349Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:12.210753Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:10:18.212212Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:10:18.212224Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:10:19.573996Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:24.213610Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:28.213284Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531484))
+2026-10-26T17:10:28.750216Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=12 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=68
+2026-10-26T17:10:34.214919Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:10:34.214935Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531484))
+2026-10-26T17:10:36.545480Z  INFO {peer=v4redacted:55463 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000001be4f7c8b7c7b41d9bdcca1e10c3bb194ead8f36e466688c1b3371 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531485)
+2026-10-26T17:10:36.546542Z  INFO zakurad::components::sync::gossip: height=Height(3531485) request=AdvertiseBlock(block::Hash("00000000001be4f7c8b7c7b41d9bdcca1e10c3bb194ead8f36e466688c1b3371"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:10:36.777802Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:43.857957Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:10:44.215709Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531485))
+2026-10-26T17:10:50.217183Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:10:50.217196Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531485))
+2026-10-26T17:11:00.217421Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531485))
+2026-10-26T17:11:04.092193Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:06.218683Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:11:06.218697Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531485))
+2026-10-26T17:11:10.011799Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531485) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=30s
+2026-10-26T17:11:11.224207Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:13.226253Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:16.219885Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531485))
+2026-10-26T17:11:18.258066Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:22.220681Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:11:22.220695Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531485))
+2026-10-26T17:11:24.222213Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:26.224173Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:30.014938Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=34 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=46
+2026-10-26T17:11:32.221816Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531485))
+2026-10-26T17:11:38.222906Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:11:38.222919Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531485))
+2026-10-26T17:11:39.205528Z  INFO {peer=v4redacted:26787 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000063f249db4bbc8422082d12f29b38cc7cd05c3176aacb509de02e4a source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531486)
+2026-10-26T17:11:39.206608Z  INFO zakurad::components::sync::gossip: height=Height(3531486) request=AdvertiseBlock(block::Hash("000000000063f249db4bbc8422082d12f29b38cc7cd05c3176aacb509de02e4a"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:11:39.888081Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:48.011464Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:11:48.223859Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:11:54.224887Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:11:54.224900Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:12:04.226353Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:12:04.439069Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:10.025530Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531486) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=30s
+2026-10-26T17:12:10.227792Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:12:10.227803Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:12:11.651575Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:13.709745Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:15.710652Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:20.228959Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:12:21.626937Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:26.231020Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:12:26.231033Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:12:28.231415Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(2) changes=2
+2026-10-26T17:12:30.910351Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=11 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=69
+2026-10-26T17:12:36.231495Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:12:41.489852Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:42.233247Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:12:42.233260Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:12:48.645219Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:52.234250Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:12:56.549908Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:12:58.236225Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:12:58.236239Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:13:08.237211Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531486))
+2026-10-26T17:13:10.037598Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531486) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 30s
+2026-10-26T17:13:10.635638Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:13:14.239143Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:13:14.239155Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531486))
+2026-10-26T17:13:17.940835Z  INFO {peer=v4redacted:39156 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000171657cf0b4f2cb9b1d8100ad03f35ff9516086de2a7d4350bd200 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531487)
+2026-10-26T17:13:17.941899Z  INFO zakurad::components::sync::gossip: height=Height(3531487) request=AdvertiseBlock(block::Hash("0000000000171657cf0b4f2cb9b1d8100ad03f35ff9516086de2a7d4350bd200"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:13:24.240017Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531487))
+2026-10-26T17:13:30.241045Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:13:30.241056Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531487))
+2026-10-26T17:13:31.750683Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:13:36.248915Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:13:40.241887Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531487))
+2026-10-26T17:13:46.244013Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:13:46.244027Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531487))
+2026-10-26T17:13:46.402325Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:13:54.371766Z  INFO {peer=v4redacted:35628 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000006b330319fa196505399050fb4950146d42217e96e17b9c47871f53 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531488)
+2026-10-26T17:13:54.372840Z  INFO zakurad::components::sync::gossip: height=Height(3531488) request=AdvertiseBlock(block::Hash("00000000006b330319fa196505399050fb4950146d42217e96e17b9c47871f53"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:13:56.244685Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531488))
+2026-10-26T17:14:02.245573Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:14:02.245586Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531488))
+2026-10-26T17:14:03.612634Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:14:10.050406Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531488) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=15s
+2026-10-26T17:14:12.246773Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531488))
+2026-10-26T17:14:14.799044Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:14:18.247527Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:14:18.247539Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531488))
+2026-10-26T17:14:24.284260Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:14:28.248675Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531488))
+2026-10-26T17:14:30.971042Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:14:32.750261Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=14 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=66
+2026-10-26T17:14:34.249507Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:14:34.249518Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531488))
+2026-10-26T17:14:36.909445Z  INFO {peer=v4redacted:39430 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000258d5068e23f0bc70fbcafddb4ffdad3472282601a5b13febbbd45 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531489)
+2026-10-26T17:14:36.910512Z  INFO zakurad::components::sync::gossip: height=Height(3531489) request=AdvertiseBlock(block::Hash("0000000000258d5068e23f0bc70fbcafddb4ffdad3472282601a5b13febbbd45"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:14:44.250380Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531489))
+2026-10-26T17:14:45.713283Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:14:50.251459Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:14:50.251472Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531489))
+2026-10-26T17:15:00.252468Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531489))
+2026-10-26T17:15:06.253568Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:15:06.253583Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531489))
+2026-10-26T17:15:10.062741Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531489) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=30s
+2026-10-26T17:15:16.254408Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531489))
+2026-10-26T17:15:22.256095Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:15:22.256108Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531489))
+2026-10-26T17:15:30.407329Z  INFO {peer=v4redacted:43586 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000037893b4ab3782584c4fcbbdf6e9b299aeaddb96a5cb7619a3c97ba source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531490)
+2026-10-26T17:15:30.408406Z  INFO zakurad::components::sync::gossip: height=Height(3531490) request=AdvertiseBlock(block::Hash("000000000037893b4ab3782584c4fcbbdf6e9b299aeaddb96a5cb7619a3c97ba"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:15:31.386916Z  INFO {peer=v4redacted:46200 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000041d5db15d1d4c6c7fb6b29c2561a0d24fd9b79c860a47692ba197a source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531491)
+2026-10-26T17:15:31.387983Z  INFO zakurad::components::sync::gossip: height=Height(3531491) request=AdvertiseBlock(block::Hash("000000000041d5db15d1d4c6c7fb6b29c2561a0d24fd9b79c860a47692ba197a"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:15:32.257070Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:15:33.749877Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=15 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=65
+2026-10-26T17:15:34.519218Z  INFO {peer=v4redacted:40398 connection_kind="In"}:msg_as_req{msg="mempool"}: zakurad::components::mempool: resetting mempool: switched best chain, skipped blocks, or activated network upgrade tip_height=Height(3531491)
+2026-10-26T17:15:34.519245Z  INFO {peer=v4redacted:40398 connection_kind="In"}:msg_as_req{msg="mempool"}: zakurad::components::mempool: activating mempool tip_height=Height(3531491) reason="chain tip reset"
+2026-10-26T17:15:34.519249Z  INFO {peer=v4redacted:40398 connection_kind="In"}:msg_as_req{msg="mempool"}: zakurad::components::mempool: re-verifying mempool transactions after a chain fork transactions=1
+2026-10-26T17:15:35.067691Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:15:38.257819Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:15:38.257831Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531491))
+2026-10-26T17:15:41.104276Z  INFO zakura_network::peer::handshake: peer with inconsistent version services and version address services remote.services=PeerServices(0x0) remote_address_services=PeerServices(NODE_NETWORK) remote.user_agent="/zcash-seeder:0.01/"
+2026-10-26T17:15:48.258673Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:15:54.259825Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:15:54.259837Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531491))
+2026-10-26T17:15:56.579905Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:16:03.636494Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:16:04.260983Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:16:10.075752Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531491) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=35s
+2026-10-26T17:16:10.262845Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:16:10.262858Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531491))
+2026-10-26T17:16:11.305168Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:16:18.439589Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:16:20.263644Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:16:26.264890Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:16:26.264905Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531491))
+2026-10-26T17:16:36.265679Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:16:42.267250Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:16:42.267262Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531491))
+2026-10-26T17:16:52.268390Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531491))
+2026-10-26T17:16:54.502849Z  INFO {peer=v4redacted:64705 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000068eacc8d731b7edbab3dbc1ff90e728c7faf4c9dd04ea7434859d4 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531492)
+2026-10-26T17:16:54.503917Z  INFO zakurad::components::sync::gossip: height=Height(3531492) request=AdvertiseBlock(block::Hash("000000000068eacc8d731b7edbab3dbc1ff90e728c7faf4c9dd04ea7434859d4"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:16:56.556237Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:16:58.270272Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:16:58.270284Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:17:00.700237Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:17:07.123535Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:17:08.270858Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:17:10.087440Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531492) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=15s
+2026-10-26T17:17:12.800164Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:17:14.272176Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:17:14.272189Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:17:24.273180Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:17:30.274887Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:17:30.274900Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:17:34.765982Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:17:35.749471Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=16 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=64
+2026-10-26T17:17:40.275734Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:17:46.276588Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:17:46.276600Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:17:53.185510Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:17:55.187055Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:17:56.278081Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:18:00.206573Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:02.278924Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:18:02.278937Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:18:04.280192Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:07.625802Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:10.100734Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531492) network_upgrade=Nu6_3 remaining_sync_blocks=2 time_since_last_state_block=1m 15s
+2026-10-26T17:18:12.280258Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:18:13.259790Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:18.282161Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:18:18.282175Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:18:21.943646Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:27.145823Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:28.282817Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531492))
+2026-10-26T17:18:29.146912Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:34.284206Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:18:34.284219Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531492))
+2026-10-26T17:18:34.643842Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000042ff07bf705c4112dd8791fc6961664fc485e303d7b89b9808a2cd source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531493)
+2026-10-26T17:18:34.644897Z  INFO zakurad::components::sync::gossip: height=Height(3531493) request=AdvertiseBlock(block::Hash("000000000042ff07bf705c4112dd8791fc6961664fc485e303d7b89b9808a2cd"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:18:36.749798Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=39 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=41
+2026-10-26T17:18:37.079243Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:42.794371Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:44.284713Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531493))
+2026-10-26T17:18:44.796077Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:18:50.286380Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:18:50.286394Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531493))
+2026-10-26T17:18:54.779617Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:19:00.287823Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531493))
+2026-10-26T17:19:04.881829Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:19:06.288506Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:19:06.288519Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531493))
+2026-10-26T17:19:09.193913Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000058ad60a2506576f6a0f564b0965089fc027aa7dd620d5a8fd65009 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531494)
+2026-10-26T17:19:09.194986Z  INFO zakurad::components::sync::gossip: height=Height(3531494) request=AdvertiseBlock(block::Hash("000000000058ad60a2506576f6a0f564b0965089fc027aa7dd620d5a8fd65009"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:19:10.113983Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531494) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=0s
+2026-10-26T17:19:11.223318Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:19:13.717721Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:19:16.290332Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531494))
+2026-10-26T17:19:22.292327Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:19:22.292339Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531494))
+2026-10-26T17:19:32.294043Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531494))
+2026-10-26T17:19:33.202686Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000476507318779a4c6badef93d61fcce8bc2e3c406686b495a6cd947 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531495)
+2026-10-26T17:19:33.203751Z  INFO zakurad::components::sync::gossip: height=Height(3531495) request=AdvertiseBlock(block::Hash("0000000000476507318779a4c6badef93d61fcce8bc2e3c406686b495a6cd947"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:19:37.750213Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=16 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=64
+2026-10-26T17:19:38.295115Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:19:38.295131Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531495))
+2026-10-26T17:19:48.295714Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531495))
+2026-10-26T17:19:54.297253Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:19:54.297265Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531495))
+2026-10-26T17:20:04.298344Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531495))
+2026-10-26T17:20:10.126402Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531495) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=35s
+2026-10-26T17:20:10.299968Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:20:10.299977Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531495))
+2026-10-26T17:20:11.051955Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:20:20.247017Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:20:20.300860Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531495))
+2026-10-26T17:20:25.894072Z  INFO {peer=v4redacted:59894 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=000000000063767acd963c7fbaddb95f8d7cc1f7f596f2d931006b6136457443 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531496)
+2026-10-26T17:20:25.895142Z  INFO zakurad::components::sync::gossip: height=Height(3531496) request=AdvertiseBlock(block::Hash("000000000063767acd963c7fbaddb95f8d7cc1f7f596f2d931006b6136457443"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:20:26.301822Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: temporary error obtaining tips: queued download of hash behind our chain tip
+2026-10-26T17:20:26.301840Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531496))
+2026-10-26T17:20:27.627378Z  INFO {peer=v4redacted:54919 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=00000000006f9059032b4a33d23b52fd73bdfc527ad5df0bb7f2b9a38b869b78 source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531497)
+2026-10-26T17:20:27.628448Z  INFO zakurad::components::sync::gossip: height=Height(3531497) request=AdvertiseBlock(block::Hash("00000000006f9059032b4a33d23b52fd73bdfc527ad5df0bb7f2b9a38b869b78"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:20:30.892695Z  INFO {peer=v4redacted:51468 connection_kind="In"}:msg_as_req{msg="inv"}:inbound:download_and_verify{hash=0000000000073102409c0def758027bd8e5dd8dff80a9e15c2c13c984c7d5b9e source="legacy:redacted"}: zakurad::components::inbound::downloads: downloaded and verified gossiped block height=Height(3531498)
+2026-10-26T17:20:30.893776Z  INFO zakurad::components::sync::gossip: height=Height(3531498) request=AdvertiseBlock(block::Hash("0000000000073102409c0def758027bd8e5dd8dff80a9e15c2c13c984c7d5b9e"), None) log_msg="sending committed block broadcast"
+2026-10-26T17:20:32.721392Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:20:36.303125Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:20:38.870273Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=30 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=50
+2026-10-26T17:20:39.823974Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:20:42.303477Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:20:42.303490Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:20:52.305166Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:20:56.453029Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:20:58.305808Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:20:58.305821Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:21:03.826394Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:21:08.306514Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:21:10.139816Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531498) network_upgrade=Nu6_3 remaining_sync_blocks=0 time_since_last_state_block=35s
+2026-10-26T17:21:11.069778Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:21:14.307892Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:21:14.307905Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:21:24.308886Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:21:30.309582Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:21:30.309596Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:21:38.659722Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:21:40.310714Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:21:40.411686Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=80 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:21:45.415294Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:21:46.312109Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:21:46.312123Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:21:56.313319Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:22:02.314717Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:22:02.314730Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:22:03.628833Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:06.108003Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:08.299217Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:10.153108Z  INFO zakurad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(3531498) network_upgrade=Nu6_3 remaining_sync_blocks=1 time_since_last_state_block=1m 35s
+2026-10-26T17:22:12.315657Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:22:18.316598Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:22:18.316612Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:22:24.413025Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:26.722424Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:28.318111Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:22:34.319339Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:22:34.319351Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:22:39.255025Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:44.321276Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531498))
+2026-10-26T17:22:46.601634Z  INFO zakurad::components::mempool::gossip: sending pending mempool transaction broadcast request=AdvertiseTransactionIds(1) changes=1
+2026-10-26T17:22:47.713434Z  INFO crawl_and_dial{new_peer_interval=61s}: zakura_network::peer_set::initialize: timer-based crawl finished active_outbound_connections=81 peerset_target_size=100 outbound_connection_limit=150 remaining_replenishment_demand=0
+2026-10-26T17:22:50.323382Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: exhausted prospective tip set
+2026-10-26T17:22:50.323393Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531498))
+2026-10-26T17:22:51.581086Z  INFO sig{kind=SignalKind(2) name="SIGINT"}: zakurad::signal: received SIGINT, starting shutdown
+2026-10-26T17:22:51.581109Z  INFO zakurad::commands::start: exiting Zakura: asking other tasks to stop
+2026-10-26T17:22:51.581116Z  INFO zakurad::commands::start: exiting Zakura: all tasks have been asked to stop, waiting for remaining tasks to finish
+2026-10-26T17:22:51.581141Z  INFO zakurad::components::tokio: waiting for async tokio tasks to shut down TOKIO_SHUTDOWN_TIMEOUT=20s
+2026-10-26T17:22:51.581924Z  INFO zakura_state::service: dropping the state: logging database metrics
+2026-10-26T17:22:51.582101Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-26T17:22:51.582121Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-26T17:22:51.582609Z  INFO zakura_network::address_book_updater: stopping address book updater error=Err(AllAddressBookUpdaterSendersClosed)
+2026-10-26T17:22:51.589250Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Disk Size: 283.4 GB
+2026-10-26T17:22:51.589258Z  INFO zakura_state::service::finalized_state::disk_db: Total Live Data Disk Size: 282.8 GB
+2026-10-26T17:22:51.589259Z  INFO zakura_state::service::finalized_state::disk_db: Total Database Memory Size: 19 MB
+2026-10-26T17:22:51.589887Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-26T17:22:51.589892Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-26T17:22:54.868091Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-26T17:22:54.868091Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-26T17:22:54.868104Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/var/lib/ztreamer/cache/state/v29/mainnet"
+2026-10-26T17:22:54.868104Z  INFO zakura_state::service::finalized_state::disk_db: forcing shutdown of a state database with multiple active instances path="/var/lib/ztreamer/cache/state/v29/mainnet"
+2026-10-26T17:22:54.868346Z  INFO zakura_state::service: waiting for the block write task to finish
+2026-10-26T17:22:54.884828Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database format running_version=29.1.0+indexer
+2026-10-26T17:22:54.884833Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this instance is valid running_version=29.1.0+indexer
+2026-10-26T17:22:58.161792Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer initial_disk_version=29.1.0+indexer
+2026-10-26T17:22:58.299603Z  INFO zakurad::components::tokio: shutting down Zakura
+2026-10-26T17:22:58.299615Z  INFO zakurad::commands::start: stopping zakurad

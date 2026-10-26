@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":1,"result":{"version":1050100,"build":"v1.5.1+gaf944f5194ef","subversion":"/Zakura:1.5.1/","protocolversion":170190,"blocks":3531461,"connections":0,"difficulty":324016931.3814508,"testnet":false,"paytxfee":0.0,"relayfee":1e-6,"errors":"chain tip metrics channel closed","errorstimestamp":1793032659}}
