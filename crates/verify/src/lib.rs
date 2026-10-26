@@ -15,3 +15,4 @@ pub mod attest;
 pub mod epoch;
 pub mod manifest;
 pub mod range;
+pub mod sample;

@@ -16,12 +16,14 @@ use std::{
 };
 
 use async_trait::async_trait;
-use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
+use zakura_chain::{block, serialization::SerializationError, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
+    codec::CodecError,
     frontier::{FromRpc, RpcDecodeError},
     index::range_meta::{Attested, PoolRoots, SubtreeNode},
+    parser::CompactParseError,
 };
 use ztreamer_remote::{RpcError, ZakuraClient};
 
@@ -80,9 +82,22 @@ pub enum NodeError {
         /// The index of the subtree.
         index: NoteCommitmentSubtreeIndex,
     },
+    /// The node block does not deserialize.
+    #[error("node block does not deserialize")]
+    Block(#[from] SerializationError),
+    /// The node block has no coinbase height.
+    #[error("node block has no coinbase height")]
+    CoinbaseHeight,
+    /// The indexer parser does not read the node block.
+    #[error(transparent)]
+    Parse(#[from] CompactParseError),
+    /// The record of the node block does not encode.
+    #[error("record of the node block does not encode")]
+    Encode(#[from] CodecError),
 }
 
-/// Why [`Epoch::attest`] did not attest an epoch.
+/// Why [`Epoch::attest`] or [`sample_epoch`](crate::sample::sample_epoch) did not accept an
+/// epoch.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochError {
     /// A range of the epoch is wrong, or a blob must be fetched again.

@@ -8076,6 +8076,7 @@ dependencies = [
  "criterion",
  "hex",
  "incrementalmerkletree",
+ "rand 0.9.5",
  "serde",
  "serde_json",
  "serde_with",
@@ -8086,6 +8087,7 @@ dependencies = [
  "zakura-rpc",
  "zakura-sapling-crypto",
  "zakura-state",
+ "zakura-test",
  "ztreamer-indexer",
  "ztreamer-remote",
 ]

@@ -59,6 +59,7 @@ impl From<&ManifestEntry> for RangeLink {
 /// A check that a range can fail after its digest matches. [`Check::StartFrontier`] to
 /// [`Check::SubtreeRoots`] are the checks of [`Epoch::verify`](crate::epoch::Epoch::verify).
 /// The `Attested` checks are the checks of [`Epoch::attest`](crate::epoch::Epoch::attest).
+/// [`Check::SampledBlock`] is the check of [`sample_epoch`](crate::sample::sample_epoch).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Check {
     /// The blob format version is not `range_version`.
@@ -93,6 +94,8 @@ pub enum Check {
     AttestedRoots,
     /// The node has another root for a subtree that the epoch completed.
     AttestedSubtree,
+    /// The record at a sampled height is not the record of the full block from the node.
+    SampledBlock,
 }
 
 impl Check {
