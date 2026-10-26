@@ -6,8 +6,9 @@
 //! ```text
 //! latest.json                         manifest path, sealed height, publish time, public key
 //! latest.json.sig                     Ed25519 signature of latest.json, hex
-//! manifests/<date>.json               one entry per sealed range
-//! manifests/<date>.json.sig           Ed25519 signature of the manifest, hex
+//! manifests/<time>.json               one entry per sealed range; <time> is UTC, for example
+//!                                     2026-10-26T143005Z
+//! manifests/<time>.json.sig           Ed25519 signature of the manifest, hex
 //! ranges/<start>-<digest prefix>.bin  range blob; the prefix is 8 hex digits of its BLAKE3 digest
 //! ```
 //!
@@ -15,7 +16,8 @@
 //! The last range of a manifest always closes an epoch, so the export sets `epoch_end` on the
 //! last entry. The row in the index keeps its flag.
 //! A range file that exists with the correct digest is not written again. Thus a daily export
-//! writes only the new ranges.
+//! writes only the new ranges. A manifest is never replaced: each export writes a manifest with
+//! a new name, and `latest.json` points at the newest.
 
 use std::{
     fs::{self, File},
@@ -141,6 +143,11 @@ impl SnapshotDir {
             .entries(entries)
             .build()
             .wrap_err("the range_meta rows do not make a valid manifest")?;
+        let manifest_path = format!("manifests/{}.json", now.format("%Y-%m-%dT%H%M%SZ"));
+        ensure!(
+            !self.root.join(&manifest_path).exists(),
+            "{manifest_path} exists, and a manifest is never replaced"
+        );
 
         for dir in ["ranges", "manifests"] {
             fs::create_dir_all(self.root.join(dir))?;
@@ -154,7 +161,6 @@ impl SnapshotDir {
             .filter(|&wrote| wrote)
             .count();
 
-        let manifest_path = format!("manifests/{}.json", now.format("%Y-%m-%d"));
         self.put_signed(&manifest_path, &serde_json::to_vec(&manifest)?, signer)?;
         let latest = Latest {
             manifest: manifest_path.clone(),
@@ -411,7 +417,7 @@ mod tests {
 
         let report = export(&index, &out, 0, None);
 
-        let manifest_path = "manifests/2026-10-26.json";
+        let manifest_path = "manifests/2026-10-26T000000Z.json";
         assert_eq!(
             report,
             ExportReport {
@@ -483,8 +489,16 @@ mod tests {
         let report = export(&index, &out, 1, None);
 
         assert_eq!((report.ranges, report.written), (3, 0));
-        assert_eq!(report.manifest, "manifests/2026-10-27.json");
+        assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
         assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
+        assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 2);
+
+        // An export in the same second does not replace the manifest.
+        let now = DateTime::from_timestamp(NOW + 86_400, 0).unwrap();
+        let error = SnapshotDir::new(out.path().to_owned())
+            .export(&index, &Network::Mainnet, now, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("never replaced"), "{error}");
     }
 
     #[test]
@@ -506,7 +520,7 @@ mod tests {
             key.verify_strict(&bytes, &Signature::from_bytes(&signature)).unwrap();
             assert!(key.verify_strict(b"other bytes", &Signature::from_bytes(&signature)).is_err());
         }
-        assert_eq!(latest.manifest, "manifests/2026-10-26.json");
+        assert_eq!(latest.manifest, "manifests/2026-10-26T000000Z.json");
     }
 
     #[test]
