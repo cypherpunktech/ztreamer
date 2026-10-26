@@ -460,6 +460,19 @@ mod tests {
     }
 
     #[test]
+    fn the_written_manifest_passes_manifest_validation() {
+        let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (index, entries) = indexed(&dir, &ALL_ROWS);
+
+        let report = export(&index, &out, 0, None);
+
+        let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
+        // `from_json` checks every rule of the manifest.
+        let manifest = Manifest::from_json(&json).unwrap();
+        assert_eq!(manifest.entries(), entries);
+    }
+
+    #[test]
     fn a_second_export_writes_no_range_file_again() {
         let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (index, _) = indexed(&dir, &ALL_ROWS);
