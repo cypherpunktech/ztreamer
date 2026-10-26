@@ -60,6 +60,46 @@ pub struct Manifest {
     pub entries: Vec<ManifestEntry>,
 }
 
+/// Builds a [`Manifest`] whose version and `sealed_through` agree with its entries.
+///
+/// ```
+/// use zakura_chain::block;
+/// use ztreamer_indexer::index::range_meta::ManifestEntry;
+/// use ztreamer_verify::manifest::{Manifest, ManifestError};
+///
+/// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
+///     Manifest::builder("Mainnet", genesis).entries(entries).build()
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct ManifestBuilder {
+    network: String,
+    genesis_hash: block::Hash,
+    entries: Vec<ManifestEntry>,
+}
+
+impl ManifestBuilder {
+    /// Sets the entries: one per sealed range, in height order from genesis.
+    pub fn entries(mut self, entries: Vec<ManifestEntry>) -> Self {
+        self.entries = entries;
+        self
+    }
+
+    /// Builds the manifest at [`MANIFEST_VERSION`], with `sealed_through` at the end of the last
+    /// entry, and validates it with [`Manifest::validate`].
+    pub fn build(self) -> Result<Manifest, ManifestError> {
+        let manifest = Manifest {
+            network: self.network,
+            genesis_hash: self.genesis_hash,
+            sealed_through: self.entries.last().map_or(0, |entry| entry.end_height),
+            manifest_version: MANIFEST_VERSION,
+            entries: self.entries,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
 /// A manifest that does not parse or does not obey the rules in [`Manifest::validate`].
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -118,6 +158,11 @@ pub enum ManifestError {
 }
 
 impl Manifest {
+    /// Starts a [`ManifestBuilder`] for `network` with the genesis block hash.
+    pub fn builder(network: impl Into<String>, genesis_hash: block::Hash) -> ManifestBuilder {
+        ManifestBuilder { network: network.into(), genesis_hash, entries: Vec::new() }
+    }
+
     /// Parses a manifest and validates it.
     pub fn from_json(json: &str) -> Result<Self, ManifestError> {
         let manifest: Self = serde_json::from_str(json)?;
@@ -388,13 +433,7 @@ mod tests {
         entries[1].frontiers = entries[0].frontiers.clone();
         entries[0].blob_digest = BlobDigest([7; 32]);
         entries[0].blob_len = 121_034_512;
-        Manifest {
-            network: "Mainnet".to_owned(),
-            genesis_hash: hash(0),
-            sealed_through: 1_999,
-            manifest_version: 1,
-            entries,
-        }
+        Manifest::builder("Mainnet", hash(0)).entries(entries).build().unwrap()
     }
 
     #[test]
@@ -403,6 +442,8 @@ mod tests {
         let json = serde_json::to_string(&manifest).unwrap();
 
         assert_eq!(Manifest::from_json(&json).unwrap(), manifest);
+        assert_eq!(manifest.sealed_through, 1_999);
+        assert_eq!(manifest.manifest_version, MANIFEST_VERSION);
     }
 
     #[test]

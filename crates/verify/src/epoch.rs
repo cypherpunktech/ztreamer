@@ -19,7 +19,6 @@ pub const MAX_COMMITMENTS: u64 = 1_000_000;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Epoch<'a> {
     entries: &'a [ManifestEntry],
-    end_height: u32,
     commitments: u64,
 }
 
@@ -31,7 +30,7 @@ impl<'a> Epoch<'a> {
 
     /// The last height of the epoch. The node attests the tree roots at this height.
     pub const fn end_height(&self) -> u32 {
-        self.end_height
+        self.entries.last().expect("an epoch is never empty").end_height
     }
 
     /// The note commitments that the epoch adds, over all three pools.
@@ -64,11 +63,7 @@ pub fn epochs(entries: &[ManifestEntry]) -> Vec<Epoch<'_>> {
             || commitments >= MAX_COMMITMENTS
             || index + 1 == entries.len();
         if closes {
-            epochs.push(Epoch {
-                entries: &entries[start..=index],
-                end_height: entry.end_height,
-                commitments,
-            });
+            epochs.push(Epoch { entries: &entries[start..=index], commitments });
             (start, base) = (index + 1, total(entry.end_tree_sizes));
         }
     }
