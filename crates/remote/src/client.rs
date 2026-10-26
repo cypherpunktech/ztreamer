@@ -145,12 +145,20 @@ pub struct CallOptions {
     pub timeout: Option<Duration>,
     /// Replaces the configured retry count.
     pub max_retries: Option<u32>,
+    /// Retries only a failure where the request did not reach the node
+    /// ([`RpcError::is_unsent`]). Use this for a call that must not run twice on the node.
+    pub unsent_only: bool,
 }
 
 impl CallOptions {
     /// One attempt, no retries.
     pub const fn no_retry() -> Self {
-        Self { timeout: None, max_retries: Some(0) }
+        Self { timeout: None, max_retries: Some(0), unsent_only: false }
+    }
+
+    /// Retries, but only when the request did not reach the node.
+    pub const fn unsent_retries() -> Self {
+        Self { timeout: None, max_retries: None, unsent_only: true }
     }
 }
 
@@ -308,7 +316,8 @@ impl RpcClient {
                 }
             }
 
-            if error.is_retryable() && retries < max_retries {
+            let retry = if options.unsent_only { error.is_unsent() } else { error.is_retryable() };
+            if retry && retries < max_retries {
                 let wait = self.inner.retry.backoff(retries);
                 retries += 1;
                 tracing::debug!(

@@ -163,7 +163,7 @@ async fn call_options_override_timeout_and_retries() {
         .call_with(
             "getblock",
             ("1",),
-            CallOptions { timeout: Some(Duration::from_secs(2)), max_retries: None },
+            CallOptions { timeout: Some(Duration::from_secs(2)), ..CallOptions::default() },
         )
         .await
         .unwrap();
@@ -308,7 +308,7 @@ async fn unreachable_node_is_a_transport_error() {
 }
 
 #[tokio::test]
-async fn send_raw_transaction_is_not_retried() {
+async fn send_raw_transaction_is_not_retried_after_the_node_answers() {
     let mock = MockNode::start(|_, _| Reply::Status {
         status: StatusCode::SERVICE_UNAVAILABLE,
         body: "busy",
@@ -319,4 +319,53 @@ async fn send_raw_transaction_is_not_retried() {
     let error = node.send_raw_transaction(&[0xde, 0xad]).await.unwrap_err();
     assert!(error.is_retryable(), "{error}");
     assert_eq!(mock.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn a_refused_connection_is_unsent() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let client = RpcClient::new(RpcConfig::new(format!("http://{addr}").parse().unwrap())).unwrap();
+    let error = client.call::<_, Value>("getblockcount", ()).await.unwrap_err();
+    assert!(error.is_unsent(), "{error:?}");
+}
+
+#[tokio::test]
+async fn send_raw_transaction_retries_a_refused_connection() {
+    // The port refuses connections until the server starts on it, after the first attempt.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let server = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        let service = hyper::service::service_fn(
+            |request: hyper::Request<hyper::body::Incoming>| async move {
+                let body =
+                    http_body_util::BodyExt::collect(request.into_body()).await.unwrap().to_bytes();
+                let request: Value = serde_json::from_slice(&body).unwrap();
+                let reply =
+                    json!({"jsonrpc": "2.0", "result": "00".repeat(32), "id": request["id"]});
+                Ok::<_, std::convert::Infallible>(hyper::Response::new(http_body_util::Full::new(
+                    bytes::Bytes::from(serde_json::to_vec(&reply).unwrap()),
+                )))
+            },
+        );
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+            .await
+            .unwrap();
+    });
+    let retries = RetryPolicy {
+        max_retries: 20,
+        initial_backoff: Duration::from_millis(10),
+        max_backoff: Duration::from_millis(10),
+    };
+    let config = RpcConfig::new(format!("http://{addr}").parse().unwrap()).with_retry(retries);
+    let node = ZakuraClient::new(RpcClient::new(config).unwrap());
+    let sent = node.send_raw_transaction(&[0xde, 0xad]).await.unwrap();
+    assert_eq!(sent.hash().to_string(), "00".repeat(32));
+    server.abort();
 }

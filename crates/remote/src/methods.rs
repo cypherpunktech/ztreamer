@@ -242,14 +242,16 @@ impl ZakuraClient {
 
     /// `sendrawtransaction`: sends a serialized transaction to the mempool of the node.
     ///
-    /// This call makes one attempt. After a timeout, the node can have the transaction already,
-    /// and a second attempt then gets the error "transaction already exists in mempool".
+    /// This call retries only when the request did not reach the node
+    /// ([`CallOptions::unsent_retries`]). After a timeout, the node can have the transaction
+    /// already, and a second attempt then gets the error "transaction already exists in
+    /// mempool".
     pub async fn send_raw_transaction(
         &self,
         transaction: &[u8],
     ) -> Result<SendRawTransactionResponse, RpcError> {
         let params = (HexData(transaction.to_vec()),);
-        self.rpc.call_with(Method::SendRawTransaction.name(), params, CallOptions::no_retry()).await
+        self.rpc.call_with(Method::SendRawTransaction.name(), params, CallOptions::unsent_retries()).await
     }
 
     /// `getaddresstxids`: the ids of the transactions that touch the addresses.

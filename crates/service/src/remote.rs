@@ -3,5 +3,5 @@
 mod backend;
 mod head;
 
-pub use backend::{RemoteBackend, RemoteConnectError};
+pub use backend::{RemoteBackend, RemoteConnectError, TipPoller};
 pub use head::RemoteHeadSource;

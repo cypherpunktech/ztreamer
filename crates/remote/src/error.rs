@@ -193,6 +193,17 @@ impl RpcError {
         matches!(self.rpc_code(), Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER))
     }
 
+    /// True when the request did not reach the node: the connection, the DNS lookup or the TLS
+    /// handshake failed. Thus a second attempt cannot run the call twice on the node.
+    pub fn is_unsent(&self) -> bool {
+        let Self::Transport { source, .. } = self else {
+            return false;
+        };
+        source
+            .downcast_ref::<hyper_util::client::legacy::Error>()
+            .is_some_and(hyper_util::client::legacy::Error::is_connect)
+    }
+
     /// True when the same request may succeed if sent again.
     ///
     /// Every call the client makes is idempotent on the node, so a retry can never double an

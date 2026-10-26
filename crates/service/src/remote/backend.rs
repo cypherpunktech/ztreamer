@@ -11,14 +11,17 @@ use std::{
     hash::Hash,
     mem::size_of,
     ops::RangeInclusive,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
 use lru::LruCache;
 use sapling_crypto::Node as SaplingNode;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use zakura_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
@@ -33,6 +36,7 @@ use zakura_rpc::{
     client::{
         GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosResponse,
         GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
+        TransactionObject,
     },
     methods::GetAddressUtxosRequest,
 };
@@ -100,7 +104,8 @@ impl From<RpcError> for BackendError {
 /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
 /// let node = ZakuraClient::new(RpcClient::new(config)?);
-/// let backend = RemoteBackend::connect(node, Network::Mainnet).await?;
+/// let (backend, poller) = RemoteBackend::connect(node, Network::Mainnet).await?;
+/// tokio::spawn(poller.run());
 /// # let _ = backend;
 /// # Ok(())
 /// # }
@@ -111,8 +116,14 @@ pub struct RemoteBackend {
     sapling_subtrees: SubtreeCache<SaplingNode>,
     orchard_subtrees: SubtreeCache<orchard::tree::Node>,
     ironwood_subtrees: SubtreeCache<ironwood::tree::Node>,
-    mempool: ForeverCache<transaction::Hash, UnminedTx>,
-    tip: TipWatch,
+    mempool: LruMap<transaction::Hash, UnminedTx>,
+    tip: Arc<TipWatch>,
+}
+
+impl Drop for RemoteBackend {
+    fn drop(&mut self) {
+        self.tip.close();
+    }
 }
 
 impl std::fmt::Debug for RemoteBackend {
@@ -128,9 +139,12 @@ impl RemoteBackend {
     /// Connects to the node and makes sure that it runs `network`: the chain name and the
     /// genesis hash must match.
     ///
-    /// It also starts the task that polls the best block hash for the tip listeners. The task
-    /// stops when the backend is dropped.
-    pub async fn connect(node: ZakuraClient, network: Network) -> Result<Self, RemoteConnectError> {
+    /// It also returns the [`TipPoller`] of the backend. Spawn [`TipPoller::run`]: without it,
+    /// no tip listener wakes.
+    pub async fn connect(
+        node: ZakuraClient,
+        network: Network,
+    ) -> Result<(Self, TipPoller), RemoteConnectError> {
         let (info, genesis) =
             tokio::try_join!(node.get_blockchain_info(), node.get_block_hash(block::Height(0)))?;
         let expected = network.bip70_network_name();
@@ -141,15 +155,19 @@ impl RemoteBackend {
         if found != expected {
             return Err(RemoteConnectError::WrongGenesis { expected, found });
         }
-        Ok(Self {
-            node: node.clone(),
+        let best = info.best_block_hash();
+        let tip = Arc::new(TipWatch::new(best));
+        let poller = TipPoller { node: node.clone(), watch: Arc::clone(&tip), last: best };
+        let backend = Self {
+            node,
             network,
             sapling_subtrees: LruMap::new("sapling_subtrees", SUBTREE_CACHE_BYTES),
             orchard_subtrees: LruMap::new("orchard_subtrees", SUBTREE_CACHE_BYTES),
             ironwood_subtrees: LruMap::new("ironwood_subtrees", SUBTREE_CACHE_BYTES),
             mempool: LruMap::new("mempool", MEMPOOL_CACHE_BYTES),
-            tip: TipWatch::start(node, info.best_block_hash()),
-        })
+            tip,
+        };
+        Ok((backend, poller))
     }
 
     /// Completed subtrees of `P` from `start`, at most `limit` of them.
@@ -199,12 +217,12 @@ impl RemoteBackend {
         Ok(subtrees)
     }
 
-    /// A transaction from `getrawtransaction` with verbose 1, and its best-chain height. The
+    /// The `getrawtransaction` answer with verbose 1, and the best-chain height in it. The
     /// height is `None` for a mempool transaction. `None` when the node does not have it.
     async fn fetch_transaction(
         &self,
         id: transaction::Hash,
-    ) -> Result<Option<(Transaction, Option<block::Height>)>, BackendError> {
+    ) -> Result<Option<(Box<TransactionObject>, Option<block::Height>)>, BackendError> {
         let request = self.node.get_raw_transaction(id, true).await;
         let Some(response) = request.or_not_found(RpcCode::INVALID_ADDRESS_OR_KEY)? else {
             return Ok(None);
@@ -214,17 +232,9 @@ impl RemoteBackend {
                 "remote zakura sent a raw transaction for a verbose request".into(),
             ));
         };
-        let transaction: Transaction =
-            decode(object.hex().as_ref().to_vec(), "transaction").await?;
-        if transaction.hash() != id {
-            return Err(BackendError::Unexpected(format!(
-                "remote zakura sent transaction {} for {id}",
-                transaction.hash()
-            )));
-        }
         // A height of -1 is a side chain, which is not the best chain either.
         let height = object.height().and_then(|height| u32::try_from(height).ok());
-        Ok(Some((transaction, height.map(block::Height))))
+        Ok(Some((object, height.map(block::Height))))
     }
 
     /// A mempool transaction, from the cache or the node. `None` when the transaction left the
@@ -232,20 +242,35 @@ impl RemoteBackend {
     ///
     /// The cache key is the mined id, so the cache keeps the first authorizing data that the
     /// node gave for a version 5 transaction.
-    async fn mempool_transaction(&self, id: String) -> Result<Option<UnminedTx>, BackendError> {
+    async fn mempool_transaction(&self, id: &str) -> Result<Option<UnminedTx>, BackendError> {
         let id: transaction::Hash = id.parse().map_err(|_| {
             BackendError::Unexpected(format!("remote zakura sent a bad mempool id {id:?}"))
         })?;
         if let Some(cached) = self.mempool.get(&id) {
             return Ok(Some(cached));
         }
-        let Some((transaction, None)) = self.fetch_transaction(id).await? else {
+        let Some((object, None)) = self.fetch_transaction(id).await? else {
             return Ok(None);
         };
-        let unmined = UnminedTx::from(transaction);
+        let unmined = UnminedTx::from(decode_transaction(id, &object).await?);
         self.mempool.insert(id, unmined.clone());
         Ok(Some(unmined))
     }
+}
+
+/// Decodes the transaction in a verbose `getrawtransaction` answer. Its id must be `id`.
+async fn decode_transaction(
+    id: transaction::Hash,
+    object: &TransactionObject,
+) -> Result<Transaction, BackendError> {
+    let transaction: Transaction = decode(object.hex().as_ref().to_vec(), "transaction").await?;
+    if transaction.hash() != id {
+        return Err(BackendError::Unexpected(format!(
+            "remote zakura sent transaction {} for {id}",
+            transaction.hash()
+        )));
+    }
+    Ok(transaction)
 }
 
 fn address_strings(addresses: HashSet<transparent::Address>) -> Vec<String> {
@@ -261,54 +286,87 @@ fn amount(zatoshis: u64) -> Result<Amount<NonNegative>, BackendError> {
 /// The best block hash or the last poll error, as the tip poller sees it.
 type BestHash = Result<block::Hash, BackendError>;
 
-/// The best block hash that one task keeps current for every tip listener of a backend.
+/// The best block hash for the tip listeners of a backend, shared with its [`TipPoller`].
+#[derive(Debug)]
 struct TipWatch {
-    receiver: watch::Receiver<BestHash>,
-    poller: tokio::task::JoinHandle<()>,
+    sender: watch::Sender<BestHash>,
+    /// Wakes the poller when a listener is made or the backend is dropped.
+    wake: Notify,
+    /// Set when the backend is dropped.
+    closed: AtomicBool,
 }
 
 impl TipWatch {
-    /// Starts the poller from `best`, the best block hash at connect.
-    fn start(node: ZakuraClient, best: block::Hash) -> Self {
-        let (sender, receiver) = watch::channel(Ok(best));
-        Self { receiver, poller: tokio::spawn(poll_best_hash(node, sender, best)) }
+    fn new(best: block::Hash) -> Self {
+        Self {
+            sender: watch::Sender::new(Ok(best)),
+            wake: Notify::new(),
+            closed: AtomicBool::new(false),
+        }
     }
 
-    /// A listener that starts from the value of now. The value is at most one poll old.
+    /// A listener that starts from the hash of now.
     fn listener(&self) -> RemoteTipListener {
-        let mut receiver = self.receiver.clone();
-        receiver.mark_unchanged();
+        let receiver = self.sender.subscribe();
+        self.wake.notify_one();
         RemoteTipListener(receiver)
     }
-}
 
-impl Drop for TipWatch {
-    fn drop(&mut self) {
-        self.poller.abort();
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.wake.notify_one();
     }
 }
 
-/// Polls `getbestblockhash` and wakes the listeners when the hash changes or a call fails.
-/// After a failure, a hash that is the same as before the failure wakes nobody.
-async fn poll_best_hash(
+/// Polls the best block hash for the tip listeners of one [`RemoteBackend`].
+///
+/// [`RemoteBackend::connect`] returns it. Spawn [`TipPoller::run`]: without it, no tip listener
+/// wakes.
+#[derive(Debug)]
+pub struct TipPoller {
     node: ZakuraClient,
-    sender: watch::Sender<BestHash>,
-    mut last: block::Hash,
-) {
-    let mut interval = tokio::time::interval(TIP_POLL_INTERVAL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        interval.tick().await;
-        match node.get_best_block_hash().await {
+    watch: Arc<TipWatch>,
+    last: block::Hash,
+}
+
+impl TipPoller {
+    /// Calls `getbestblockhash` every second while at least one tip listener exists. It wakes
+    /// the listeners when the hash changes or a call fails. After a failure, a hash that is the
+    /// same as before the failure wakes nobody. While no listener exists, it makes no calls. It
+    /// returns when the backend is dropped and no listener is left.
+    ///
+    /// After a time without listeners, the hash that it keeps can be old. The first poll then
+    /// wakes the new listeners, also for a change before they were made. A mempool stream then
+    /// ends one block early, which is safe. A change after a listener is made always wakes it.
+    pub async fn run(mut self) {
+        let mut interval = tokio::time::interval(TIP_POLL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            if self.watch.sender.receiver_count() == 0 {
+                if self.watch.closed.load(Ordering::SeqCst) {
+                    return;
+                }
+                self.watch.wake.notified().await;
+                interval.reset_immediately();
+                continue;
+            }
+            interval.tick().await;
+            self.poll().await;
+        }
+    }
+
+    async fn poll(&mut self) {
+        match self.node.get_best_block_hash().await {
             Ok(best) => {
-                let changed = best.hash() != last;
-                last = best.hash();
-                sender.send_if_modified(|value| {
+                let changed = best.hash() != self.last;
+                self.last = best.hash();
+                let last = self.last;
+                self.watch.sender.send_if_modified(|value| {
                     *value = Ok(last);
                     changed
                 });
             }
-            Err(error) => sender.send_modify(|value| *value = Err(error.into())),
+            Err(error) => self.watch.sender.send_modify(|value| *value = Err(error.into())),
         }
     }
 }
@@ -479,6 +537,9 @@ impl Pool for IronwoodPool {
 /// The bytes of an entry are an estimate: the size of the key and the value, a fixed overhead
 /// for the map, and [`HeapBytes::heap_bytes`] of the value. The map reports its bytes, its
 /// entries, and its hits, misses and evictions as metrics with the label `cache`.
+///
+/// The trees and subtrees in it do not change. A mempool entry is used only while
+/// `getrawmempool` still lists its id.
 struct LruMap<K, V> {
     budget: usize,
     inner: Mutex<LruMapInner<K, V>>,
@@ -602,10 +663,11 @@ impl StateBackend for RemoteBackend {
         &self,
         hash: transaction::Hash,
     ) -> Result<Option<MinedTransaction>, BackendError> {
-        let Some((transaction, Some(height))) = self.fetch_transaction(hash).await? else {
+        let Some((object, Some(height))) = self.fetch_transaction(hash).await? else {
             return Ok(None);
         };
-        Ok(Some(MinedTransaction { transaction: Arc::new(transaction), height }))
+        let transaction = Arc::new(decode_transaction(hash, &object).await?);
+        Ok(Some(MinedTransaction { transaction, height }))
     }
 
     async fn tree_state(&self, _hash: block::Hash) -> Result<TreeState, BackendError> {
@@ -651,8 +713,9 @@ impl StateBackend for RemoteBackend {
             return Ok(Vec::new());
         }
         // The node also moves a start above its tip down to the tip. Read the tip first: the tip
-        // of the node does not go down, so the node then keeps the start as it is.
-        if *heights.start() > self.node.get_block_count().await? {
+        // of the node does not go down, so the node then keeps the start as it is. A start of 0
+        // cannot be above the tip.
+        if heights.start().0 > 0 && *heights.start() > self.node.get_block_count().await? {
             return Ok(Vec::new());
         }
         let request = GetAddressTxIdsRequest::new(
@@ -709,13 +772,19 @@ impl StateBackend for RemoteBackend {
             GetRawMempoolResponse::Verbose(objects) => objects.into_keys().collect(),
         };
         stream::iter(ids)
-            .map(|id| self.mempool_transaction(id))
+            .map(|id| async move {
+                let fetched = self.mempool_transaction(&id).await;
+                (id, fetched)
+            })
             .buffer_unordered(MEMPOOL_FETCHES)
             // A failed call for one transaction does not fail the read. That transaction is not
             // in the cache, so the next read asks for it again.
-            .filter_map(|fetched| {
+            .filter_map(|(id, fetched)| {
                 future::ready(match fetched {
-                    Err(BackendError::Unavailable(_)) => None,
+                    Err(BackendError::Unavailable(error)) => {
+                        tracing::warn!(txid = %id, %error, "remote zakura: skipped a mempool transaction");
+                        None
+                    }
                     fetched => fetched.transpose(),
                 })
             })
@@ -798,7 +867,9 @@ mod tests {
 
     async fn backend(mock: &MockNode) -> RemoteBackend {
         let node = ZakuraClient::new(RpcClient::new(mock.config()).unwrap());
-        RemoteBackend::connect(node, Network::Mainnet).await.unwrap()
+        let (backend, poller) = RemoteBackend::connect(node, Network::Mainnet).await.unwrap();
+        tokio::spawn(poller.run());
+        backend
     }
 
     fn block_1() -> Block {
@@ -813,7 +884,8 @@ mod tests {
     async fn connect_checks_the_network() {
         let mock = mainnet(1, |_, _| Reply::Close).await;
         let node = ZakuraClient::new(RpcClient::new(mock.config()).unwrap());
-        let backend = RemoteBackend::connect(node.clone(), Network::Mainnet).await.unwrap();
+        let (backend, _poller) =
+            RemoteBackend::connect(node.clone(), Network::Mainnet).await.unwrap();
         assert_eq!(backend.network(), Network::Mainnet);
         assert_eq!(backend.tip_height().await.unwrap(), Some(block::Height(1)));
 
@@ -881,6 +953,8 @@ mod tests {
         // A mempool transaction is not in the best chain.
         mined.store(false, Ordering::SeqCst);
         assert!(backend.transaction(id).await.unwrap().is_none());
+        // A mined answer for another id is refused.
+        mined.store(true, Ordering::SeqCst);
         let error = backend.transaction(transaction::Hash([1; 32])).await.unwrap_err();
         assert!(matches!(error, BackendError::Unexpected(_)), "{error}");
     }
@@ -1191,16 +1265,30 @@ mod tests {
             }
         })
         .await;
-        let backend = backend(&mock).await;
-        let mut first = backend.tip_listener().unwrap();
-        // The poller gives the same hash as at connect, so nothing wakes.
+        let node = ZakuraClient::new(RpcClient::new(mock.config()).unwrap());
+        let (backend, poller) = RemoteBackend::connect(node, Network::Mainnet).await.unwrap();
+        let poller = tokio::spawn(poller.run());
         let wait = TIP_POLL_INTERVAL + Duration::from_millis(500);
+        let polls =
+            || mock.seen().iter().filter(|seen| seen.body["method"] == "getbestblockhash").count();
+
+        // Without a listener, the poller makes no calls.
+        tokio::time::sleep(wait).await;
+        assert_eq!(polls(), 0);
+
+        // The poller gives the same hash as at connect, so nothing wakes.
+        let mut first = backend.tip_listener().unwrap();
         assert!(tokio::time::timeout(wait, first.tip_changed()).await.is_err());
+        assert!(polls() > 0);
         moved.store(true, Ordering::SeqCst);
         tokio::time::timeout(2 * wait, first.tip_changed()).await.unwrap().unwrap();
 
         // A listener made after the change starts from the new hash.
         let mut late = backend.tip_listener().unwrap();
         assert!(tokio::time::timeout(wait, late.tip_changed()).await.is_err());
+
+        // The poller returns when the backend and the listeners are gone.
+        drop((backend, first, late));
+        tokio::time::timeout(2 * wait, poller).await.unwrap().unwrap();
     }
 }
