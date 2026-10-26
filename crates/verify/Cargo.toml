@@ -12,6 +12,7 @@ workspace = true
 async-trait = "0.1"
 bytes = "1"
 ed25519-dalek.workspace = true
+futures-util = "0.3"
 hex = "0.4"
 http = "1"
 http-body-util = "0.1"

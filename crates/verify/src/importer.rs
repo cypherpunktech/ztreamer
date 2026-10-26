@@ -2,22 +2,23 @@
 //!
 //! [`Importer::run`] reads the manifest of the source. It refuses a manifest for another
 //! network or genesis block, and an index that is verified at or above the manifest. Then it
-//! sends each epoch after the verified tip of the index through three stages:
+//! starts the epochs after the verified tip of the index in height order, at most two for each
+//! of the [`ImportConfig::import_workers`] at a time. The work on one epoch is:
 //!
-//! 1. Fetch: at most [`ImportConfig::import_workers`] epochs at a time, in ascending order. The
-//!    stage fetches a blob again after a wrong digest, until the [`Fetcher`] drops the source.
-//!    An epoch at or below the sealed tip is installed already, with
-//!    [`VerifyState::ChainOk`] rows: the stage reads its blobs from the index, not from the
-//!    source. At most two epochs per worker and [`MAX_PENDING_BYTES`] wait for a verify worker.
-//! 2. Verify: at most `import_workers` runs of [`Epoch::verify`] on the blocking thread pool,
-//!    the waiting epoch with the most note commitments first. Then [`Epoch::attest`] and
-//!    [`Epoch::sample`] run against the [`TrustedNode`] at the same time, outside of the worker
-//!    limit. Thus the node calls of an epoch overlap the rebuild of the next epoch.
-//! 3. Install: one writer, in height order. It installs each range of a fetched epoch with
-//!    [`Index::install_sealed_range`] and a [`VerifyState::Verified`] row. It marks each range
-//!    of an installed epoch verified with [`Index::advance_verified_through`]. When the verified
-//!    epochs that wait for an epoch below them hold more than [`MAX_BUFFERED_RANGES`] ranges,
-//!    only the lowest epoch that is not verified starts a rebuild.
+//! 1. Take its part of a byte budget of [`MAX_PENDING_BYTES`], in height order. The epoch
+//!    keeps it until its install.
+//! 2. Fetch its blobs. After a wrong digest, fetch the blob again, until the [`Fetcher`] drops
+//!    the source. An epoch at or below the sealed tip is installed already, with
+//!    [`VerifyState::ChainOk`] rows: read its blobs from the index, not from the source.
+//! 3. Run [`Epoch::verify`] on the blocking thread pool. At most `import_workers` epochs do
+//!    this at the same time.
+//! 4. Run [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`] at the same
+//!    time. Thus the node calls of an epoch overlap the rebuild of the next epoch.
+//!
+//! The importer takes the verified epochs in height order, and installs each one before it
+//! takes the next. It installs each range of a fetched epoch with
+//! [`Index::install_sealed_range`] and a [`VerifyState::Verified`] row. It marks each range of
+//! an installed epoch verified with [`Index::advance_verified_through`].
 //!
 //! The start frontiers of the first epoch come from the `range_meta` row of the last verified
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
@@ -25,7 +26,7 @@
 //! manifest entry before it. [`Epoch::verify`] of the epoch before rebuilds them byte for byte,
 //! and the writer installs an epoch only after all epochs below it.
 //!
-//! A failed epoch stops the import. The writer first installs the epochs below it, thus the
+//! A failed epoch stops the import. The importer first installs the epochs below it, thus the
 //! index keeps them. A restart continues after the last installed epoch, and fetches no range
 //! that is installed.
 //!
@@ -37,33 +38,32 @@
 
 mod pipeline;
 
-use std::{num::NonZeroUsize, panic, sync::Arc, thread};
+use std::{future, num::NonZeroUsize, panic, pin, sync::Arc, thread};
 
 use bytes::Bytes;
-use tokio::sync::watch;
+use futures_util::{StreamExt as _, TryStreamExt as _, stream};
+use tokio::sync::{Semaphore, watch};
+use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::index::{
-    Index, IndexError, RANGE_SIZE,
+    Index, IndexError, IndexState, RANGE_SIZE,
     range_meta::{Frontiers, ManifestEntry, NodeId},
 };
 
-use self::pipeline::{Pipeline, Run};
+use self::pipeline::Run;
 use crate::{
     attest::{Attestor, EpochError, NodeError},
+    epoch::Epoch,
     fetch::{FetchError, Fetcher, RangeSource, Source},
     manifest::Manifest,
     range::Reject,
     sample::{SamplePlan, Sampler},
 };
 
-/// The most bytes of fetched blobs that wait for a verify worker. An epoch can hold about
-/// 1.2 GB of blobs. The fetch stage starts an epoch above this limit only when no blob waits.
+/// The byte budget of the blobs from their fetch to their install. Each epoch takes the bytes
+/// of its blobs before its fetch, in height order, and keeps them until its install. The
+/// largest mainnet epoch holds 258 MB of blobs. An epoch above the budget takes the full budget.
 pub const MAX_PENDING_BYTES: u64 = 2 << 30;
-
-/// The most ranges in verified epochs that wait for the install of an epoch below them when a
-/// rebuild starts. The epochs in verification do not count. The lowest epoch that is not
-/// verified starts above this limit.
-pub const MAX_BUFFERED_RANGES: usize = 64;
 
 /// The node that attests and samples the imported epochs.
 #[derive(Clone)]
@@ -122,6 +122,20 @@ pub struct ImportReport {
     pub verified_through: Option<u32>,
     /// `true` if the shutdown signal stopped the import before the end of the manifest.
     pub stopped: bool,
+}
+
+impl ImportReport {
+    /// Adds the install of `epoch`. `fetched` is `false` for an epoch that was installed with
+    /// `ChainOk` rows before the import.
+    fn add_install(&mut self, epoch: &Epoch<'_>, fetched: bool, state: &IndexState) {
+        if fetched {
+            self.epochs += 1;
+            self.ranges += epoch.entries().len();
+        }
+        self.sealed_through = state.sealed_through();
+        self.verified_through = state.verified_through();
+        info!(end_height = epoch.end_height(), ranges = self.ranges, "imported epoch");
+    }
 }
 
 /// Why an import stopped.
@@ -252,10 +266,13 @@ impl<S: RangeSource + 'static> Importer<S> {
     /// Imports the epochs of the manifest after the verified tip of the index, as the module
     /// docs give.
     ///
-    /// When `shutdown` becomes `true`, the writer completes the epoch that it installs, and the
-    /// import stops. The import drops the other epochs. The future is `Send + 'static`. The
+    /// When `shutdown` becomes `true`, the importer completes the epoch that it installs, and
+    /// the import stops. The import drops the other epochs. The future is `Send + 'static`. The
     /// caller spawns it.
-    pub async fn run(self, shutdown: watch::Receiver<bool>) -> Result<ImportReport, ImportError> {
+    pub async fn run(
+        self,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<ImportReport, ImportError> {
         let manifest = self.source.manifest().await?;
         self.check_identity(&manifest)?;
         let state = self.blocking(|index| index.state()).await?;
@@ -274,13 +291,46 @@ impl<S: RangeSource + 'static> Importer<S> {
             return Err(ImportError::EpochBoundary { height: sealed });
         }
         let start = self.start_frontiers(verified).await?;
-        let report = ImportReport {
+        let mut report = ImportReport {
             sealed_through: sealed,
             verified_through: verified,
             ..ImportReport::default()
         };
-        let run = Run::new(self, manifest, first, start, sealed);
-        Pipeline::new(run, report).run(shutdown).await
+        let run = Arc::new(Run::new(self, manifest, first, start, sealed));
+        let budget = Arc::new(Semaphore::new(MAX_PENDING_BYTES as usize));
+        let stop = async move {
+            // A dropped sender never stops the import.
+            if shutdown.wait_for(|&stop| stop).await.is_err() {
+                future::pending::<()>().await;
+            }
+        };
+        let epochs = stream::iter(run.epochs_to_import())
+            .then(|at| {
+                let (budget, bytes) = (Arc::clone(&budget), run.budget_bytes(at));
+                async move {
+                    let held = budget.acquire_many_owned(bytes).await;
+                    (at, held.expect("the budget is never closed"))
+                }
+            })
+            .map(|(at, held)| {
+                let (check, span) = (Arc::clone(&run).check(at), run.span(at));
+                async move { Ok::<_, ImportError>((at, check.await?, held)) }.instrument(span)
+            })
+            .buffered(run.window())
+            .take_until(stop);
+        let mut epochs = pin::pin!(epochs);
+        // `buffered` gives the epochs in height order. Thus the error of an epoch comes after
+        // the install of each epoch below it.
+        let mut next = run.epochs_to_import().start;
+        while let Some((at, rows, _held)) = epochs.try_next().await? {
+            let fetched = !run.is_installed(at);
+            let state = run.install(at, rows).instrument(run.span(at)).await?;
+            report.add_install(&run.epoch(at), fetched, &state);
+            next = at + 1;
+        }
+        // Only the shutdown signal ends the epochs early: an error returns above.
+        report.stopped = next < run.epochs_to_import().end;
+        Ok(report)
     }
 
     /// Refuses a manifest for another network or genesis block than the index.
@@ -347,7 +397,7 @@ mod tests {
     use async_trait::async_trait;
     use ed25519_dalek::SigningKey;
     use tempfile::TempDir;
-    use tokio::sync::{Barrier, Notify};
+    use tokio::sync::Notify;
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_indexer::{
         codec::{RangeDecoder, encode_range},
@@ -376,8 +426,6 @@ mod tests {
         answers: BTreeMap<u32, Attested>,
         hold: Option<Hold>,
         released: Notify,
-        /// Each `tree_roots` call waits until this count of calls wait.
-        together: Option<Barrier>,
         /// The heights of the answered `tree_roots` calls, in order.
         answered: Mutex<Vec<u32>>,
     }
@@ -395,9 +443,6 @@ mod tests {
         }
 
         async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
-            if let Some(together) = &self.together {
-                together.wait().await;
-            }
             if let Some((held, release)) = self.hold {
                 if height == held {
                     self.released.notified().await;
@@ -482,36 +527,18 @@ mod tests {
         }
 
         fn attestor(&self, hold: Option<Hold>) -> Arc<FakeAttestor> {
-            Arc::new(self.fake_attestor(hold, None))
-        }
-
-        /// An attestor that answers only when `calls` epochs ask for their roots together.
-        fn attestor_for_calls_together(&self, calls: usize) -> Arc<FakeAttestor> {
-            Arc::new(self.fake_attestor(None, Some(Barrier::new(calls))))
-        }
-
-        fn fake_attestor(&self, hold: Option<Hold>, together: Option<Barrier>) -> FakeAttestor {
             let answers = self.snapshot.manifest.entries().iter().map(|entry| {
                 let meta = self.source.index.range_meta(entry.start_height).unwrap().unwrap();
                 (entry.end_height, meta.attested.unwrap())
             });
             let (released, answered) = (Notify::new(), Mutex::default());
-            FakeAttestor { answers: answers.collect(), hold, released, together, answered }
+            Arc::new(FakeAttestor { answers: answers.collect(), hold, released, answered })
         }
 
         fn importer(
             &self,
             attestor: Arc<FakeAttestor>,
             network: Network,
-        ) -> Importer<CountedSource> {
-            self.importer_with_workers(attestor, network, 4)
-        }
-
-        fn importer_with_workers(
-            &self,
-            attestor: Arc<FakeAttestor>,
-            network: Network,
-            workers: usize,
         ) -> Importer<CountedSource> {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
             let source = HttpSource::new(self.server.base.clone(), key).unwrap();
@@ -523,7 +550,7 @@ mod tests {
             let config = ImportConfig {
                 network,
                 verify_sample: SamplePlan { per_range: 2, seed: 7 },
-                import_workers: NonZeroUsize::new(workers).unwrap(),
+                import_workers: NonZeroUsize::new(4).unwrap(),
             };
             let source = Source::Http(Box::new(source));
             let fetcher =
@@ -589,21 +616,6 @@ mod tests {
         assert_eq!((report.epochs, report.ranges), (12, 120));
         import.assert_same_ranges();
         assert_eq!(import.take_fetches(), 120);
-    }
-
-    #[tokio::test]
-    async fn the_buffer_limit_does_not_count_the_epochs_in_verification() {
-        // Eight epochs of ten ranges: more than `MAX_BUFFERED_RANGES` in verification.
-        let import = Import::new(80).await;
-        let attestor = import.attestor_for_calls_together(8);
-        let (_stop, shutdown) = watch::channel(false);
-
-        let importer = import.importer_with_workers(attestor, Network::Mainnet, 8);
-        let import_run = tokio::time::timeout(Duration::from_secs(60), importer.run(shutdown));
-        let report = import_run.await.expect("all eight epochs reach the attestor").unwrap();
-
-        assert_eq!((report.epochs, report.ranges), (8, 80));
-        import.assert_same_ranges();
     }
 
     #[tokio::test]
