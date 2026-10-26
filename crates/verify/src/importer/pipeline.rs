@@ -18,6 +18,7 @@ use ztreamer_indexer::index::{
 
 use super::{
     ImportError, Importer, MAX_PENDING_BYTES,
+    sources::Version,
     telemetry::{ImportMetrics, Stage},
 };
 use crate::{
@@ -29,13 +30,15 @@ use crate::{
 /// The blobs of an epoch and their `range_meta` rows, in height order.
 pub(crate) type Rows = Vec<(Bytes, RangeMeta)>;
 
-/// One import: the importer, the manifest, and where the import starts. The futures of the
+/// One import: the importer, the manifests, and where the import starts. The futures of the
 /// epochs share it.
 pub(crate) struct Run<S> {
     importer: Importer<S>,
-    manifest: Manifest,
-    /// The position of the first entry of each epoch of the manifest.
-    offsets: Vec<usize>,
+    /// The manifest of each source that gave one, and the position of the source. The first is
+    /// the reference.
+    manifests: Vec<(usize, Manifest)>,
+    /// The versions of each epoch of the reference. The first is the version of the reference.
+    versions: Vec<Vec<Version>>,
     /// The position of the first epoch to import.
     first: usize,
     /// The start frontiers of the first epoch.
@@ -51,31 +54,25 @@ pub(crate) struct Run<S> {
 impl<S: RangeSource + 'static> Run<S> {
     pub(crate) fn new(
         importer: Importer<S>,
-        manifest: Manifest,
+        manifests: Vec<(usize, Manifest)>,
         first: usize,
         start: Frontiers,
         sealed: Option<u32>,
     ) -> Self {
-        let offsets = manifest
-            .epochs()
-            .scan(0, |offset, epoch| {
-                let first = *offset;
-                *offset += epoch.entries().len();
-                Some(first)
-            })
-            .collect();
-        let fetched_from = manifest
+        let versions = Version::compare_manifests(&manifests);
+        let fetched_from = manifests[0]
+            .1
             .epochs()
             .take_while(|epoch| sealed.is_some_and(|sealed| epoch.end_height() <= sealed))
             .count();
         let workers = Semaphore::new(importer.config.import_workers.get());
         let metrics = ImportMetrics::new();
-        Self { importer, manifest, offsets, first, start, fetched_from, workers, metrics }
+        Self { importer, manifests, versions, first, start, fetched_from, workers, metrics }
     }
 
-    /// The positions of the epochs to import: from the first epoch to the end of the manifest.
+    /// The positions of the epochs to import: from the first epoch to the end of the reference.
     pub(crate) const fn epochs_to_import(&self) -> Range<usize> {
-        self.first..self.offsets.len()
+        self.first..self.versions.len()
     }
 
     /// The epochs in work at the same time: two for each verify worker. Thus the node calls of
@@ -84,10 +81,23 @@ impl<S: RangeSource + 'static> Run<S> {
         2 * self.importer.config.import_workers.get()
     }
 
+    /// The epoch at `at` in the reference.
     pub(crate) fn epoch(&self, at: usize) -> Epoch<'_> {
-        Epochs::starting_at(self.manifest.entries(), self.offsets[at])
+        self.version_epoch(at, 0)
+    }
+
+    /// The epoch of version `version` of the epoch at `at`.
+    fn version_epoch(&self, at: usize, version: usize) -> Epoch<'_> {
+        let Version { manifest, offset, .. } = self.versions[at][version];
+        Epochs::starting_at(self.manifests[manifest].1.entries(), offset)
             .next()
-            .expect("the import takes `at` from the epochs")
+            .expect("`Version` takes `offset` from the epochs")
+    }
+
+    /// Returns `true` if the manifests give two versions or more of the epoch at `at`, and the
+    /// epoch is not installed.
+    fn is_disputed(&self, at: usize) -> bool {
+        self.versions[at].len() > 1 && !self.is_installed(at)
     }
 
     /// The span of the work on the epoch at `at`.
@@ -109,18 +119,50 @@ impl<S: RangeSource + 'static> Run<S> {
     }
 
     /// Fetches, rebuilds, attests and samples the epoch at `at`, and gives its
-    /// [`VerifyState::Verified`] rows.
+    /// [`VerifyState::Verified`] rows. A disputed epoch goes to [`Run::resolve`].
     pub(crate) async fn check(self: Arc<Self>, at: usize) -> Result<Rows, ImportError> {
-        let blobs = self.fetch(at).await?;
-        let (blobs, proof) = self.rebuild(at, blobs).await?;
-        self.attest(at, blobs, proof).await
+        if self.is_disputed(at) {
+            return self.resolve(at).await;
+        }
+        self.check_version(at, 0).await
     }
 
-    /// The blobs of the epoch at `at`: from the index for an installed epoch, else from the
-    /// source.
-    async fn fetch(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
+    /// Checks each version of the disputed epoch at `at` in turn, until one passes. The sources
+    /// of each rejected version take a strike.
+    async fn resolve(self: &Arc<Self>, at: usize) -> Result<Rows, ImportError> {
+        let mut failure = None;
+        for version in 0..self.versions[at].len() {
+            match self.check_version(at, version).await {
+                Err(error @ ImportError::Rejected { .. }) => {
+                    self.importer.sources.strike(&self.versions[at][version].holders);
+                    failure = Some(error);
+                }
+                // The holders of the version cannot send it. Try the next version.
+                Err(error @ (ImportError::NoSources | ImportError::Fetch(_))) => {
+                    failure = Some(error);
+                }
+                checked => return checked,
+            }
+        }
+        Err(failure.expect("a disputed epoch has two versions or more"))
+    }
+
+    /// Fetches, rebuilds, attests and samples version `version` of the epoch at `at`.
+    async fn check_version(
+        self: &Arc<Self>,
+        at: usize,
+        version: usize,
+    ) -> Result<Rows, ImportError> {
+        let blobs = self.fetch(at, version).await?;
+        let (blobs, proof) = self.rebuild(at, version, blobs).await?;
+        self.attest(at, version, blobs, proof).await
+    }
+
+    /// The blobs of version `version` of the epoch at `at`: from the index for an installed
+    /// epoch, else from the sources of the version.
+    async fn fetch(&self, at: usize, version: usize) -> Result<Vec<Bytes>, ImportError> {
         let started = Instant::now();
-        let entries = self.epoch(at).entries();
+        let entries = self.version_epoch(at, version).entries();
         let blobs = if self.is_installed(at) {
             let starts: Vec<_> = entries.iter().map(|entry| entry.start_height).collect();
             let read = move |index: &Index| {
@@ -136,12 +178,9 @@ impl<S: RangeSource + 'static> Run<S> {
                 })
                 .collect::<Result<_, _>>()?
         } else {
+            let holders = &self.versions[at][version].holders;
             stream::iter(entries)
-                .then(|entry| async move {
-                    let blob = self.importer.blob(entry).await?;
-                    self.metrics.add_fetched_bytes(entry.blob_len);
-                    Ok::<_, ImportError>(blob)
-                })
+                .then(|entry| self.importer.sources.blob(entry, holders))
                 .try_collect()
                 .await?
         };
@@ -149,11 +188,12 @@ impl<S: RangeSource + 'static> Run<S> {
         Ok(blobs)
     }
 
-    /// Runs [`Epoch::verify`] for the epoch at `at` on the blocking thread pool, with one of
-    /// the `import_workers` permits.
+    /// Runs [`Epoch::verify`] for version `version` of the epoch at `at` on the blocking thread
+    /// pool, with one of the `import_workers` permits.
     async fn rebuild(
         self: &Arc<Self>,
         at: usize,
+        version: usize,
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<Bytes>, EpochProof), ImportError> {
         let _permit = {
@@ -165,7 +205,7 @@ impl<S: RangeSource + 'static> Run<S> {
         tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
                 let started = Instant::now();
-                let rebuilt = run.verify(at, blobs);
+                let rebuilt = run.verify(at, version, blobs);
                 run.metrics.record(Stage::Verify, started);
                 rebuilt
             })
@@ -174,13 +214,15 @@ impl<S: RangeSource + 'static> Run<S> {
         .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
     }
 
-    /// Runs [`Epoch::verify`] for the epoch at `at`. Call it on the blocking thread pool.
+    /// Runs [`Epoch::verify`] for version `version` of the epoch at `at`. Call it on the
+    /// blocking thread pool.
     fn verify(
         &self,
         at: usize,
+        version: usize,
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<Bytes>, EpochProof), ImportError> {
-        let epoch = self.epoch(at);
+        let epoch = self.version_epoch(at, version);
         // `Epoch::verify` of the epoch before rebuilt the frontiers of the entry before.
         let start = epoch
             .previous()
@@ -192,15 +234,16 @@ impl<S: RangeSource + 'static> Run<S> {
         Ok((blobs, proof))
     }
 
-    /// Runs [`Epoch::attest`] and [`Epoch::sample`] for the epoch at `at` at the same time,
-    /// and makes the [`VerifyState::Verified`] rows.
+    /// Runs [`Epoch::attest`] and [`Epoch::sample`] for version `version` of the epoch at `at`
+    /// at the same time, and makes the [`VerifyState::Verified`] rows.
     async fn attest(
         &self,
         at: usize,
+        version: usize,
         blobs: Vec<Bytes>,
         proof: EpochProof,
     ) -> Result<Rows, ImportError> {
-        let epoch = self.epoch(at);
+        let epoch = self.version_epoch(at, version);
         let node = &self.importer.node;
         let attest = async {
             let started = Instant::now();

@@ -210,7 +210,8 @@ impl RangeSource for Source {
     }
 }
 
-/// The strikes against one source: the blobs that it sent with a wrong digest.
+/// The strikes against one source: the blobs that it sent with a wrong digest, and the epochs
+/// that failed verification.
 #[derive(Debug, Default)]
 pub struct Strikes(AtomicU8);
 
@@ -270,6 +271,12 @@ impl<S: RangeSource> Fetcher<S> {
         &self.strikes
     }
 
+    /// Adds one strike against the source, and returns the new count. From
+    /// [`Strikes::LIMIT`] strikes, the fetcher refuses each call.
+    pub(crate) fn strike(&self) -> u8 {
+        self.strikes.add()
+    }
+
     /// What the export of the source holds.
     pub async fn export_info(&self) -> Result<ExportInfo, FetchError> {
         self.strikes.check()?;
@@ -303,7 +310,7 @@ impl<S: RangeSource> Fetcher<S> {
         if RangeBlob::new(&blob, entry).matches_digest() {
             return Ok(blob.freeze());
         }
-        let strikes = self.strikes.add();
+        let strikes = self.strike();
         warn!(start_height = entry.start_height, strikes, "range blob has a wrong digest");
         if strikes >= Strikes::LIMIT {
             return Err(FetchError::SourceDropped { strikes });
