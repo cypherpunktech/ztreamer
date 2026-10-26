@@ -1,11 +1,19 @@
 //! The `--remote-rpc` mode: `ztreamerd` reads the chain from a remote zakura node over JSON-RPC
 //! and starts no embedded node.
 
-use std::{ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    net::IpAddr,
+    ops::ControlFlow,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
 use http::Uri;
+use percent_encoding::percent_decode_str;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
@@ -33,27 +41,15 @@ type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBacke
 #[derive(Debug, Args)]
 pub(crate) struct RemoteArgs {
     /// JSON-RPC URL of a remote zakura node. ztreamerd then reads the chain from this node and
-    /// starts no embedded node.
+    /// starts no embedded node. For HTTP basic auth, put the credentials in the URL:
+    /// https://user:password@host:8232. Without credentials and without --remote-rpc-cookie, a
+    /// loopback URL uses the default cookie file of zakura if it exists.
     #[arg(long, value_name = "URL", conflicts_with_all = ["zakura_config", "fill_range_meta"])]
-    remote_rpc: Option<Uri>,
+    remote_rpc: Option<NodeUrl>,
 
     /// Cookie file of the --remote-rpc node.
-    #[arg(long, value_name = "FILE", requires = "remote_rpc", conflicts_with = "remote_rpc_user")]
-    remote_rpc_cookie: Option<PathBuf>,
-
-    /// User for HTTP basic auth to the --remote-rpc node.
-    #[arg(long, value_name = "USER", requires_all = ["remote_rpc", "remote_rpc_password"])]
-    remote_rpc_user: Option<String>,
-
-    /// Password for HTTP basic auth to the --remote-rpc node. Other users of the host can read
-    /// the command line, thus prefer --remote-rpc-cookie.
-    #[arg(long, value_name = "PASSWORD", requires = "remote_rpc_user")]
-    remote_rpc_password: Option<Secret>,
-
-    /// PEM-encoded CA certificates for an https --remote-rpc URL, in addition to the web PKI
-    /// roots.
     #[arg(long, value_name = "FILE", requires = "remote_rpc")]
-    remote_rpc_ca: Option<PathBuf>,
+    remote_rpc_cookie: Option<PathBuf>,
 
     /// Network of the index and of the --remote-rpc node: mainnet or testnet. Defaults to
     /// mainnet.
@@ -62,28 +58,106 @@ pub(crate) struct RemoteArgs {
 }
 
 impl RemoteArgs {
-    /// The node of `--remote-rpc`, or `None` without that flag. It reads the cookie file, but it
-    /// does not call the node.
+    /// The node of `--remote-rpc`, or `None` without that flag. The default cookie file is the
+    /// one of a zakura with the default configuration. It reads the cookie file, but it does
+    /// not call the node.
     pub(crate) fn node(&self) -> Result<Option<RemoteNode>> {
-        let Some(url) = self.remote_rpc.clone() else {
+        let rpc = zakura_rpc::config::rpc::Config::default();
+        self.node_with_default_cookie(&rpc.cookie_dir.join(rpc.cookie_file_name))
+    }
+
+    /// The node of `--remote-rpc`, or `None` without that flag, with `default_cookie` as the
+    /// default cookie file.
+    fn node_with_default_cookie(&self, default_cookie: &Path) -> Result<Option<RemoteNode>> {
+        let Some(url) = &self.remote_rpc else {
             return Ok(None);
         };
-        let auth = match (&self.remote_rpc_cookie, &self.remote_rpc_user, &self.remote_rpc_password)
-        {
-            (Some(cookie), ..) => Auth::Cookie(cookie.clone()),
-            (None, Some(user), Some(password)) => {
-                Auth::Basic { user: user.clone(), password: password.clone() }
-            }
-            _ => Auth::None,
-        };
-        let config = ZakuraClient::config(url).with_auth(auth);
-        let config = match &self.remote_rpc_ca {
-            Some(ca) => config.with_tls_ca_file(ca),
-            None => config,
-        };
+        let auth = self.auth(default_cookie)?;
+        info!(?auth, "remote zakura credentials");
+        let config = ZakuraClient::config(url.uri.clone()).with_auth(auth);
         let rpc = RpcClient::new(config).wrap_err("configure the --remote-rpc client")?;
         let network = self.network.clone().unwrap_or(Network::Mainnet);
         Ok(Some(RemoteNode::new(ZakuraClient::new(rpc), network)))
+    }
+
+    /// The credentials for the node: `--remote-rpc-cookie`, else the credentials of the URL,
+    /// else `default_cookie` when the URL is a loopback URL and the file exists, else none.
+    ///
+    /// The default cookie applies only to a loopback URL, because the cookie of a local zakura
+    /// gives access to that node: ztreamerd must not send it to another host.
+    fn auth(&self, default_cookie: &Path) -> Result<Auth> {
+        let Some(url) = &self.remote_rpc else {
+            return Ok(Auth::None);
+        };
+        Ok(match (&self.remote_rpc_cookie, &url.credentials) {
+            (Some(_), Some(_)) => {
+                return Err(eyre!(
+                    "use --remote-rpc-cookie or credentials in the --remote-rpc URL, not both"
+                ));
+            }
+            (Some(cookie), None) => Auth::Cookie(cookie.clone()),
+            (None, Some(credentials)) => credentials.clone(),
+            (None, None) if url.is_loopback() && default_cookie.is_file() => {
+                Auth::Cookie(default_cookie.to_owned())
+            }
+            (None, None) => Auth::None,
+        })
+    }
+}
+
+/// The URL of `--remote-rpc`. The credentials of its userinfo part
+/// (`https://user:password@host:8232`) go into [`Auth::Basic`]. Thus the URL that ztreamerd keeps
+/// and logs has no credentials, and the `Debug` output does not show the password.
+#[derive(Clone, Debug)]
+pub(crate) struct NodeUrl {
+    /// The URL without its userinfo part.
+    uri: Uri,
+    /// [`Auth::Basic`] from the userinfo part, if the URL has one.
+    credentials: Option<Auth>,
+}
+
+impl NodeUrl {
+    /// True when the host is `localhost` or a loopback address.
+    fn is_loopback(&self) -> bool {
+        self.uri.host().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        })
+    }
+}
+
+impl FromStr for NodeUrl {
+    type Err = eyre::Report;
+
+    /// Parses the URL and moves `user:password` from the userinfo part into [`Auth::Basic`]. It
+    /// percent-decodes the user and the password.
+    fn from_str(url: &str) -> Result<Self> {
+        let uri: Uri = url.parse()?;
+        let Some((userinfo, host)) = uri
+            .authority()
+            .and_then(|authority| authority.as_str().rsplit_once('@'))
+            .map(|(userinfo, host)| (userinfo.to_owned(), host.to_owned()))
+        else {
+            return Ok(Self { uri, credentials: None });
+        };
+        let (user, password) = userinfo
+            .split_once(':')
+            .ok_or_else(|| eyre!("the userinfo part of the URL needs user:password"))?;
+        let decode = |part: &str| {
+            percent_decode_str(part)
+                .decode_utf8()
+                .map(String::from)
+                .map_err(|_| eyre!("the userinfo part of the URL is not UTF-8"))
+        };
+        let credentials =
+            Auth::Basic { user: decode(user)?, password: Secret::new(decode(password)?) };
+        let mut parts = uri.into_parts();
+        parts.authority = Some(host.parse()?);
+        Ok(Self { uri: Uri::from_parts(parts)?, credentials: Some(credentials) })
     }
 }
 

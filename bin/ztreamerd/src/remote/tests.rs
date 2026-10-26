@@ -55,9 +55,15 @@ fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> DaemonArgs {
     Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
 }
 
+/// The node of `cli`, with no default cookie file. Thus a cookie of a local zakura does not
+/// change the tests.
+fn node(cli: &DaemonArgs) -> RemoteNode {
+    cli.remote.node_with_default_cookie(Path::new("/nonexistent/zakura/.cookie")).unwrap().unwrap()
+}
+
 /// Runs the daemon with no signal, until it stops by itself.
 async fn run(cli: DaemonArgs) -> Result<()> {
-    let node = cli.remote.node().unwrap().unwrap();
+    let node = node(&cli);
     let daemon = node.run_until(cli, Server::builder(), future::pending());
     timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
 }
@@ -86,7 +92,7 @@ impl Daemon {
     fn start(dir: &tempfile::TempDir, url: &str) -> Self {
         let grpc = free_addr();
         let cli = cli(dir, url, &["--grpc-listen", &grpc.to_string()]);
-        let node = cli.remote.node().unwrap().unwrap();
+        let node = node(&cli);
         let signal = CancellationToken::new();
         let received = signal.clone().cancelled_owned();
         let daemon = node.run_until(cli, Server::builder(), async move {
@@ -214,7 +220,7 @@ async fn waits_for_an_unreachable_node_until_the_signal() {
 }
 
 #[test]
-fn the_flags_keep_the_two_modes_apart_and_hide_the_password() {
+fn the_flags_keep_the_two_modes_apart() {
     let parse = |flags: &[&str]| {
         Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
     };
@@ -223,15 +229,67 @@ fn the_flags_keep_the_two_modes_apart_and_hide_the_password() {
     assert!(parse(&["--remote-rpc", url, "--fill-range-meta"]).is_err());
     assert!(parse(&["--remote-rpc-cookie", ".cookie"]).is_err());
     assert!(parse(&["--network", "testnet"]).is_err());
-    assert!(parse(&["--remote-rpc", url, "--remote-rpc-user", "user"]).is_err());
-    assert!(parse(&["--remote-rpc", url, "--remote-rpc-password", "hunter2"]).is_err());
-    let user = ["--remote-rpc-user", "user", "--remote-rpc-password", "hunter2"];
-    assert!(
-        parse(&["--remote-rpc", url, "--remote-rpc-cookie", ".cookie", user[0], user[1]]).is_err()
-    );
-
-    let cli = parse(&["--remote-rpc", url, user[0], user[1], user[2], user[3]]).unwrap();
-    assert!(!format!("{cli:?}").contains("hunter2"));
-    assert!(cli.remote.node().unwrap().is_some());
+    assert!(parse(&["--remote-rpc", "http://user@127.0.0.1:8232"]).is_err());
     assert!(parse(&[]).unwrap().remote.node().unwrap().is_none());
+}
+
+#[test]
+fn credentials_in_the_url_become_basic_auth() {
+    let url: NodeUrl = "https://us%40er:hunter:2@node.example:8232/".parse().unwrap();
+    assert_eq!(url.uri, "https://node.example:8232/");
+    let expected = Auth::Basic { user: "us@er".into(), password: Secret::new("hunter:2") };
+    assert_eq!(url.credentials, Some(expected));
+    assert!(!format!("{url:?}").contains("hunter"));
+    assert!(!url.is_loopback());
+
+    let url: NodeUrl = "http://[::1]:8232".parse().unwrap();
+    assert_eq!(url.credentials, None);
+    assert!(url.is_loopback());
+    assert!("http://user@127.0.0.1:8232".parse::<NodeUrl>().is_err());
+}
+
+#[test]
+fn the_credentials_come_from_the_flag_the_url_or_the_default_cookie() {
+    let dir = tempfile::tempdir().unwrap();
+    let cookie = dir.path().join(".cookie");
+    std::fs::write(&cookie, "__cookie__:secret").unwrap();
+    let missing = dir.path().join("missing");
+    let auth = |flags: &[&str], default_cookie: &Path| {
+        let flags = ["ztreamerd", "--remote-rpc"].iter().chain(flags);
+        Cli::parse_from(flags).daemon.remote.auth(default_cookie)
+    };
+    let flag = ["http://10.0.0.1:8232", "--remote-rpc-cookie", "/zakura/.cookie"];
+    assert_eq!(auth(&flag, &cookie).unwrap(), Auth::Cookie("/zakura/.cookie".into()));
+    let basic = Auth::Basic { user: "user".into(), password: Secret::new("hunter2") };
+    assert_eq!(auth(&["http://user:hunter2@localhost:8232"], &cookie).unwrap(), basic);
+    let both = ["http://user:hunter2@localhost:8232", "--remote-rpc-cookie", "/zakura/.cookie"];
+    assert!(auth(&both, &cookie).is_err());
+
+    for loopback in ["http://127.0.0.1:8232", "http://localhost:8232", "http://[::1]:8232"] {
+        assert_eq!(auth(&[loopback], &cookie).unwrap(), Auth::Cookie(cookie.clone()));
+        assert_eq!(auth(&[loopback], &missing).unwrap(), Auth::None);
+    }
+    // The cookie of a local zakura does not go to another host.
+    assert_eq!(auth(&["https://node.example:8232"], &cookie).unwrap(), Auth::None);
+}
+
+#[tokio::test]
+async fn the_node_gets_the_credentials_of_the_url_and_of_the_default_cookie() {
+    let dir = tempfile::tempdir().unwrap();
+    let cookie = dir.path().join(".cookie");
+    std::fs::write(&cookie, "__cookie__:secret").unwrap();
+    let mock = MockNode::start(|_, _| Reply::Result(json!("00"))).await;
+    let port = mock.addr().port();
+    let headers = async |url: String| {
+        let cli = Cli::parse_from(["ztreamerd", "--remote-rpc", &url]).daemon;
+        let node = cli.remote.node_with_default_cookie(&cookie).unwrap().unwrap();
+        assert!(!format!("{node:?}").contains("hunter2"));
+        node.client.rpc().call::<_, String>("getbestblockhash", ()).await.unwrap();
+        mock.seen().pop().unwrap().authorization
+    };
+
+    let basic = headers(format!("http://us%40er:hunter2@127.0.0.1:{port}")).await;
+    assert_eq!(basic.as_deref(), Some("Basic dXNAZXI6aHVudGVyMg=="));
+    let cookie = headers(format!("http://127.0.0.1:{port}")).await;
+    assert_eq!(cookie.as_deref(), Some("Basic X19jb29raWVfXzpzZWNyZXQ="));
 }

@@ -8122,6 +8122,7 @@ dependencies = [
  "eyre",
  "hex",
  "http",
+ "percent-encoding",
  "serde_json",
  "tempfile",
  "tokio",
