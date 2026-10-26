@@ -5,9 +5,9 @@
 //! In remote mode, no node runs in the `ztreamerd` process. Three parts read one remote zakura
 //! node over JSON-RPC. Each part holds a [`ZakuraClient`] from `ztreamer-remote`.
 //!
-//! - [`RemoteTailSource`] and [`RemoteHeadSource`] write blocks into the compact index. They
-//!   replace the embedded node as the sources of the historical pipeline and of the head
-//!   follower.
+//! - [`RemoteTailSource`] and [`RemoteHeadSource`] read blocks for the two parts that write the
+//!   compact index: [`HistoricalPipeline`] and the head follower. They replace the embedded node
+//!   as the sources of these writers. The sources themselves do not write the index.
 //! - [`RemoteBackend`] does not write the index. It answers the wallet requests that the index
 //!   cannot answer, at the time of the request. It replaces [`InProcessBackend`] as the
 //!   [`StateBackend`] of [`CompactService`].
@@ -18,48 +18,70 @@
 //!            blocks and      |          |  tree states, subtrees, transactions,
 //!            block ranges    |          |  addresses, mempool, submit, tip changes
 //!                            v          v
-//!                     compact index    RemoteBackend -----------------+
-//!                        (LMDB)                                       |
-//!                          ^                                          |
-//!                          | writes blocks                            |
-//!            +-------------+--------------+                           |
-//!            |                            |                           |
-//!     RemoteTailSource             RemoteHeadSource                   |
-//!     (historical pipeline)        (head follower)                    |
-//!            |                            |                           |
-//!            +------------+---------------+---------------------------+
+//!                     compact index    RemoteBackend -------------------------+
+//!                        (LMDB)                                               |
+//!                          ^                                                  |
+//!        writes blocks     |     writes blocks        writes sealed ranges    |
+//!        +-----------------+--------------+---------------------+             |
+//!        |                                |                     |             |
+//!   HistoricalPipeline              head follower           importer          |
+//!   (sync_until_stable)             (follow_head)           (planned)         |
+//!        ^                                ^                     ^             |
+//!        | blocks                         | blocks              | ranges      |
+//!   RemoteTailSource               RemoteHeadSource        snapshot hosts     |
+//!        |                                |                                   |
+//!        +----------------+---------------+-----------------------------------+
 //!                         |   ZakuraClient (ztreamer-remote)
 //!                         v
 //!               remote zakura node (JSON-RPC)
 //! ```
 //!
+//! # Who writes the index
+//!
+//! Three parts write the compact index. Each part writes its own band of heights:
+//!
+//! - **[`HistoricalPipeline`]** (`ztreamer-indexer`) writes finalized blocks in bulk. Its workers
+//!   read and parse the blocks of a [`HistoricalSource`], and the pipeline writes the records in
+//!   height order. `ztreamerd` runs it at startup with [`HistoricalPipeline::sync_until_stable`],
+//!   which stops when two passes agree on the tip. Its source is the embedded `ZakuraDb` today
+//!   and [`RemoteTailSource`] in remote mode.
+//! - **The head follower** ([`CompactService::follow_head`]) writes the newest blocks and
+//!   replaces them on a reorg. Its source is the embedded node today and [`RemoteHeadSource`] in
+//!   remote mode.
+//! - **The importer** (planned, not written yet) downloads the sealed ranges of a snapshot from
+//!   snapshot hosts, verifies them against the node, and writes them with
+//!   [`Index::install_sealed_range`]. Each range goes in with its [`RangeMeta`]. The importer does
+//!   not use the block pipeline. It comes with the `--replicate-from` startup path of the
+//!   replication plan.
+//!
 //! # Who writes which heights
 //!
-//! The two sources share the chain by height. `S` is the tip of the index when the run starts.
+//! The writers share the chain by height. `S` is the tip of the index when the run starts.
 //! `B` is the best height of the node.
 //!
 //! ```text
 //!   height: 0 ............... S ..................... B - SEAL_DEPTH .......... B
-//!           |   already in    |    RemoteTailSource   |    RemoteHeadSource    |
-//!           |   the index     |    bulk, finalized    |    follows the tip,    |
-//!           |                 |    blocks only        |    replaces reorgs     |
+//!           |  importer, or   |  HistoricalPipeline   |  head follower,        |
+//!           |  an earlier run |  from RemoteTail-     |  from RemoteHead-      |
+//!           |                 |  Source, in bulk      |  Source, with reorgs   |
 //! ```
 //!
 //! - **Below `S`.** The index holds these blocks from an earlier run. With replication, the
-//!   import of a snapshot installs them as verified sealed ranges, and `S` is the sealed tip of
-//!   the snapshot.
-//! - **`S` to `B - SEAL_DEPTH`.** [`RemoteTailSource`] is a [`HistoricalSource`]. Its tip is
-//!   [`SEAL_DEPTH`] blocks below the best tip, because the index seals blocks at that depth. The
-//!   pipeline workers read these blocks in bulk with `getblock <height> 0`, with several requests
-//!   in flight for each worker. This part is long only when `S` is far behind the node.
-//! - **`B - SEAL_DEPTH` to `B`.** [`RemoteHeadSource`] is a [`CanonicalBlockSource`].
-//!   [`CompactService::follow_head`] asks it for the tip with `getblockchaininfo`, once for each
-//!   [`HeadFollowerConfig::poll_interval`], and for each new block with `getblockhash` and then
-//!   `getblock <hash> 0`. The head follower replaces the blocks of a reorg down to
-//!   [`SEAL_DEPTH`].
+//!   importer installs them as verified sealed ranges, and `S` is the sealed tip of the
+//!   snapshot.
+//! - **`S` to `B - SEAL_DEPTH`.** [`HistoricalPipeline`] reads from [`RemoteTailSource`], a
+//!   [`HistoricalSource`]. The tip of the source is [`SEAL_DEPTH`] blocks below the best tip,
+//!   because the index seals blocks at that depth. The pipeline workers read these blocks in bulk
+//!   with `getblock <height> 0`, with several requests in flight for each worker. This part is
+//!   long only when `S` is far behind the node.
+//! - **`B - SEAL_DEPTH` to `B`.** The head follower reads from [`RemoteHeadSource`], a
+//!   [`CanonicalBlockSource`]. [`CompactService::follow_head`] asks it for the tip with
+//!   `getblockchaininfo`, once for each [`HeadFollowerConfig::poll_interval`], and for each new
+//!   block with `getblockhash` and then `getblock <hash> 0`. The head follower replaces the
+//!   blocks of a reorg down to [`SEAL_DEPTH`].
 //!
-//! The two sources write the same records as the embedded node writes. Thus the index does not
-//! know which mode wrote a block.
+//! With a remote source, the pipeline and the head follower write the same records as with the
+//! embedded node. Thus the index does not know which mode wrote a block.
 //!
 //! # What the backend answers
 //!
@@ -122,6 +144,10 @@
 //! [`HistoricalSource`]: ztreamer_indexer::pipeline::HistoricalSource
 //! [`CanonicalBlockSource`]: ztreamer_indexer::head::CanonicalBlockSource
 //! [`SEAL_DEPTH`]: ztreamer_indexer::index::SEAL_DEPTH
+//! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
+//! [`HistoricalPipeline::sync_until_stable`]: ztreamer_indexer::pipeline::HistoricalPipeline::sync_until_stable
+//! [`Index::install_sealed_range`]: ztreamer_indexer::index::Index::install_sealed_range
+//! [`RangeMeta`]: ztreamer_indexer::index::range_meta::RangeMeta
 //! [`InProcessBackend`]: crate::InProcessBackend
 //! [`StateBackend`]: crate::StateBackend
 //! [`CompactService`]: crate::CompactService
