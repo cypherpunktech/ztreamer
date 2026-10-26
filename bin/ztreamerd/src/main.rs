@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use zakura_chain::parameters::Network;
 use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadSyncError},
@@ -28,10 +29,13 @@ use ztreamer_indexer::{
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
 use ztreamer_node as node;
-use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
+use ztreamer_protocol::{
+    replicate::replicator_server::ReplicatorServer,
+    wire::compact_tx_streamer_server::CompactTxStreamerServer,
+};
 use ztreamer_service::{
-    CompactService, HeadFollowerConfig, InProcessBackend, RangeMetaFiller, StateBackend,
-    p2p::P2pCompactService,
+    CompactService, HeadFollowerConfig, InProcessBackend, RangeMetaFiller, ReplicatorService,
+    StateBackend, p2p::P2pCompactService,
 };
 
 mod lifecycle;
@@ -101,6 +105,11 @@ struct Cli {
     /// snapshot source.
     #[arg(long)]
     fill_range_meta: bool,
+
+    /// Replicator gRPC listener. It serves the sealed ranges that have a `range_meta` row to a
+    /// replica, with the TLS settings of the CompactTxStreamer server. Off when not set.
+    #[arg(long, value_name = "ADDR")]
+    replicate_listen: Option<SocketAddr>,
 }
 
 impl From<&Cli> for PipelineConfig {
@@ -174,16 +183,8 @@ async fn main() -> Result<()> {
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
         };
-        run_application(
-            cli,
-            grpc_server,
-            index,
-            network.bip70_network_name(),
-            p2p.clone(),
-            sources,
-            shutdown.clone(),
-        )
-        .await
+        run_application(cli, grpc_server, index, &network, p2p.clone(), sources, shutdown.clone())
+            .await
     };
 
     lifecycle::supervise(node, application, shutdown.clone(), lifecycle::shutdown_signal()).await
@@ -233,7 +234,7 @@ async fn run_application<T, H, B>(
     cli: Cli,
     grpc_server: Server,
     index: Arc<Index>,
-    chain_name: String,
+    network: &Network,
     p2p: Arc<P2pCompactService>,
     sources: NodeSources<T, H, B>,
     shutdown: CancellationToken,
@@ -260,7 +261,8 @@ where
     }
 
     let filler_index = cli.fill_range_meta.then(|| Arc::clone(&index));
-    let compact = CompactService::with_backend(index, state, chain_name, backend)
+    let replicate_index = cli.replicate_listen.map(|_| Arc::clone(&index));
+    let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
         .with_ping_enabled(cli.ping_very_insecure);
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
@@ -268,9 +270,22 @@ where
     p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
     drop(p2p);
 
-    let filler = filler_index
-        .map(|index| RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe()));
-    serve(compact, head, pipeline, grpc_server, &cli, filler, &shutdown).await
+    let extras = Extras {
+        filler: filler_index.map(|index| {
+            RangeMetaFiller::embedded(index, compact.backend()).run(compact.subscribe())
+        }),
+        replicator: replicate_index
+            .map(|index| ReplicatorService::new(index, compact.subscribe(), network)),
+    };
+    serve(compact, head, pipeline, grpc_server, &cli, extras, &shutdown).await
+}
+
+/// The optional tasks that run beside the head follower and the CompactTxStreamer server.
+struct Extras<F> {
+    /// The `range_meta` filler, with `--fill-range-meta`.
+    filler: Option<F>,
+    /// The Replicator service, with `--replicate-listen`.
+    replicator: Option<ReplicatorService>,
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -344,18 +359,19 @@ async fn reconcile_head(
     }
 }
 
-/// Runs the head follower and gRPC server until shutdown or until either task stops. If
-/// `filler` is set, runs it beside them and stops it with them.
+/// Runs the head follower and gRPC server until shutdown or until either task stops. If the
+/// filler is set, runs it beside them and stops it with them. If the Replicator is set, its
+/// server runs in the gRPC task, and the task stops when either server stops.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     mut grpc_server: Server,
     cli: &Cli,
-    filler: Option<impl Future<Output = ()> + Send + 'static>,
+    extras: Extras<impl Future<Output = ()> + Send + 'static>,
     shutdown: &CancellationToken,
 ) -> Result<()> {
-    let filler = filler.map(tokio::spawn);
+    let filler = extras.filler.map(tokio::spawn);
     let (server_shutdown, _) = watch::channel(false);
     let mut follower = tokio::spawn({
         let compact = compact.clone();
@@ -371,13 +387,23 @@ async fn serve(
         let receiver = server_shutdown.subscribe();
         let address = cli.grpc_listen;
         let tls = cli.tls_cert.is_some();
+        let replicate = extras.replicator.zip(cli.replicate_listen).map(|(replicator, address)| {
+            info!(%address, tls, "serving Replicator gRPC");
+            grpc_server
+                .clone()
+                .add_service(ReplicatorServer::new(replicator))
+                .serve_with_shutdown(address, shutdown_requested(server_shutdown.subscribe()))
+        });
         async move {
             info!(%address, tls, "serving CompactTxStreamer gRPC");
-            grpc_server
+            let streamer = grpc_server
                 .add_service(CompactTxStreamerServer::new(compact))
-                .serve_with_shutdown(address, shutdown_requested(receiver))
-                .await
-                .wrap_err("gRPC server failed")
+                .serve_with_shutdown(address, shutdown_requested(receiver));
+            match replicate {
+                Some(replicate) => tokio::try_join!(streamer, replicate).map(drop),
+                None => streamer.await,
+            }
+            .wrap_err("gRPC server failed")
         }
     });
 
@@ -446,5 +472,12 @@ mod tests {
         assert_eq!(pipeline.source_segment_blocks, defaults.source_segment_blocks);
         assert_eq!(pipeline.max_pending_bytes, defaults.max_pending_bytes);
         assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
+    }
+
+    #[test]
+    fn replicate_listen_is_off_by_default() {
+        assert_eq!(Cli::parse_from(["ztreamerd"]).replicate_listen, None);
+        let cli = Cli::parse_from(["ztreamerd", "--replicate-listen", "127.0.0.1:9068"]);
+        assert_eq!(cli.replicate_listen, Some(SocketAddr::from(([127, 0, 0, 1], 9068))));
     }
 }

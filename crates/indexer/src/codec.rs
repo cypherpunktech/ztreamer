@@ -7,7 +7,8 @@ use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 use crate::{index::RANGE_SIZE, types::CompactTransaction};
 
 const BLOCK_FORMAT_VERSION: u8 = 1;
-pub(crate) const RANGE_FORMAT_VERSION: u8 = 1;
+/// The format version of the packed range blobs that the index writes.
+pub const RANGE_FORMAT_VERSION: u8 = 1;
 pub(crate) const MAX_RECORD_BYTES: usize = 2_000_000;
 
 const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();

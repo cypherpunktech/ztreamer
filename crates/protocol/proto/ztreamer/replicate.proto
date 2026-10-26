@@ -1,0 +1,118 @@
+// The Replicator service: a ztreamer serves its sealed ranges to a replica.
+//
+// A replica reads GetExportInfo first, then ListRanges, then GetRange for each range it does not
+// have. It checks each blob against the blob_digest of its manifest entry.
+
+syntax = "proto3";
+package ztreamer.replicate;
+
+service Replicator {
+    // The identity of the index and how far it is sealed and verified.
+    rpc GetExportInfo(Empty) returns (ExportInfo);
+    // One entry for each sealed range that has range metadata, in ascending height order, from
+    // the first range that starts at or above from_start_height.
+    rpc ListRanges(ListRangesRequest) returns (stream ManifestEntry);
+    // The packed blob of one sealed range, in chunks of 1 MiB or less, from a byte offset.
+    rpc GetRange(GetRangeRequest) returns (stream RangeChunk);
+}
+
+message Empty {}
+
+message ExportInfo {
+    // The network name, as the index stores it, for example "Mainnet".
+    string network = 1;
+    // The genesis block hash, 32 bytes in the serialized byte order.
+    bytes genesis_hash = 2;
+    // The range blob format versions that the server can send.
+    repeated uint32 range_versions = 3;
+    // The version of the ManifestEntry message.
+    uint32 manifest_version = 4;
+    // The highest sealed height. Not set when no range is sealed.
+    optional uint32 sealed_through = 5;
+    // The highest height through which every sealed range is verified. Not set when no range is.
+    optional uint32 verified_through = 6;
+    // The index generation that the answer and the ranges come from.
+    uint64 generation = 7;
+}
+
+message ListRangesRequest {
+    uint32 from_start_height = 1;
+}
+
+// A note commitment pool.
+enum Pool {
+    POOL_UNSPECIFIED = 0;
+    POOL_SAPLING = 1;
+    POOL_ORCHARD = 2;
+    POOL_IRONWOOD = 3;
+}
+
+// How far the server has proven a range.
+enum VerifyState {
+    VERIFY_STATE_UNSPECIFIED = 0;
+    // Installed, and no check has run.
+    VERIFY_STATE_UNVERIFIED = 1;
+    // The digest, the hash chain and the tree sizes check out, and the end hash matches a node.
+    VERIFY_STATE_CHAIN_OK = 2;
+    // The rebuilt tree roots match a node.
+    VERIFY_STATE_VERIFIED = 3;
+    // A check failed.
+    VERIFY_STATE_REJECTED = 4;
+}
+
+// The cumulative note commitment tree sizes after a block.
+message TreeSizes {
+    uint32 sapling = 1;
+    uint32 orchard = 2;
+    uint32 ironwood = 3;
+}
+
+// The tree frontiers after a block, each in the zcashd RPC encoding. An empty frontier means the
+// pool was not active at that height.
+message Frontiers {
+    bytes sapling = 1;
+    bytes orchard = 2;
+    bytes ironwood = 3;
+}
+
+// The root of one completed note commitment subtree.
+message SubtreeRoot {
+    Pool pool = 1;
+    // The subtree index in its pool's tree. At most 65535.
+    uint32 index = 2;
+    // 32 bytes in the pool's byte order.
+    bytes root = 3;
+}
+
+// What a snapshot manifest says about one sealed range, and how far the server has proven it.
+message ManifestEntry {
+    // The range blob format version. At most 255.
+    uint32 range_version = 1;
+    uint32 start_height = 2;
+    uint32 end_height = 3;
+    // The hash of the block at end_height, 32 bytes in the serialized byte order.
+    bytes end_hash = 4;
+    TreeSizes end_tree_sizes = 5;
+    Frontiers frontiers = 6;
+    // The subtrees that the range completed.
+    repeated SubtreeRoot subtree_roots = 7;
+    // The BLAKE3 digest of the range blob, 32 bytes.
+    bytes blob_digest = 8;
+    uint64 blob_len = 9;
+    // Whether the range closes a verification epoch.
+    bool epoch_end = 10;
+    VerifyState state = 11;
+}
+
+message GetRangeRequest {
+    // The first height of the range.
+    uint32 start_height = 1;
+    // The first byte of the blob to send. Zero for the whole blob.
+    uint64 offset = 2;
+}
+
+message RangeChunk {
+    // The position of data in the blob.
+    uint64 offset = 1;
+    bytes data = 2;
+}

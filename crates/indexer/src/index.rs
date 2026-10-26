@@ -325,11 +325,44 @@ impl Index {
     /// as in `sealed_ranges`. Returns `None` if no sealed range starts at `start`. Reads the
     /// current generation.
     pub fn read_sealed_range_bytes(&self, start: u32) -> Result<Option<Vec<u8>>, IndexError> {
+        let txn = self.env.read_txn()?;
+        self.sealed_range_bytes_in(&txn, start)
+    }
+
+    /// Reads the packed blob of the sealed range that starts at `start` from a generation-pinned
+    /// LMDB snapshot. Returns `None` if no sealed range starts at `start`.
+    pub fn read_sealed_range_bytes_at(
+        &self,
+        generation: u64,
+        start: u32,
+    ) -> Result<Option<Vec<u8>>, IndexError> {
+        let txn = self.env.read_txn()?;
+        self.read_generation(&txn, generation)?;
+        self.sealed_range_bytes_in(&txn, start)
+    }
+
+    fn sealed_range_bytes_in(
+        &self,
+        txn: &RoTxn<'_>,
+        start: u32,
+    ) -> Result<Option<Vec<u8>>, IndexError> {
         if start != range_start(start) {
             return Err(IndexError::RangeStart { height: start });
         }
+        Ok(self.tables.sealed_ranges.get(txn, start)?.map(<[u8]>::to_vec))
+    }
+
+    /// Reads the metadata rows of the sealed ranges that start at or above `start`, in height
+    /// order, from a generation-pinned LMDB snapshot. A sealed range with no row is not in the
+    /// list.
+    pub fn range_metas_from(
+        &self,
+        generation: u64,
+        start: u32,
+    ) -> Result<Vec<RangeMeta>, IndexError> {
         let txn = self.env.read_txn()?;
-        Ok(self.tables.sealed_ranges.get(&txn, start)?.map(<[u8]>::to_vec))
+        self.read_generation(&txn, generation)?;
+        self.tables.range_meta.rows_from(&txn, start)
     }
 
     /// Installs one packed range from a snapshot, and its metadata, in one write. The caller
@@ -782,6 +815,37 @@ mod tests {
         assert_eq!(state.verified_through(), None);
         index.put_range_meta(0, &full_meta(0)).unwrap();
         assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
+    }
+
+    /// The pinned reads refuse another generation. The row list starts at the given height.
+    #[test]
+    fn pinned_range_reads_check_the_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let index =
+            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let generation = index.write(batch(&index, 0..=2_100, 2_200)).unwrap().generation();
+        index.put_range_meta(0, &full_meta(0)).unwrap();
+        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
+
+        assert_eq!(
+            index.range_metas_from(generation, 0).unwrap(),
+            [full_meta(0), full_meta(1_000)]
+        );
+        assert_eq!(index.range_metas_from(generation, 1).unwrap(), [full_meta(1_000)]);
+        assert_eq!(
+            index.read_sealed_range_bytes_at(generation, 1_000).unwrap(),
+            index.read_sealed_range_bytes(1_000).unwrap()
+        );
+        assert_eq!(index.read_sealed_range_bytes_at(generation, 2_000).unwrap(), None);
+        let other = generation + 1;
+        assert!(matches!(
+            index.range_metas_from(other, 0),
+            Err(IndexError::Generation { expected, actual }) if expected == other && actual == generation
+        ));
+        assert!(matches!(
+            index.read_sealed_range_bytes_at(other, 0),
+            Err(IndexError::Generation { .. })
+        ));
     }
 
     #[test]

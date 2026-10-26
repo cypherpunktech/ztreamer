@@ -1,4 +1,4 @@
-//! Compiles the Lightwallet protobuf definitions and the file descriptor set.
+//! Compiles the Lightwallet and Replicator protobuf definitions and the file descriptor set.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
@@ -27,5 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .out_dir(bytes_dir)
         .bytes(".")
         .compile_protos(&["proto/lightwalletd/compact_formats.proto"], &["proto/lightwalletd"])?;
+    // Range chunks share the blob buffer instead of copying it.
+    tonic_prost_build::configure()
+        .bytes(".ztreamer.replicate.RangeChunk.data")
+        .compile_protos(&["proto/ztreamer/replicate.proto"], &["proto"])?;
     Ok(())
 }

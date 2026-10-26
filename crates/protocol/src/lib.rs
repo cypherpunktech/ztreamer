@@ -1,4 +1,5 @@
-//! Lightwallet protobuf types and Ztreamer's Zakura p2p protocol definitions.
+//! Lightwallet protobuf types, the Replicator service, and Ztreamer's Zakura p2p protocol
+//! definitions.
 
 // Public items are not fully documented yet. Remove this once every `pub` item has a doc comment.
 #![allow(missing_docs)]
@@ -28,4 +29,10 @@ pub mod proto {
     /// Serialized file descriptor set for gRPC reflection.
     pub const FILE_DESCRIPTOR_SET: &[u8] =
         tonic::include_file_descriptor_set!("lightwalletd_descriptor");
+}
+
+/// Generated Replicator service types: a ztreamer serves its sealed ranges to a replica.
+#[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
+pub mod replicate {
+    tonic::include_proto!("ztreamer.replicate");
 }

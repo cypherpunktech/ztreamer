@@ -43,6 +43,9 @@ use zakura_chain::{block, ironwood, orchard, sapling, subtree::NoteCommitmentSub
 use super::IndexError;
 use crate::codec::{CodecError, Reader, TreeSizes};
 
+mod wire;
+pub use wire::WireError;
+
 const FORMAT_VERSION: u8 = 1;
 const SAPLING_TAG: u8 = 0;
 const ORCHARD_TAG: u8 = 1;
@@ -166,6 +169,16 @@ pub struct ManifestEntry {
     pub blob_len: u64,
     /// Whether the range closes a verification epoch.
     pub epoch_end: bool,
+}
+
+/// A manifest entry and how far the index that serves it has proven the range. The Replicator
+/// service sends one for each range that it lists.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportedRange {
+    /// The manifest entry for the range.
+    pub entry: ManifestEntry,
+    /// How far the serving index has proven the range.
+    pub state: VerifyState,
 }
 
 /// The node that verified a range.
@@ -430,6 +443,15 @@ impl RangeMetaTable {
     pub(crate) fn delete_from(&self, txn: &mut RwTxn<'_>, start: u32) -> Result<(), IndexError> {
         self.0.delete_range(txn, &(start..))?;
         Ok(())
+    }
+
+    /// The rows of every range that starts at or above `start`, in height order.
+    pub(crate) fn rows_from(
+        &self,
+        txn: &RoTxn<'_>,
+        start: u32,
+    ) -> Result<Vec<RangeMeta>, IndexError> {
+        self.0.range(txn, &(start..))?.map(|entry| Ok(RangeMeta::decode(entry?.1)?)).collect()
     }
 
     /// The start heights of every row, in height order.

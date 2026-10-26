@@ -14,6 +14,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "syn
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zakura-chain.workspace = true
 zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
@@ -23,7 +24,6 @@ tokio-util = "0.7"
 
 [dev-dependencies]
 tempfile = "3"
-zakura-chain.workspace = true
 zakura-network.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
