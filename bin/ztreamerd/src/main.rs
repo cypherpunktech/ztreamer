@@ -14,7 +14,7 @@ use std::{
     time::Instant,
 };
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use eyre::{Result, WrapErr, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -34,14 +34,35 @@ use ztreamer_service::{
     p2p::P2pCompactService,
 };
 
+mod export;
 mod lifecycle;
 
 /// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "CompactTxStreamer daemon backed by embedded Zakura")]
+#[command(
+    version,
+    about = "CompactTxStreamer daemon backed by embedded Zakura",
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    #[command(flatten)]
+    daemon: DaemonArgs,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Write the sealed ranges of an index as a snapshot that a replica can import.
+    ExportSnapshot(export::ExportArgs),
+}
+
+/// The daemon flags. They apply when no subcommand is given.
+#[derive(Debug, Args)]
+struct DaemonArgs {
     /// Zakura TOML configuration. Zakura defaults and ZAKURA_* variables apply when omitted.
     #[arg(long, value_name = "FILE")]
     zakura_config: Option<PathBuf>,
@@ -103,9 +124,9 @@ struct Cli {
     fill_range_meta: bool,
 }
 
-impl From<&Cli> for PipelineConfig {
+impl From<&DaemonArgs> for PipelineConfig {
     /// Starts from the pipeline defaults and applies the limits given on the command line.
-    fn from(cli: &Cli) -> Self {
+    fn from(cli: &DaemonArgs) -> Self {
         let defaults = Self::default();
         Self {
             workers: cli.workers.map_or(defaults.workers, NonZeroUsize::get),
@@ -123,15 +144,21 @@ impl From<&Cli> for PipelineConfig {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
+fn main() -> Result<()> {
+    let Cli { command, daemon } = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+    match command {
+        Some(Command::ExportSnapshot(args)) => args.run(),
+        None => run_daemon(daemon),
+    }
+}
 
+#[tokio::main]
+async fn run_daemon(cli: DaemonArgs) -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
 
@@ -230,7 +257,7 @@ impl<T, B> Readiness for NodeSources<T, node::NodeClient, B> {
 }
 
 async fn run_application<T, H, B>(
-    cli: Cli,
+    cli: DaemonArgs,
     grpc_server: Server,
     index: Arc<Index>,
     chain_name: String,
@@ -351,7 +378,7 @@ async fn serve(
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     mut grpc_server: Server,
-    cli: &Cli,
+    cli: &DaemonArgs,
     filler: Option<impl Future<Output = ()> + Send + 'static>,
     shutdown: &CancellationToken,
 ) -> Result<()> {
@@ -439,12 +466,30 @@ mod tests {
     fn pipeline_config_keeps_defaults_for_unset_flags() {
         let cli =
             Cli::parse_from(["ztreamerd", "--fetch-workers", "3", "--max-batch-bytes", "4096"]);
+        assert!(cli.command.is_none());
         let defaults = PipelineConfig::default();
-        let pipeline = PipelineConfig::from(&cli);
+        let pipeline = PipelineConfig::from(&cli.daemon);
         assert_eq!(pipeline.workers, 3);
         assert_eq!(pipeline.max_batch_bytes, 4096);
         assert_eq!(pipeline.source_segment_blocks, defaults.source_segment_blocks);
         assert_eq!(pipeline.max_pending_bytes, defaults.max_pending_bytes);
         assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
+    }
+
+    #[test]
+    fn export_snapshot_is_a_subcommand_beside_the_daemon_flags() {
+        let cli = Cli::parse_from([
+            "ztreamerd",
+            "export-snapshot",
+            "--index-dir",
+            "index",
+            "--out",
+            "snapshot",
+        ]);
+        assert!(matches!(cli.command, Some(Command::ExportSnapshot(_))));
+        assert!(
+            Cli::try_parse_from(["ztreamerd", "--index-only", "export-snapshot", "--out", "x"])
+                .is_err()
+        );
     }
 }
