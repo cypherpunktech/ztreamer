@@ -26,20 +26,13 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use ed25519_dalek::{Signer as _, SigningKey};
 use eyre::{Result, WrapErr, bail, ensure, eyre};
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, hex::Hex, serde_as};
+use serde_with::{hex::Hex, serde_as};
 use tracing::{info, warn};
-use zakura_chain::{block, parameters::Network};
-use ztreamer_indexer::{
-    codec::TreeSizes,
-    index::{
-        Index, RANGE_SIZE,
-        range_meta::{ManifestEntry, SubtreeNode, SubtreeRoot},
-    },
-};
+use zakura_chain::parameters::Network;
+use ztreamer_indexer::index::{Index, RANGE_SIZE, range_meta::ManifestEntry};
+use ztreamer_verify::manifest::Manifest;
 
 use crate::DEFAULT_MAP_SIZE;
-
-const MANIFEST_VERSION: u32 = 1;
 
 /// Bytes per write when a range blob goes to disk.
 const WRITE_CHUNK: usize = 1024 * 1024;
@@ -145,14 +138,20 @@ impl SnapshotDir {
         let Rows { entries, missing: missing_rows } = Rows::read(index)?;
         let open_epoch = entries.iter().rev().take_while(|entry| !entry.epoch_end).count();
         let entries = &entries[..entries.len() - open_epoch];
-        let last = entries.last().ok_or_else(|| {
-            eyre!("the index has no range_meta row from genesis to a range that closes an epoch")
-        })?;
+        ensure!(
+            !entries.is_empty(),
+            "the index has no range_meta row from genesis to a range that closes an epoch"
+        );
+        let manifest = Manifest::builder(network.to_string(), network.genesis_hash())
+            .entries(entries.to_vec())
+            .build()
+            .wrap_err("the range_meta rows do not make a valid manifest")?;
 
         for dir in ["ranges", "manifests"] {
             fs::create_dir_all(self.root.join(dir))?;
         }
-        let written = entries
+        let written = manifest
+            .entries()
             .iter()
             .map(|entry| self.put_range(index, entry))
             .collect::<Result<Vec<_>>>()?
@@ -160,18 +159,11 @@ impl SnapshotDir {
             .filter(|&wrote| wrote)
             .count();
 
-        let manifest = Manifest {
-            network: network.to_string(),
-            genesis_hash: network.genesis_hash(),
-            sealed_through: last.end_height,
-            manifest_version: MANIFEST_VERSION,
-            entries: entries.iter().map(EntryJson::from).collect(),
-        };
         let manifest_path = format!("manifests/{}.json", now.format("%Y-%m-%d"));
         self.put_signed(&manifest_path, &serde_json::to_vec(&manifest)?, signer)?;
         let latest = Latest {
             manifest: manifest_path.clone(),
-            sealed_through: last.end_height,
+            sealed_through: manifest.sealed_through(),
             published_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
             public_key: signer.map(Signer::public_key),
         };
@@ -179,7 +171,7 @@ impl SnapshotDir {
 
         Ok(ExportReport {
             manifest: manifest_path,
-            ranges: entries.len(),
+            ranges: manifest.entries().len(),
             written,
             missing_rows,
             open_epoch,
@@ -324,102 +316,6 @@ struct Latest {
     public_key: Option<[u8; 32]>,
 }
 
-/// A snapshot manifest. Block hashes are hex in display order, as the node prints them.
-#[serde_as]
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct Manifest {
-    network: String,
-    #[serde_as(as = "DisplayFromStr")]
-    genesis_hash: block::Hash,
-    sealed_through: u32,
-    manifest_version: u32,
-    entries: Vec<EntryJson>,
-}
-
-/// The JSON form of a [`ManifestEntry`]. A frontier is the hex of the `zcashd` RPC tree
-/// encoding; an empty string means that the pool was not active.
-#[serde_as]
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct EntryJson {
-    range_version: u8,
-    start_height: u32,
-    end_height: u32,
-    #[serde_as(as = "DisplayFromStr")]
-    end_hash: block::Hash,
-    #[serde(with = "TreeSizesJson")]
-    end_tree_sizes: TreeSizes,
-    #[serde_as(as = "Hex")]
-    sapling_frontier: Vec<u8>,
-    #[serde_as(as = "Hex")]
-    orchard_frontier: Vec<u8>,
-    #[serde_as(as = "Hex")]
-    ironwood_frontier: Vec<u8>,
-    subtree_roots: Vec<SubtreeRootJson>,
-    #[serde_as(as = "Hex")]
-    blob_digest: [u8; 32],
-    blob_len: u64,
-    epoch_end: bool,
-}
-
-/// The JSON form of [`TreeSizes`].
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "TreeSizes")]
-struct TreeSizesJson {
-    sapling: u32,
-    orchard: u32,
-    ironwood: u32,
-}
-
-/// A note commitment pool.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum Pool {
-    Sapling,
-    Orchard,
-    Ironwood,
-}
-
-/// The JSON form of a [`SubtreeRoot`]. The root is hex in the pool's byte order, as
-/// `z_getsubtreesbyindex` prints it.
-#[serde_as]
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct SubtreeRootJson {
-    pool: Pool,
-    index: u16,
-    #[serde_as(as = "Hex")]
-    root: [u8; 32],
-}
-
-impl From<&ManifestEntry> for EntryJson {
-    fn from(entry: &ManifestEntry) -> Self {
-        Self {
-            range_version: entry.range_version,
-            start_height: entry.start_height,
-            end_height: entry.end_height,
-            end_hash: entry.end_hash,
-            end_tree_sizes: entry.end_tree_sizes,
-            sapling_frontier: entry.frontiers.sapling.clone(),
-            orchard_frontier: entry.frontiers.orchard.clone(),
-            ironwood_frontier: entry.frontiers.ironwood.clone(),
-            subtree_roots: entry.subtree_roots.iter().map(SubtreeRootJson::from).collect(),
-            blob_digest: entry.blob_digest.0,
-            blob_len: entry.blob_len,
-            epoch_end: entry.epoch_end,
-        }
-    }
-}
-
-impl From<&SubtreeRoot> for SubtreeRootJson {
-    fn from(root: &SubtreeRoot) -> Self {
-        let (pool, bytes) = match root.root {
-            SubtreeNode::Sapling(node) => (Pool::Sapling, node.to_bytes()),
-            SubtreeNode::Orchard(node) => (Pool::Orchard, node.to_repr()),
-            SubtreeNode::Ironwood(node) => (Pool::Ironwood, node.to_repr()),
-        };
-        Self { pool, index: root.index.0, root: bytes }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::{Signature, VerifyingKey};
@@ -427,7 +323,9 @@ mod tests {
     use tempfile::TempDir;
     use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
     use ztreamer_indexer::{
-        index::range_meta::{BlobDigest, Frontiers, RangeMeta, VerifyState},
+        index::range_meta::{
+            BlobDigest, Frontiers, RangeMeta, SubtreeNode, SubtreeRoot, VerifyState,
+        },
         test_utils::{populate, record},
     };
 
@@ -530,16 +428,12 @@ mod tests {
 
         let bytes = fs::read(out.path().join(manifest_path)).unwrap();
         let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(
-            manifest,
-            Manifest {
-                network: "Mainnet".to_owned(),
-                genesis_hash: Network::Mainnet.genesis_hash(),
-                sealed_through: 2_999,
-                manifest_version: 1,
-                entries: entries.iter().map(EntryJson::from).collect(),
-            }
-        );
+        let expected = Manifest::builder("Mainnet", Network::Mainnet.genesis_hash())
+            .entries(entries.clone())
+            .build()
+            .unwrap();
+        assert_eq!(manifest, expected);
+        assert_eq!(manifest.sealed_through(), 2_999);
         let json: Value = serde_json::from_slice(&bytes).unwrap();
         let entry = &json["entries"][0];
         assert_eq!(entry["end_hash"], entries[0].end_hash.to_string());
@@ -621,8 +515,8 @@ mod tests {
         assert_eq!((report.ranges, report.missing_rows, report.open_epoch), (1, 2, 0));
         let manifest: Manifest =
             serde_json::from_slice(&fs::read(out.path().join(&report.manifest)).unwrap()).unwrap();
-        assert_eq!(manifest.entries, [EntryJson::from(&entries[0])]);
-        assert_eq!(manifest.sealed_through, 999);
+        assert_eq!(manifest.entries(), &entries[..1]);
+        assert_eq!(manifest.sealed_through(), 999);
     }
 
     #[test]

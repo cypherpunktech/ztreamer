@@ -8108,4 +8108,5 @@ dependencies = [
  "ztreamer-node",
  "ztreamer-protocol",
  "ztreamer-service",
+ "ztreamer-verify",
 ]

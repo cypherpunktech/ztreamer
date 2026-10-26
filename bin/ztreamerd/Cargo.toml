@@ -26,6 +26,7 @@ zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
+ztreamer-verify = { path = "../../crates/verify" }
 ztreamer-node = { path = "../../crates/node" }
 tokio-util = "0.7"
 
