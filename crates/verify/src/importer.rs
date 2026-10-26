@@ -15,8 +15,9 @@
 //!    limit. Thus the node calls of an epoch overlap the rebuild of the next epoch.
 //! 3. Install: one writer, in height order. It installs each range of a fetched epoch with
 //!    [`Index::install_sealed_range`] and a [`VerifyState::Verified`] row. It marks each range
-//!    of an installed epoch verified with [`Index::advance_verified_through`]. The verified
-//!    epochs that wait for an epoch below them hold at most [`MAX_BUFFERED_RANGES`] ranges.
+//!    of an installed epoch verified with [`Index::advance_verified_through`]. When the verified
+//!    epochs that wait for an epoch below them hold more than [`MAX_BUFFERED_RANGES`] ranges,
+//!    only the lowest epoch that is not verified starts a rebuild.
 //!
 //! The start frontiers of the first epoch come from the `range_meta` row of the last verified
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
@@ -59,8 +60,9 @@ use crate::{
 /// 1.2 GB of blobs. The fetch stage starts an epoch above this limit only when no blob waits.
 pub const MAX_PENDING_BYTES: u64 = 2 << 30;
 
-/// The most ranges in verified epochs that wait for the install of an epoch below them, with
-/// the epochs in verification. The lowest epoch that is not verified starts above this limit.
+/// The most ranges in verified epochs that wait for the install of an epoch below them when a
+/// rebuild starts. The epochs in verification do not count. The lowest epoch that is not
+/// verified starts above this limit.
 pub const MAX_BUFFERED_RANGES: usize = 64;
 
 /// The node that attests and samples the imported epochs.
@@ -278,7 +280,7 @@ impl<S: RangeSource + 'static> Importer<S> {
             ..ImportReport::default()
         };
         let run = Run::new(self, manifest, first, start, sealed);
-        Pipeline::new(run, first, report).run(shutdown).await
+        Pipeline::new(run, report).run(shutdown).await
     }
 
     /// Refuses a manifest for another network or genesis block than the index.
@@ -345,7 +347,7 @@ mod tests {
     use async_trait::async_trait;
     use ed25519_dalek::SigningKey;
     use tempfile::TempDir;
-    use tokio::sync::Notify;
+    use tokio::sync::{Barrier, Notify};
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_indexer::{
         codec::{RangeDecoder, encode_range},
@@ -374,6 +376,8 @@ mod tests {
         answers: BTreeMap<u32, Attested>,
         hold: Option<Hold>,
         released: Notify,
+        /// Each `tree_roots` call waits until this count of calls wait.
+        together: Option<Barrier>,
         /// The heights of the answered `tree_roots` calls, in order.
         answered: Mutex<Vec<u32>>,
     }
@@ -391,6 +395,9 @@ mod tests {
         }
 
         async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
+            if let Some(together) = &self.together {
+                together.wait().await;
+            }
             if let Some((held, release)) = self.hold {
                 if height == held {
                     self.released.notified().await;
@@ -475,18 +482,36 @@ mod tests {
         }
 
         fn attestor(&self, hold: Option<Hold>) -> Arc<FakeAttestor> {
+            Arc::new(self.fake_attestor(hold, None))
+        }
+
+        /// An attestor that answers only when `calls` epochs ask for their roots together.
+        fn attestor_for_calls_together(&self, calls: usize) -> Arc<FakeAttestor> {
+            Arc::new(self.fake_attestor(None, Some(Barrier::new(calls))))
+        }
+
+        fn fake_attestor(&self, hold: Option<Hold>, together: Option<Barrier>) -> FakeAttestor {
             let answers = self.snapshot.manifest.entries().iter().map(|entry| {
                 let meta = self.source.index.range_meta(entry.start_height).unwrap().unwrap();
                 (entry.end_height, meta.attested.unwrap())
             });
             let (released, answered) = (Notify::new(), Mutex::default());
-            Arc::new(FakeAttestor { answers: answers.collect(), hold, released, answered })
+            FakeAttestor { answers: answers.collect(), hold, released, together, answered }
         }
 
         fn importer(
             &self,
             attestor: Arc<FakeAttestor>,
             network: Network,
+        ) -> Importer<CountedSource> {
+            self.importer_with_workers(attestor, network, 4)
+        }
+
+        fn importer_with_workers(
+            &self,
+            attestor: Arc<FakeAttestor>,
+            network: Network,
+            workers: usize,
         ) -> Importer<CountedSource> {
             let key = SigningKey::from_bytes(&SEED).verifying_key();
             let source = HttpSource::new(self.server.base.clone(), key).unwrap();
@@ -498,7 +523,7 @@ mod tests {
             let config = ImportConfig {
                 network,
                 verify_sample: SamplePlan { per_range: 2, seed: 7 },
-                import_workers: NonZeroUsize::new(4).unwrap(),
+                import_workers: NonZeroUsize::new(workers).unwrap(),
             };
             let source = Source::Http(Box::new(source));
             let fetcher =
@@ -567,6 +592,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_buffer_limit_does_not_count_the_epochs_in_verification() {
+        // Eight epochs of ten ranges: more than `MAX_BUFFERED_RANGES` in verification.
+        let import = Import::new(80).await;
+        let attestor = import.attestor_for_calls_together(8);
+        let (_stop, shutdown) = watch::channel(false);
+
+        let importer = import.importer_with_workers(attestor, Network::Mainnet, 8);
+        let import_run = tokio::time::timeout(Duration::from_secs(60), importer.run(shutdown));
+        let report = import_run.await.expect("all eight epochs reach the attestor").unwrap();
+
+        assert_eq!((report.epochs, report.ranges), (8, 80));
+        import.assert_same_ranges();
+    }
+
+    #[tokio::test]
     async fn a_slow_epoch_verifies_last_and_installs_in_order() {
         let import = Import::new(RANGES).await;
         // The first epoch gets its roots only after the last epoch.
@@ -614,8 +654,10 @@ mod tests {
         for entry in &import.snapshot.manifest.entries()[..10] {
             let start = entry.start_height;
             let blob = import.source.index.read_sealed_range_bytes(start).unwrap().unwrap();
+            // An older manifest ended at 4,999, and marked its last range as an epoch end.
+            let epoch_end = entry.epoch_end || start == 4_000;
             let meta = RangeMeta {
-                entry: entry.clone(),
+                entry: ManifestEntry { epoch_end, ..entry.clone() },
                 state: VerifyState::ChainOk,
                 verified_by: None,
                 verified_at: None,

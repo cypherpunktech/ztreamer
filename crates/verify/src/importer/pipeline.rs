@@ -14,7 +14,7 @@ use tokio::{
     sync::watch,
     task::{JoinError, JoinSet},
 };
-use tracing::info;
+use tracing::{Instrument as _, Span, info};
 use ztreamer_indexer::index::{
     IndexState,
     range_meta::{Frontiers, RangeMeta, VerifyState},
@@ -22,7 +22,7 @@ use ztreamer_indexer::index::{
 
 use super::{ImportError, ImportReport, Importer, MAX_BUFFERED_RANGES, MAX_PENDING_BYTES};
 use crate::{
-    epoch::{Epoch, EpochProof},
+    epoch::{Epoch, EpochProof, Epochs},
     fetch::RangeSource,
     manifest::Manifest,
 };
@@ -63,6 +63,8 @@ impl ImportMetrics {
 pub(crate) struct Run<S> {
     importer: Importer<S>,
     manifest: Manifest,
+    /// The position of the first entry of each epoch of the manifest.
+    offsets: Vec<usize>,
     /// The position of the first epoch to import.
     first: usize,
     /// The start frontiers of the first epoch.
@@ -80,11 +82,27 @@ impl<S: RangeSource + 'static> Run<S> {
         start: Frontiers,
         sealed: Option<u32>,
     ) -> Self {
-        Self { importer, manifest, first, start, sealed, metrics: ImportMetrics::new() }
+        let offsets = manifest
+            .epochs()
+            .scan(0, |offset, epoch| {
+                let first = *offset;
+                *offset += epoch.entries().len();
+                Some(first)
+            })
+            .collect();
+        let metrics = ImportMetrics::new();
+        Self { importer, manifest, offsets, first, start, sealed, metrics }
     }
 
     fn epoch(&self, at: usize) -> Epoch<'_> {
-        self.manifest.epochs().nth(at).expect("the scheduler takes `at` from the epochs")
+        Epochs::starting_at(self.manifest.entries(), self.offsets[at])
+            .next()
+            .expect("the scheduler takes `at` from the epochs")
+    }
+
+    /// The span of the work on the epoch at `at`.
+    fn span(&self, at: usize) -> Span {
+        tracing::debug_span!("import_epoch", end_height = self.epoch(at).end_height())
     }
 
     /// Returns `true` if the epoch at `at` was installed before the import, with
@@ -199,12 +217,17 @@ impl<S: RangeSource + 'static> Run<S> {
         let state = self
             .importer
             .blocking(move |index| {
-                rows.iter().try_fold(None, |_, (blob, meta)| {
+                rows.into_iter().try_fold(None, |_, (blob, mut meta)| {
                     let start = meta.entry.start_height;
                     let state = if installed {
-                        index.advance_verified_through(start, meta)
+                        // The row keeps `epoch_end` from the manifest that installed it. A
+                        // manifest that ended inside this epoch marks its last range.
+                        if let Some(row) = index.range_meta(start)? {
+                            meta.entry.epoch_end = row.entry.epoch_end;
+                        }
+                        index.advance_verified_through(start, &meta)
                     } else {
-                        index.install_sealed_range(start, blob, meta)
+                        index.install_sealed_range(start, &blob, &meta)
                     };
                     state.map(Some)
                 })
@@ -250,7 +273,7 @@ pub(crate) struct Pipeline<S> {
 }
 
 impl<S: RangeSource + 'static> Pipeline<S> {
-    pub(crate) fn new(run: Run<S>, first: usize, report: ImportReport) -> Self {
+    pub(crate) fn new(run: Run<S>, report: ImportReport) -> Self {
         let sizes: Vec<_> = run
             .manifest
             .epochs()
@@ -260,6 +283,7 @@ impl<S: RangeSource + 'static> Pipeline<S> {
                 bytes: epoch.entries().iter().map(|entry| entry.blob_len).sum(),
             })
             .collect();
+        let first = run.first;
         Self {
             workers: run.importer.config.import_workers.get(),
             run: Arc::new(run),
@@ -335,7 +359,8 @@ impl<S: RangeSource + 'static> Pipeline<S> {
             let (at, run) = (self.next_install, Arc::clone(&self.run));
             self.ahead.remove(&at);
             self.next_install += 1;
-            self.installs.spawn(async move { (at, run.install(at, rows).await) });
+            let span = run.span(at);
+            self.installs.spawn(async move { (at, run.install(at, rows).await) }.instrument(span));
         }
         while self.rebuilds.len() < self.workers {
             let Some(at) = self.next_rebuild() else {
@@ -344,8 +369,8 @@ impl<S: RangeSource + 'static> Pipeline<S> {
             let blobs = self.fetched.remove(&at).expect("`next_rebuild` takes `at` from `fetched`");
             self.pending_bytes -= self.sizes[at].bytes;
             self.ahead.insert(at);
-            let run = Arc::clone(&self.run);
-            self.rebuilds.spawn_blocking(move || (at, run.rebuild(at, blobs)));
+            let (run, span) = (Arc::clone(&self.run), self.run.span(at));
+            self.rebuilds.spawn_blocking(move || span.in_scope(|| (at, run.rebuild(at, blobs))));
         }
         while self.next_fetch < self.end
             && self.fetches.len() < self.workers
@@ -357,19 +382,20 @@ impl<S: RangeSource + 'static> Pipeline<S> {
             }
             self.next_fetch += 1;
             self.pending_bytes += bytes;
-            let run = Arc::clone(&self.run);
-            self.fetches.spawn(async move { (at, run.fetch(at).await) });
+            let (run, span) = (Arc::clone(&self.run), self.run.span(at));
+            self.fetches.spawn(async move { (at, run.fetch(at).await) }.instrument(span));
         }
         let metrics = &self.run.metrics;
         metrics.epochs_pending.set(self.fetched.len() as f64);
         metrics.workers_busy.set(self.rebuilds.len() as f64);
     }
 
-    /// The fetched epoch to verify next: the epoch with the most commitments whose ranges fit
-    /// in [`MAX_BUFFERED_RANGES`]. Else the lowest fetched epoch, if it is below each epoch in
+    /// The fetched epoch to verify next: the epoch with the most commitments, if its ranges and
+    /// the ranges of the verified epochs that wait for the writer fit in
+    /// [`MAX_BUFFERED_RANGES`]. Else the lowest fetched epoch, if it is below each epoch in
     /// verification or in the buffer: the writer needs it first.
     fn next_rebuild(&self) -> Option<usize> {
-        let buffered: usize = self.ahead.iter().map(|&at| self.sizes[at].ranges).sum();
+        let buffered: usize = self.verified.keys().map(|&at| self.sizes[at].ranges).sum();
         self.fetched
             .keys()
             .copied()
@@ -397,8 +423,9 @@ impl<S: RangeSource + 'static> Pipeline<S> {
     fn rebuilt(&mut self, at: usize, rebuilt: Result<(Vec<Bytes>, EpochProof), ImportError>) {
         match rebuilt {
             Ok((blobs, proof)) if at < self.end => {
-                let run = Arc::clone(&self.run);
-                self.attests.spawn(async move { (at, run.attest(at, blobs, proof).await) });
+                let (run, span) = (Arc::clone(&self.run), self.run.span(at));
+                let attest = async move { (at, run.attest(at, blobs, proof).await) };
+                self.attests.spawn(attest.instrument(span));
             }
             Ok(_) => {}
             Err(error) => self.fail(at, error),
