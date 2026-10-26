@@ -53,8 +53,11 @@ const SUBTREE_CACHE_BYTES: usize = 2 << 20;
 /// The most `getrawtransaction` calls in flight for one mempool read.
 const MEMPOOL_FETCHES: usize = 16;
 
-/// The most mempool transactions that the cache keeps.
-const MEMPOOL_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(8_192).unwrap();
+/// The bytes that the mempool cache can hold. zakura's default mempool holds at most 80 MB of
+/// transaction cost (`tx_cost_limit`), and a decoded transaction takes about two times its
+/// serialized bytes. The cache keeps only the transactions of the latest `getrawmempool`
+/// answer, so it is normally smaller.
+const MEMPOOL_CACHE_BYTES: usize = 160 << 20;
 
 /// The default time between two `getbestblockhash` calls of the tip poller.
 const TIP_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -581,6 +584,14 @@ impl<Node> HeapBytes for NoteCommitmentSubtreeData<Node> {
     }
 }
 
+impl HeapBytes for UnminedTx {
+    /// Two times the serialized size: the decoded transaction keeps the proofs and the
+    /// signatures as bytes, and adds its own structure.
+    fn heap_bytes(&self) -> usize {
+        2 * self.size()
+    }
+}
+
 impl<K: Hash + Eq, V: Clone + HeapBytes> LruMap<K, V> {
     fn new(name: &'static str, budget: usize) -> Self {
         Self {
@@ -601,6 +612,22 @@ impl<K: Hash + Eq, V: Clone + HeapBytes> LruMap<K, V> {
             None => self.metrics.misses.increment(1),
         }
         value
+    }
+
+    /// Drops every entry whose key `keep` refuses.
+    fn retain(&self, keep: impl Fn(&K) -> bool)
+    where
+        K: Clone,
+    {
+        let mut inner = self.lock();
+        let refused: Vec<K> =
+            inner.entries.iter().map(|(key, _)| key).filter(|key| !keep(key)).cloned().collect();
+        for key in refused {
+            if let Some((_, bytes)) = inner.entries.pop(&key) {
+                inner.bytes -= bytes;
+            }
+        }
+        self.metrics.report(&inner);
     }
 
     fn insert(&self, key: K, value: V) {
@@ -784,6 +811,10 @@ impl StateBackend for RemoteBackend {
             GetRawMempoolResponse::TxIds(ids) => ids,
             GetRawMempoolResponse::Verbose(objects) => objects.into_keys().collect(),
         };
+        // The cache keeps only the transactions that the node still has in its mempool.
+        let listed: HashSet<transaction::Hash> =
+            ids.iter().filter_map(|id| id.parse().ok()).collect();
+        self.mempool.retain(|id| listed.contains(id));
         stream::iter(ids)
             .map(|id| async move {
                 let fetched = self.mempool_transaction(&id).await;
@@ -1238,6 +1269,35 @@ mod tests {
             .map(|seen| seen.body["params"][0].as_str().unwrap().to_owned())
             .collect();
         assert_eq!(asked, HashSet::from([mined_id, gone, failing].map(|id| id.to_string())));
+    }
+
+    #[tokio::test]
+    async fn mempool_cache_keeps_only_the_listed_ids() {
+        let pending = block_1().transactions[0].clone();
+        let id = pending.hash();
+        let listed = Arc::new(AtomicBool::new(true));
+        let in_mempool = listed.clone();
+        let mock = mainnet(1, move |method, _| match method {
+            "getrawmempool" if in_mempool.load(Ordering::SeqCst) => {
+                Reply::Result(json!([id.to_string()]))
+            }
+            "getrawmempool" => Reply::Result(json!([])),
+            _ => Reply::Result(transaction_object(&pending, None)),
+        })
+        .await;
+        let backend = backend(&mock).await;
+        assert_eq!(backend.mempool_transactions().await.unwrap().len(), 1);
+        assert_eq!(backend.mempool.lock().entries.len(), 1);
+        assert!(
+            backend.mempool.lock().bytes
+                > 2 * block_1().transactions[0].zcash_serialize_to_vec().unwrap().len()
+        );
+
+        // The transaction left the mempool, so the cache drops it.
+        listed.store(false, Ordering::SeqCst);
+        assert!(backend.mempool_transactions().await.unwrap().is_empty());
+        assert_eq!(backend.mempool.lock().entries.len(), 0);
+        assert_eq!(backend.mempool.lock().bytes, 0);
     }
 
     #[tokio::test]
