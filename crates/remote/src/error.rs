@@ -29,11 +29,21 @@ impl RpcCode {
     ///
     /// zakura answers `getblock` with this code for a block that it does not have: an unknown
     /// hash, or a height above its tip. `getblockhash` answers this code for a height at or below
-    /// the tip when the node has no hash for it.
+    /// the tip when the node has no hash for it. `z_gettreestate` answers it when it cannot read
+    /// the block, which on a pruned node is also a block below the prune height.
     pub const INVALID_PARAMETER: Self = Self(-8);
 
     /// zcashd legacy code: the node is still warming up.
     pub const IN_WARMUP: Self = Self(-28);
+
+    /// zcashd legacy code: an address or a key is not valid or is unknown.
+    ///
+    /// zakura answers `getrawtransaction` with this code for a transaction that is not in its
+    /// mempool or best chain, and for a txid that is not valid hex. `getblockheader` and `getblock`
+    /// with verbosity 1 or 2 answer it for an unknown block hash. The address methods
+    /// (`getaddressbalance`, `getaddresstxids`, `getaddressutxos`) answer it for an address that
+    /// is not valid.
+    pub const INVALID_ADDRESS_OR_KEY: Self = Self(-5);
 }
 
 impl fmt::Display for RpcCode {
@@ -254,6 +264,14 @@ mod tests {
 
     #[test]
     fn codes_parse_as_plain_integers() {
+        assert_eq!(
+            serde_json::to_value(RpcCode::INVALID_PARAMETER).unwrap(),
+            serde_json::json!(-8)
+        );
+        assert_eq!(
+            serde_json::to_value(RpcCode::INVALID_ADDRESS_OR_KEY).unwrap(),
+            serde_json::json!(-5)
+        );
         let object: RpcErrorObject =
             serde_json::from_str(r#"{"code":-32601,"message":"Method not found"}"#).unwrap();
         assert_eq!(object.code, RpcCode::METHOD_NOT_FOUND);

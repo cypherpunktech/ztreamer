@@ -37,12 +37,6 @@ use crate::backend::{
 /// The most subtree roots that the cache keeps for one pool.
 const SUBTREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(16_384).unwrap();
 
-/// The code of the node's answer to `getblock` for a block that is not in the best chain.
-const BLOCK_NOT_FOUND: RpcCode = RpcCode(-8);
-
-/// The code of the node's answer to `getrawtransaction` for an unknown transaction.
-const TRANSACTION_NOT_FOUND: RpcCode = RpcCode(-5);
-
 /// The PR that adds the methods that this backend does not serve yet.
 const NEXT_PR: &str = "feat(service): RemoteBackend addresses, mempool and submit";
 
@@ -349,7 +343,7 @@ impl StateBackend for RemoteBackend {
 
     async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
         let request = self.node.get_block_raw(HashOrHeight::Hash(hash)).await;
-        let Some(raw) = request.or_not_found(BLOCK_NOT_FOUND)? else {
+        let Some(raw) = request.or_not_found(RpcCode::INVALID_PARAMETER)? else {
             return Ok(None);
         };
         let block: Block = decode(raw.0, "block").await?;
@@ -367,7 +361,7 @@ impl StateBackend for RemoteBackend {
         hash: transaction::Hash,
     ) -> Result<Option<MinedTransaction>, BackendError> {
         let request = self.node.get_raw_transaction(hash, true).await;
-        let Some(response) = request.or_not_found(TRANSACTION_NOT_FOUND)? else {
+        let Some(response) = request.or_not_found(RpcCode::INVALID_ADDRESS_OR_KEY)? else {
             return Ok(None);
         };
         let GetRawTransactionResponse::Object(object) = response else {
@@ -549,7 +543,7 @@ mod tests {
     async fn block_parses_the_raw_answer() {
         let mock = mainnet(1, |_, params| match params[0].as_str().unwrap() {
             "1111111111111111111111111111111111111111111111111111111111111111" => {
-                Reply::Error { code: BLOCK_NOT_FOUND, message: "Block not found" }
+                Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "Block not found" }
             }
             _ => {
                 Reply::Result(serde_json::to_value(HexData(BLOCK_MAINNET_1_BYTES.clone())).unwrap())
