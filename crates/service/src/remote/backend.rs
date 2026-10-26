@@ -225,12 +225,12 @@ impl RemoteBackend {
         Ok(subtrees)
     }
 
-    /// The `getrawtransaction` answer with verbose 1, and the best-chain height in it. The
-    /// height is `None` for a mempool transaction. `None` when the node does not have it.
+    /// The `getrawtransaction` answer for `id` with verbose 1. `None` when the node does not
+    /// have the transaction.
     async fn fetch_transaction(
         &self,
         id: transaction::Hash,
-    ) -> Result<Option<(Box<TransactionObject>, Option<block::Height>)>, BackendError> {
+    ) -> Result<Option<FetchedTransaction>, BackendError> {
         let request = self.node.get_raw_transaction(id, true).await;
         let Some(response) = request.or_not_found(RpcCode::INVALID_ADDRESS_OR_KEY)? else {
             return Ok(None);
@@ -240,9 +240,7 @@ impl RemoteBackend {
                 "remote zakura sent a raw transaction for a verbose request".into(),
             ));
         };
-        // A height of -1 is a side chain, which is not the best chain either.
-        let height = object.height().and_then(|height| u32::try_from(height).ok());
-        Ok(Some((object, height.map(block::Height))))
+        Ok(Some(FetchedTransaction { id, object }))
     }
 
     /// A mempool transaction, from the cache or the node. `None` when the transaction left the
@@ -257,38 +255,43 @@ impl RemoteBackend {
         if let Some(cached) = self.mempool.get(&id) {
             return Ok(Some(cached));
         }
-        let Some((object, None)) = self.fetch_transaction(id).await? else {
+        let Some(fetched) = self.fetch_transaction(id).await? else {
             return Ok(None);
         };
-        let unmined = UnminedTx::from(decode_transaction(id, &object).await?);
+        if fetched.height().is_some() {
+            return Ok(None);
+        }
+        let unmined = UnminedTx::from(fetched.decode().await?);
         self.mempool.insert(id, unmined.clone());
         Ok(Some(unmined))
     }
 }
 
-/// Decodes the transaction in a verbose `getrawtransaction` answer. Its id must be `id`.
-async fn decode_transaction(
+/// A verbose `getrawtransaction` answer for one transaction id.
+struct FetchedTransaction {
     id: transaction::Hash,
-    object: &TransactionObject,
-) -> Result<Transaction, BackendError> {
-    let transaction: Transaction = decode(object.hex().as_ref().to_vec(), "transaction").await?;
-    if transaction.hash() != id {
-        return Err(BackendError::Unexpected(format!(
-            "remote zakura sent transaction {} for {id}",
-            transaction.hash()
-        )));
+    object: Box<TransactionObject>,
+}
+
+impl FetchedTransaction {
+    /// The best-chain height of the transaction. `None` for a mempool transaction. A height of
+    /// -1 is a side chain, which is not the best chain either.
+    fn height(&self) -> Option<block::Height> {
+        self.object.height().and_then(|height| u32::try_from(height).ok()).map(block::Height)
     }
-    Ok(transaction)
-}
 
-fn address_strings(addresses: HashSet<transparent::Address>) -> Vec<String> {
-    addresses.iter().map(ToString::to_string).collect()
-}
-
-fn amount(zatoshis: u64) -> Result<Amount<NonNegative>, BackendError> {
-    Amount::try_from(zatoshis).map_err(|error| {
-        BackendError::Unexpected(format!("remote zakura sent a bad amount {zatoshis}: {error}"))
-    })
+    /// Decodes the transaction. Its id must be the id of the request.
+    async fn decode(self) -> Result<Transaction, BackendError> {
+        let transaction = Transaction::from_node_bytes(self.object.hex().as_ref().to_vec()).await?;
+        if transaction.hash() != self.id {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura sent transaction {} for {}",
+                transaction.hash(),
+                self.id
+            )));
+        }
+        Ok(transaction)
+    }
 }
 
 /// The best block hash or the last poll error, as the tip poller sees it.
@@ -703,10 +706,13 @@ impl StateBackend for RemoteBackend {
         &self,
         hash: transaction::Hash,
     ) -> Result<Option<MinedTransaction>, BackendError> {
-        let Some((object, Some(height))) = self.fetch_transaction(hash).await? else {
+        let Some(fetched) = self.fetch_transaction(hash).await? else {
             return Ok(None);
         };
-        let transaction = Arc::new(decode_transaction(hash, &object).await?);
+        let Some(height) = fetched.height() else {
+            return Ok(None);
+        };
+        let transaction = Arc::new(fetched.decode().await?);
         Ok(Some(MinedTransaction { transaction, height }))
     }
 
@@ -779,15 +785,17 @@ impl StateBackend for RemoteBackend {
         &self,
         addresses: HashSet<transparent::Address>,
     ) -> Result<Amount<NonNegative>, BackendError> {
-        let request = GetAddressBalanceRequest::new(address_strings(addresses));
-        amount(self.node.get_address_balance(&request).await?.balance())
+        let request =
+            GetAddressBalanceRequest::new(addresses.iter().map(ToString::to_string).collect());
+        Ok(Amount::try_from(self.node.get_address_balance(&request).await?.balance())?)
     }
 
     async fn address_utxos(
         &self,
         addresses: HashSet<transparent::Address>,
     ) -> Result<Vec<AddressUtxo>, BackendError> {
-        let request = GetAddressUtxosRequest::new(address_strings(addresses), false);
+        let addresses = addresses.iter().map(ToString::to_string).collect();
+        let request = GetAddressUtxosRequest::new(addresses, false);
         let utxos = match self.node.get_address_utxos(&request).await? {
             GetAddressUtxosResponse::Utxos(utxos) => utxos,
             GetAddressUtxosResponse::UtxosAndChainInfo(object) => object.utxos().clone(),
@@ -799,7 +807,7 @@ impl StateBackend for RemoteBackend {
                 Ok(AddressUtxo {
                     address,
                     outpoint: transparent::OutPoint { hash, index: index.index() },
-                    output: transparent::Output { value: amount(zatoshis)?, lock_script },
+                    output: transparent::Output { value: Amount::try_from(zatoshis)?, lock_script },
                     height,
                 })
             })
@@ -1213,7 +1221,10 @@ mod tests {
         assert_eq!(calls(&mock).last().unwrap().body["method"], "getblockcount");
 
         let addresses = HashSet::from([address()]);
-        assert_eq!(backend.address_balance(addresses.clone()).await.unwrap(), amount(5).unwrap());
+        assert_eq!(
+            backend.address_balance(addresses.clone()).await.unwrap(),
+            Amount::<NonNegative>::try_from(5_u64).unwrap()
+        );
         assert_eq!(last_params(&mock), json!([{"addresses": [ADDRESS]}]));
         assert_eq!(
             backend.address_utxos(addresses).await.unwrap(),
@@ -1221,7 +1232,7 @@ mod tests {
                 address: address(),
                 outpoint: transparent::OutPoint { hash: txid, index: 2 },
                 output: transparent::Output {
-                    value: amount(9).unwrap(),
+                    value: Amount::<NonNegative>::try_from(9_u64).unwrap(),
                     lock_script: transparent::Script::new(&[0x51]),
                 },
                 height: block::Height(1),
