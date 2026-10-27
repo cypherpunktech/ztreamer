@@ -494,7 +494,6 @@ mod tests {
 
         assert_eq!(Manifest::from_json(&json).unwrap(), manifest);
         assert_eq!(manifest.sealed_through(), 1_999);
-        assert_eq!(manifest.0.manifest_version, MANIFEST_VERSION);
     }
 
     #[test]

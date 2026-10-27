@@ -144,9 +144,9 @@ impl FetchError {
 /// source must verify its signatures first. [`RangeSource::fetch_blob`] sends the bytes of the
 /// blob from `offset` to its end, and an error when the transfer stops early. It does not check
 /// the digest: [`Fetcher::blob`] does. [`Fetcher`] and the importer hold a source as a
-/// `Box<dyn RangeSource>`.
+/// `Box<dyn RangeSource>`. The `Debug` form names the source, for logs.
 #[async_trait]
-pub trait RangeSource: Send + Sync {
+pub trait RangeSource: fmt::Debug + Send + Sync {
     /// The manifest of the source.
     async fn manifest(&self) -> Result<Manifest, FetchError>;
 
@@ -173,14 +173,9 @@ pub trait RangeSource: Send + Sync {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct Fetcher {
     source: Box<dyn RangeSource>,
-}
-
-impl fmt::Debug for Fetcher {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Fetcher").finish_non_exhaustive()
-    }
 }
 
 impl Fetcher {

@@ -12,10 +12,11 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use async_trait::async_trait;
+use tokio::sync::OnceCell;
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
@@ -259,7 +260,8 @@ impl Epoch<'_> {
 /// An [`Attestor`] that asks a zakura node over JSON-RPC, and keeps the tree roots.
 ///
 /// It keeps up to [`CACHE_CAPACITY`] `z_gettreestate` answers. When the map is full, it drops
-/// the answer for the lowest height.
+/// the answer for the lowest height. Calls for one height at the same time make one
+/// `z_gettreestate` call.
 ///
 /// ```no_run
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
@@ -276,8 +278,9 @@ impl Epoch<'_> {
 #[derive(Debug)]
 pub struct JsonRpcAttestor {
     node: ZakuraClient,
-    /// The tree roots by height. The map drops its lowest height when it is full.
-    roots: Mutex<BTreeMap<u32, PoolRoots>>,
+    /// The tree roots by height. A cell is empty until a call for its height succeeds. The map
+    /// drops its lowest height when it is full.
+    roots: Mutex<BTreeMap<u32, Arc<OnceCell<PoolRoots>>>>,
 }
 
 impl JsonRpcAttestor {
@@ -286,18 +289,29 @@ impl JsonRpcAttestor {
         Self { node, roots: Mutex::new(BTreeMap::new()) }
     }
 
-    /// The kept tree roots. The map is valid after a panic, because each change is one call.
-    fn roots(&self) -> MutexGuard<'_, BTreeMap<u32, PoolRoots>> {
-        self.roots.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Keeps the tree roots at `height`, and drops the lowest heights above [`CACHE_CAPACITY`].
-    fn keep_roots(&self, height: u32, roots: PoolRoots) {
-        let mut map = self.roots();
-        map.insert(height, roots);
+    /// The cell of the tree roots at `height`. Adds an empty cell, and drops the lowest heights
+    /// above [`CACHE_CAPACITY`]. The map is valid after a panic, because each change is one call.
+    fn tree_roots_cell(&self, height: u32) -> Arc<OnceCell<PoolRoots>> {
+        let mut map = self.roots.lock().unwrap_or_else(PoisonError::into_inner);
+        let cell = Arc::clone(map.entry(height).or_default());
         while map.len() > CACHE_CAPACITY {
             map.pop_first();
         }
+        cell
+    }
+
+    /// Asks the node for the tree roots at `height` with `z_gettreestate`.
+    async fn ask_tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
+        let state = self.node.z_get_treestate(HashOrHeight::Height(block::Height(height))).await?;
+        let actual = state.height().0;
+        if actual != height {
+            return Err(NodeError::Height { expected: height, actual });
+        }
+        Ok(PoolRoots {
+            sapling: final_root(Pool::Sapling, state.sapling().commitments())?,
+            orchard: final_root(Pool::Orchard, state.orchard().commitments())?,
+            ironwood: final_root(Pool::Ironwood, state.ironwood().commitments())?,
+        })
     }
 }
 
@@ -308,22 +322,8 @@ impl Attestor for JsonRpcAttestor {
     }
 
     async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
-        let known = self.roots().get(&height).copied();
-        if let Some(roots) = known {
-            return Ok(roots);
-        }
-        let state = self.node.z_get_treestate(HashOrHeight::Height(block::Height(height))).await?;
-        let actual = state.height().0;
-        if actual != height {
-            return Err(NodeError::Height { expected: height, actual });
-        }
-        let roots = PoolRoots {
-            sapling: final_root(Pool::Sapling, state.sapling().commitments())?,
-            orchard: final_root(Pool::Orchard, state.orchard().commitments())?,
-            ironwood: final_root(Pool::Ironwood, state.ironwood().commitments())?,
-        };
-        self.keep_roots(height, roots);
-        Ok(roots)
+        let cell = self.tree_roots_cell(height);
+        cell.get_or_try_init(|| self.ask_tree_roots(height)).await.copied()
     }
 
     async fn subtree_roots(
@@ -616,9 +616,10 @@ mod tests {
     async fn json_rpc_attestor_asks_the_node_once_for_the_tree_roots() {
         let (node, attestor) = json_rpc_attestor(treestate(2_999)).await;
 
-        for _ in 0..2 {
-            attestor.tree_roots(2_999).await.unwrap();
-        }
+        // Two calls at the same time, then a retry.
+        let (first, second) = tokio::join!(attestor.tree_roots(2_999), attestor.tree_roots(2_999));
+        assert_eq!((first.unwrap(), second.unwrap()), (roots(), roots()));
+        attestor.tree_roots(2_999).await.unwrap();
 
         assert_eq!(node.seen().len(), 1);
     }
