@@ -47,7 +47,7 @@ All 3,525 sealed range ends, through height 3,524,999, were checked against `z_g
 - Orchard matched as printed (`match`) in all 1,838 ranges from 1,687,999 onward.
 - Ironwood is present on this node, not absent. Every response has an `ironwood` object, and the node returns an Ironwood root for the 97 ranges from 3,428,999 onward. `verify_cost` does not rebuild Ironwood, so those roots were not checked.
 
-`compare-tree-roots.py` prints `"sapling": "absent", "orchard": "absent", "ironwood": "absent"` for the full run (`out/compare.json`). That is because it reports the pool status of row 0 only, and row 0 (height 999) is before Sapling. The per-row tally is `out/pool_status.json`, made by `pool_status.py`. A second run of the script over the post-NU5 rows only (`out/compare-post-nu5.json`) shows `match-reversed` / `match` directly.
+`compare-tree-roots.py` prints `"sapling": "absent", "orchard": "absent", "ironwood": "absent"` for the full run (`out/compare.json`). That is because it reports the pool status of row 0 only, and row 0 (height 999) is before Sapling. The per-row tally is `out/pool_status.json`, made by `pool_status.py`. A second run of the script over the post-NU5 rows only (`out/compare-post-nu5.json`) shows `match-reversed` / `match` directly. The input of that run is the header and the rows of `out/roots.csv` from `range_start` 1687000 on: `(head -1 out/roots.csv; tail -n +1689 out/roots.csv)`.
 
 ## Derived numbers
 
