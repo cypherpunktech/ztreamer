@@ -4,8 +4,9 @@
 //! `zakura_chain` type of the trait. A parse failure is [`BackendError::Unexpected`].
 //!
 //! The backend keeps two caches, and a cache hit makes no call to the node. The tree state of a
-//! block hash does not change, and that cache holds at most 4,096 of them. The mempool cache
-//! holds the transactions of the latest `getrawmempool` answer, so the node mempool bounds it.
+//! block hash does not change, and that cache holds at most 4,096 of them. Concurrent misses for
+//! one tree state share one call to the node. The mempool cache holds the transactions of the
+//! latest `getrawmempool` answer, so the node mempool bounds it.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -14,9 +15,14 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
-use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
+use futures_util::{
+    FutureExt as _, StreamExt as _, TryStreamExt as _,
+    future::{self, BoxFuture, Shared},
+    stream,
+};
 use lru::LruCache;
 use sapling_crypto::Node as SaplingNode;
+use tracing::Instrument as _;
 use zakura_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
@@ -108,7 +114,7 @@ pub struct RemoteBackend {
     node: ZakuraClient,
     network: Network,
     /// The tree states that the node gave. They do not change.
-    tree_states: Mutex<LruCache<block::Hash, TreeState>>,
+    tree_states: TreeStateCache,
     /// The transactions of the latest `getrawmempool` answer. The node mempool bounds it.
     mempool: Mutex<HashMap<transaction::Hash, UnminedTx>>,
 }
@@ -136,17 +142,7 @@ impl RemoteBackend {
         if found != expected {
             return Err(RemoteConnectError::WrongGenesis { expected, found });
         }
-        Ok(Self {
-            node,
-            network,
-            tree_states: Mutex::new(LruCache::new(TREE_CACHE_ENTRIES)),
-            mempool: Mutex::default(),
-        })
-    }
-
-    /// Locks the tree-state cache. A panic in another holder leaves the cache valid.
-    fn lock_tree_states(&self) -> MutexGuard<'_, LruCache<block::Hash, TreeState>> {
-        self.tree_states.lock().unwrap_or_else(PoisonError::into_inner)
+        Ok(Self { node, network, tree_states: TreeStateCache::new(), mempool: Mutex::default() })
     }
 
     /// Locks the mempool cache. A panic in another holder leaves the cache valid.
@@ -204,6 +200,88 @@ impl RemoteBackend {
         let unmined = UnminedTx::from(fetched.decode().await?);
         self.lock_mempool().insert(id, unmined.clone());
         Ok(Some(unmined))
+    }
+}
+
+/// A `z_gettreestate` call that all requests for one block hash share.
+type TreeStateCall = Shared<BoxFuture<'static, Result<TreeState, BackendError>>>;
+
+/// The tree states that the node gave, at most [`TREE_CACHE_ENTRIES`] of them.
+///
+/// Each entry is the call for one block hash. Concurrent misses for one hash await the same
+/// call, so the node gets one `z_gettreestate`, and all of them get its result. A done call
+/// keeps its tree state, so a hit makes no node call. A failed call leaves the cache, so the
+/// next request calls the node again. A call in flight counts to the cap. Each call runs in its
+/// own task, so it completes also when all the requests that await it stop.
+struct TreeStateCache(Mutex<LruCache<block::Hash, TreeStateCall>>);
+
+impl TreeStateCache {
+    fn new() -> Self {
+        Self(Mutex::new(LruCache::new(TREE_CACHE_ENTRIES)))
+    }
+
+    /// Locks the cache. A panic in another holder leaves the cache valid.
+    fn lock(&self) -> MutexGuard<'_, LruCache<block::Hash, TreeStateCall>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The tree state of the block of `fetch`. A miss starts `fetch` as the call for the hash.
+    async fn get_or_fetch(&self, fetch: TreeStateFetch) -> Result<TreeState, BackendError> {
+        let hash = fetch.hash;
+        let call = self.lock().get_or_insert(hash, || fetch.into_call()).clone();
+        let trees = call.clone().await;
+        if trees.is_err() {
+            let mut cache = self.lock();
+            if cache.peek(&hash).is_some_and(|cached| cached.ptr_eq(&call)) {
+                cache.pop(&hash);
+            }
+        }
+        trees
+    }
+}
+
+/// One `z_gettreestate` call for the block `hash`, and the parse of its answer.
+struct TreeStateFetch {
+    node: ZakuraClient,
+    hash: block::Hash,
+}
+
+impl TreeStateFetch {
+    /// Starts the call in a new task, and gives its result as a future that more requests can
+    /// await. The task keeps the span of the request that starts it. A task that panics gives
+    /// [`BackendError::Unavailable`].
+    fn into_call(self) -> TreeStateCall {
+        tokio::spawn(self.run().instrument(tracing::Span::current()))
+            .map(|task| {
+                task.unwrap_or_else(|error| {
+                    Err(BackendError::Unavailable(format!("tree-state task failed: {error}")))
+                })
+            })
+            .boxed()
+            .shared()
+    }
+
+    async fn run(self) -> Result<TreeState, BackendError> {
+        let hash = self.hash;
+        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
+        if response.hash() != hash {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura sent the tree state of {} for {hash}",
+                response.hash()
+            )));
+        }
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| {
+                Ok::<_, BackendError>(TreeState {
+                    sapling: RpcTree::from_treestate("Sapling", response.sapling())?,
+                    orchard: RpcTree::from_treestate("Orchard", response.orchard())?,
+                    ironwood: RpcTree::from_treestate("Ironwood", response.ironwood())?,
+                })
+            })
+        })
+        .await
+        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
     }
 }
 
@@ -454,31 +532,7 @@ impl StateBackend for RemoteBackend {
     }
 
     async fn tree_state(&self, hash: block::Hash) -> Result<TreeState, BackendError> {
-        let cached = self.lock_tree_states().get(&hash).cloned();
-        if let Some(trees) = cached {
-            return Ok(trees);
-        }
-        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
-        if response.hash() != hash {
-            return Err(BackendError::Unexpected(format!(
-                "remote zakura sent the tree state of {} for {hash}",
-                response.hash()
-            )));
-        }
-        let span = tracing::Span::current();
-        let trees = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                Ok::<_, BackendError>(TreeState {
-                    sapling: RpcTree::from_treestate("Sapling", response.sapling())?,
-                    orchard: RpcTree::from_treestate("Orchard", response.orchard())?,
-                    ironwood: RpcTree::from_treestate("Ironwood", response.ironwood())?,
-                })
-            })
-        })
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))??;
-        self.lock_tree_states().put(hash, trees.clone());
-        Ok(trees)
+        self.tree_states.get_or_fetch(TreeStateFetch { node: self.node.clone(), hash }).await
     }
 
     async fn sapling_subtrees(
@@ -861,7 +915,7 @@ mod tests {
         assert_eq!(trees.sapling.unwrap().count(), 3);
         assert_eq!(trees.orchard.unwrap().count(), 5);
         assert!(trees.ironwood.is_none());
-        assert_eq!(backend.lock_tree_states().len(), 1);
+        assert_eq!(backend.tree_states.lock().len(), 1);
         let requests = mock.seen().len();
         assert_eq!(backend.tree_state(good).await.unwrap().orchard.unwrap().count(), 5);
         assert_eq!(mock.seen().len(), requests);
@@ -870,6 +924,52 @@ mod tests {
             let error = backend.tree_state(hash).await.unwrap_err();
             assert!(matches!(error, BackendError::Unexpected(_)), "{error}");
         }
+        // A failed call leaves the cache.
+        assert_eq!(backend.tree_states.lock().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn tree_state_shares_one_call_per_hash() {
+        let hash = block::Hash([1; 32]);
+        let failing = Arc::new(AtomicBool::new(true));
+        let fails = failing.clone();
+        let mock = mainnet(1, move |_, _| {
+            let reply = match fails.load(Ordering::SeqCst) {
+                true => Reply::Error { code: RpcCode(-1), message: "node failed" },
+                false => Reply::Result(tree_state_answer(hash, None)),
+            };
+            Reply::Delay(std::time::Duration::from_millis(200), Box::new(reply))
+        })
+        .await;
+        let backend = Arc::new(backend(&mock).await);
+        let calls =
+            || mock.seen().iter().filter(|seen| seen.body["method"] == "z_gettreestate").count();
+        let concurrent_reads = || {
+            future::join_all((0..64).map(|_| {
+                let backend = backend.clone();
+                tokio::spawn(async move { backend.tree_state(hash).await })
+            }))
+        };
+
+        // All concurrent misses get the error of one call.
+        for read in concurrent_reads().await {
+            let error = read.unwrap().unwrap_err();
+            assert!(
+                matches!(&error, BackendError::Unavailable(message) if message.contains("node failed"))
+            );
+        }
+        assert_eq!(calls(), 1);
+
+        // The error is not cached: the next misses call the node again, once.
+        failing.store(false, Ordering::SeqCst);
+        for read in concurrent_reads().await {
+            assert_eq!(read.unwrap().unwrap().orchard.unwrap().count(), 5);
+        }
+        assert_eq!(calls(), 2);
+
+        // A hit makes no call.
+        backend.tree_state(hash).await.unwrap();
+        assert_eq!(calls(), 2);
     }
 
     #[tokio::test]
@@ -881,14 +981,15 @@ mod tests {
             bytes[..4].copy_from_slice(&index.to_le_bytes());
             block::Hash(bytes)
         };
+        let done = || future::ready(Ok(TreeState::default())).boxed().shared();
         let cap = TREE_CACHE_ENTRIES.get() as u32;
-        let mut cache = backend.lock_tree_states();
+        let mut cache = backend.tree_states.lock();
         for index in 0..cap {
-            cache.put(hash(index), TreeState::default());
+            cache.put(hash(index), done());
         }
         // A hit makes hash 0 the most recent entry, so the next insert drops hash 1.
         assert!(cache.get(&hash(0)).is_some());
-        cache.put(hash(cap), TreeState::default());
+        cache.put(hash(cap), done());
         assert_eq!(cache.len(), cap as usize);
         assert!(cache.contains(&hash(0)) && cache.contains(&hash(cap)));
         assert!(!cache.contains(&hash(1)));
