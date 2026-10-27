@@ -47,7 +47,8 @@ mod replicate;
 #[cfg(test)]
 mod test_support;
 
-/// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
+/// Must be larger than the full mainnet index. That index was 17.3 GiB at height 3,532,489
+/// (2026-10-27).
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Parser)]
