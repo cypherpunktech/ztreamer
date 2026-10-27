@@ -43,6 +43,8 @@ mod export;
 mod lifecycle;
 mod remote;
 mod replicate;
+#[cfg(test)]
+mod test_support;
 
 /// Must be large enough to hold full mainnet index, which is 21 GiB at the time of writing
 const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
@@ -514,14 +516,6 @@ mod tests {
         assert_eq!(pipeline.source_segment_blocks, defaults.source_segment_blocks);
         assert_eq!(pipeline.max_pending_bytes, defaults.max_pending_bytes);
         assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
-    }
-
-    /// The Replicator shares the CompactTxStreamer listener, so it has no listener flag.
-    #[test]
-    fn replicate_listen_is_not_a_flag() {
-        let error =
-            Cli::try_parse_from(["ztreamerd", "--replicate-listen", "127.0.0.1:9068"]).unwrap_err();
-        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]

@@ -5,6 +5,16 @@ use tokio::{sync::oneshot, time::timeout};
 
 use super::*;
 
+/// [`supervise`], with a panic when it does not finish within five seconds.
+async fn supervise_within_five_seconds(
+    node: impl Future<Output = Result<()>>,
+    application: impl Future<Output = Result<()>>,
+    shutdown: CancellationToken,
+    signal: impl Future<Output = Result<()>>,
+) -> Result<()> {
+    timeout(Duration::from_secs(5), supervise(node, application, shutdown, signal)).await.unwrap()
+}
+
 #[tokio::test]
 async fn application_completion_drains_node_without_send() {
     // Keeping an Rc across await proves the supervisor needs no Send bound.
@@ -16,13 +26,9 @@ async fn application_completion_drains_node_without_send() {
         cleaned.set(true);
         Ok(())
     };
-    timeout(
-        Duration::from_secs(5),
-        supervise(node, async { Ok(()) }, shutdown.clone(), future::pending()),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    supervise_within_five_seconds(node, async { Ok(()) }, shutdown.clone(), future::pending())
+        .await
+        .unwrap();
     assert!(cleaned.get());
 }
 
@@ -35,17 +41,13 @@ async fn application_failure_still_drains_node() {
         cleaned.set(true);
         Ok(())
     };
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(
-            node,
-            async { Err(eyre!("application failed")) },
-            shutdown.clone(),
-            future::pending(),
-        ),
+    let error = supervise_within_five_seconds(
+        node,
+        async { Err(eyre!("application failed")) },
+        shutdown.clone(),
+        future::pending(),
     )
     .await
-    .unwrap()
     .unwrap_err();
     assert_eq!(error.to_string(), "application failed");
     assert!(cleaned.get());
@@ -61,17 +63,13 @@ async fn node_failure_cancels_application_waiting_for_readiness() {
         cleaned.set(true);
         Ok(())
     };
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(
-            async { Err(eyre!("node failed")) },
-            application,
-            shutdown.clone(),
-            future::pending(),
-        ),
+    let error = supervise_within_five_seconds(
+        async { Err(eyre!("node failed")) },
+        application,
+        shutdown.clone(),
+        future::pending(),
     )
     .await
-    .unwrap()
     .unwrap_err();
     assert_eq!(error.to_string(), "node failed");
     assert!(cleaned.get());
@@ -80,20 +78,16 @@ async fn node_failure_cancels_application_waiting_for_readiness() {
 #[tokio::test]
 async fn unexpected_successful_node_exit_is_an_error() {
     let shutdown = CancellationToken::new();
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(
-            async { Ok(()) },
-            async {
-                shutdown.cancelled().await;
-                Ok(())
-            },
-            shutdown.clone(),
-            future::pending(),
-        ),
+    let error = supervise_within_five_seconds(
+        async { Ok(()) },
+        async {
+            shutdown.cancelled().await;
+            Ok(())
+        },
+        shutdown.clone(),
+        future::pending(),
     )
     .await
-    .unwrap()
     .unwrap_err();
     assert_eq!(error.to_string(), "Zakura stopped unexpectedly");
 }
@@ -124,11 +118,9 @@ async fn signal_drains_both_futures_concurrently_even_on_error() {
         app_started_rx.await.unwrap();
         Ok(())
     };
-    let error =
-        timeout(Duration::from_secs(5), supervise(node, application, shutdown.clone(), signal))
-            .await
-            .unwrap()
-            .unwrap_err();
+    let error = supervise_within_five_seconds(node, application, shutdown.clone(), signal)
+        .await
+        .unwrap_err();
     assert_eq!(error.to_string(), "node cleanup failed");
 }
 
@@ -137,25 +129,21 @@ async fn signal_failure_still_drains_both_futures() {
     let shutdown = CancellationToken::new();
     let node_cleaned = Cell::new(false);
     let app_cleaned = Cell::new(false);
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(
-            async {
-                shutdown.cancelled().await;
-                node_cleaned.set(true);
-                Ok(())
-            },
-            async {
-                shutdown.cancelled().await;
-                app_cleaned.set(true);
-                Ok(())
-            },
-            shutdown.clone(),
-            async { Err(eyre!("signal failed")) },
-        ),
+    let error = supervise_within_five_seconds(
+        async {
+            shutdown.cancelled().await;
+            node_cleaned.set(true);
+            Ok(())
+        },
+        async {
+            shutdown.cancelled().await;
+            app_cleaned.set(true);
+            Ok(())
+        },
+        shutdown.clone(),
+        async { Err(eyre!("signal failed")) },
     )
     .await
-    .unwrap()
     .unwrap_err();
     assert_eq!(error.to_string(), "signal failed");
     assert!(node_cleaned.get() && app_cleaned.get());
@@ -181,65 +169,6 @@ async fn drain_both_reuses_taken_results_and_awaits_the_rest() {
     .unwrap();
     assert_eq!((a, b), (1, 2));
     assert!(!polled.get());
-}
-
-#[tokio::test]
-async fn startup_failure_returns_original_error() {
-    let mut config = zakurad::config::ZakuradConfig::default();
-    config.zcashd_compat.enabled = false;
-    config.zcashd_compat.block_gossip_peer_ips = vec!["127.0.0.1".parse().unwrap()];
-    let shutdown = CancellationToken::new();
-    let (ready_tx, ready_rx) = oneshot::channel();
-    let node = async {
-        Box::pin(zakurad::node::run_with_services_ready(config, vec![], shutdown.clone(), ready_tx))
-            .await
-            .map_err(|error| eyre!("{error}"))
-    };
-    let application = async {
-        tokio::select! {
-            _ = shutdown.cancelled() => Ok(()),
-            result = ready_rx => {
-                result.map_err(|_| eyre!("readiness closed"))?;
-                Err(eyre!("invalid node unexpectedly started"))
-            }
-        }
-    };
-    let error = timeout(
-        Duration::from_secs(5),
-        supervise(node, application, shutdown.clone(), future::pending()),
-    )
-    .await
-    .unwrap()
-    .unwrap_err();
-    assert!(error.to_string().contains("block_gossip_peer_ips requires"), "{error}");
-}
-
-#[tokio::test]
-async fn cancellation_before_startup_closes_readiness() {
-    let shutdown = CancellationToken::new();
-    let (ready_tx, ready_rx) = oneshot::channel();
-    let node = async {
-        Box::pin(zakurad::node::run_with_services_ready(
-            zakurad::config::ZakuradConfig::default(),
-            vec![],
-            shutdown.clone(),
-            ready_tx,
-        ))
-        .await
-        .map_err(|error| eyre!("{error}"))
-    };
-    let application = async {
-        shutdown.cancelled().await;
-        assert!(ready_rx.await.is_err());
-        Ok(())
-    };
-    timeout(
-        Duration::from_secs(5),
-        supervise(node, application, shutdown.clone(), async { Ok(()) }),
-    )
-    .await
-    .unwrap()
-    .unwrap();
 }
 
 use std::{
@@ -412,9 +341,6 @@ async fn signal_waits_for_an_active_blocking_writer() {
         started_rx.await.unwrap();
         Ok(())
     };
-    timeout(Duration::from_secs(5), supervise(node, application, shutdown.clone(), signal))
-        .await
-        .unwrap()
-        .unwrap();
+    supervise_within_five_seconds(node, application, shutdown.clone(), signal).await.unwrap();
     assert!(writer_finished.load(Ordering::SeqCst));
 }

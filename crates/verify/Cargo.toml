@@ -8,6 +8,18 @@ description = "Verification of imported ranges against a snapshot manifest"
 [lints]
 workspace = true
 
+[features]
+# Shared test fixtures in `ztreamer_verify::test_utils`: a source index with `range_meta` rows,
+# its snapshot directory, an HTTP server for that directory and a Replicator gRPC server.
+test-utils = [
+    "dep:tempfile",
+    "dep:ztreamer-service",
+    "hyper/server",
+    "tokio/net",
+    "tokio-stream/net",
+    "ztreamer-indexer/test-utils",
+]
+
 [dependencies]
 async-trait = "0.1"
 bytes = "1"
@@ -26,6 +38,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 serde_with = { version = "3", features = ["hex"] }
+tempfile = { version = "3", optional = true }
 thiserror = "2"
 metrics = "0.24"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
@@ -39,6 +52,7 @@ zakura-state.workspace = true
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
+ztreamer-service = { path = "../service", optional = true }
 
 [dev-dependencies]
 criterion = "0.8"

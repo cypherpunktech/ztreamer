@@ -1,5 +1,8 @@
 //! Test fixtures: an index with `range_meta` rows, its snapshot directory, an HTTP server for
 //! that directory, and a Replicator gRPC server for the index.
+//!
+//! Compiled for this crate's own tests and for other crates that enable the `test-utils`
+//! feature in their `[dev-dependencies]`.
 
 use std::{
     convert::Infallible,
@@ -40,6 +43,7 @@ use ztreamer_indexer::{
     },
     parser::parse_block,
     test_utils::{populate, raw_block},
+    types::RawIndexBlock,
 };
 use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
@@ -53,22 +57,31 @@ use crate::{
 };
 
 /// The seed of the key that signs a [`Snapshot`].
-pub(crate) const SEED: [u8; 32] = [7; 32];
+pub const SEED: [u8; 32] = [7; 32];
 
-/// An index with `ranges` sealed ranges of empty blocks, ten mutable blocks, and a `range_meta`
-/// row for each sealed range from [`RangeMetaFiller`].
-pub(crate) struct SourceIndex {
-    pub(crate) index: Arc<Index>,
-    pub(crate) state: IndexState,
-    _dir: TempDir,
+/// A Mainnet index in a temporary directory, sealed through a height, with or without a
+/// `range_meta` row for each sealed range.
+#[derive(Debug)]
+pub struct SourceIndex {
+    /// The index.
+    pub index: Arc<Index>,
+    /// The state of the index after the last write.
+    pub state: IndexState,
+    dir: TempDir,
 }
 
 impl SourceIndex {
-    pub(crate) async fn new(ranges: u32) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let index = Arc::new(Self::open(&dir));
+    /// An index with `ranges` sealed ranges of empty blocks, ten mutable blocks, and a
+    /// `range_meta` row for each sealed range from [`RangeMetaFiller`].
+    pub async fn new(ranges: u32) -> Self {
         let records = Self::records(ranges * RANGE_SIZE + 10);
-        let state = populate(&index, &records, Some(ranges * RANGE_SIZE - 1));
+        Self::with_range_meta(&records, ranges * RANGE_SIZE - 1).await
+    }
+
+    /// An index with `records`, sealed through `sealed_through`, and with a `range_meta` row for
+    /// each sealed range from [`RangeMetaFiller`].
+    pub async fn with_range_meta(records: &[CompactBlockRecord], sealed_through: u32) -> Self {
+        let source = Self::sealed(records, sealed_through);
         let (_state, read, _tip, _change) = zakura_state::init(
             zakura_state::Config::ephemeral(),
             &Network::Mainnet,
@@ -77,25 +90,47 @@ impl SourceIndex {
         )
         .await
         .unwrap();
-        let (sender, snapshots) = watch::channel(ServingSnapshot::from(state));
+        let (sender, snapshots) = watch::channel(ServingSnapshot::from(source.state));
         drop(sender);
         let backend = Arc::new(InProcessBackend::new(read));
-        RangeMetaFiller::embedded(Arc::clone(&index), backend).run(snapshots).await;
-        Self { index, state, _dir: dir }
+        RangeMetaFiller::embedded(Arc::clone(&source.index), backend).run(snapshots).await;
+        source
+    }
+
+    /// An index with `records`, sealed through `sealed_through`, with no `range_meta` row.
+    pub fn sealed(records: &[CompactBlockRecord], sealed_through: u32) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Arc::new(Self::open(&dir));
+        let state = populate(&index, records, Some(sealed_through));
+        Self { index, state, dir }
+    }
+
+    /// Closes the index and gives its directory. Another user of the index makes this panic.
+    pub fn into_dir(self) -> TempDir {
+        drop(Arc::into_inner(self.index).expect("no other user holds the index"));
+        self.dir
     }
 
     /// An empty Mainnet index in `dir`.
-    pub(crate) fn open(dir: &TempDir) -> Index {
+    pub fn open(dir: &TempDir) -> Index {
         let network = Network::Mainnet;
         Index::open(dir.path(), 1 << 30, &network.to_string(), network.genesis_hash()).unwrap()
     }
 
     /// The records of [`raw_block`] from genesis, as the parser gives them.
-    pub(crate) fn records(count: u32) -> Vec<CompactBlockRecord> {
+    pub fn records(count: u32) -> Vec<CompactBlockRecord> {
+        Self::parse_records((0..count).map(raw_block))
+    }
+
+    /// The records of `blocks` from genesis, as the parser gives them.
+    pub fn parse_records(
+        blocks: impl IntoIterator<Item = RawIndexBlock>,
+    ) -> Vec<CompactBlockRecord> {
         let mut sizes = TreeSizes::default();
-        (0..count)
-            .map(|height| {
-                let record = parse_block(&raw_block(height)).unwrap().into_record(sizes).unwrap();
+        blocks
+            .into_iter()
+            .map(|block| {
+                let record = parse_block(&block).unwrap().into_record(sizes).unwrap();
                 sizes = record.end_tree_sizes;
                 record
             })
@@ -104,7 +139,7 @@ impl SourceIndex {
 
     /// The entries of the rows from genesis to the sealed tip, with `epoch_end` on the last
     /// entry, as `ztreamerd export-snapshot` gives them to [`SnapshotWriter`].
-    pub(crate) fn entries(&self) -> Vec<ManifestEntry> {
+    pub fn entries(&self) -> Vec<ManifestEntry> {
         let ranges = self.state.sealed_through().unwrap() / RANGE_SIZE + 1;
         let mut entries: Vec<_> = (0..ranges)
             .map(|range| self.index.range_meta(range * RANGE_SIZE).unwrap().unwrap().entry)
@@ -115,18 +150,21 @@ impl SourceIndex {
 }
 
 /// A snapshot directory that [`SnapshotWriter`] wrote, signed with [`SEED`].
-pub(crate) struct Snapshot {
-    pub(crate) manifest: Manifest,
+#[derive(Debug)]
+pub struct Snapshot {
+    /// The last manifest.
+    pub manifest: Manifest,
     /// The path of the manifest that `latest.json` names, relative to [`Self::dir`].
-    pub(crate) manifest_path: String,
+    pub manifest_path: String,
     /// The time of the last manifest. Each new manifest is one day after the last manifest.
     published_at: DateTime<Utc>,
-    pub(crate) dir: TempDir,
+    /// The snapshot directory.
+    pub dir: TempDir,
 }
 
 impl Snapshot {
     /// Exports the rows of `source` from genesis to the sealed tip at 2026-10-26T00:00:00Z.
-    pub(crate) fn export(source: &SourceIndex) -> Self {
+    pub fn export(source: &SourceIndex) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let manifest =
             Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), source.entries()).unwrap();
@@ -137,13 +175,13 @@ impl Snapshot {
 
     /// Writes a new manifest with only the first `ranges` entries, as a source with a shorter
     /// export does. The last entry that stays must close an epoch.
-    pub(crate) fn keep_first_ranges(&mut self, ranges: usize) {
+    pub fn keep_first_ranges(&mut self, ranges: usize) {
         self.publish(self.manifest.entries()[..ranges].to_vec());
     }
 
     /// Writes `blob` as the blob of the range at `start`. Then it writes a new manifest with the
     /// entry of `blob`, as a source that sends a wrong range does.
-    pub(crate) fn replace_blob(&mut self, start: u32, blob: &[u8]) {
+    pub fn replace_blob(&mut self, start: u32, blob: &[u8]) {
         let mut entries = self.manifest.entries().to_vec();
         let entry = &mut entries[(start / RANGE_SIZE) as usize];
         entry.blob_digest = BlobDigest::hash(blob);
@@ -153,7 +191,7 @@ impl Snapshot {
     }
 
     /// The file of the blob of `entry`.
-    pub(crate) fn range_path(&self, entry: &ManifestEntry) -> PathBuf {
+    pub fn range_path(&self, entry: &ManifestEntry) -> PathBuf {
         self.dir.path().join(RangePath::from(entry).as_str())
     }
 
@@ -175,11 +213,14 @@ type Requests = Vec<(String, Option<String>)>;
 
 /// An HTTP/1 server for the files below a directory. It answers a `Range: bytes=<offset>-`
 /// request with 206 and the bytes from the offset.
-pub(crate) struct FileServer {
-    pub(crate) base: Uri,
+#[derive(Debug)]
+pub struct FileServer {
+    /// The base URL of the directory.
+    pub base: Uri,
     state: Arc<Served>,
 }
 
+#[derive(Debug)]
 struct Served {
     root: PathBuf,
     /// The next answer for this path sends half of its bytes, then stops with an error.
@@ -190,7 +231,8 @@ struct Served {
 type Body = BoxBody<Bytes, io::Error>;
 
 impl FileServer {
-    pub(crate) async fn start(root: &Path) -> Self {
+    /// Serves the files below `root` on a free local port.
+    pub async fn start(root: &Path) -> Self {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
         let state = Arc::new(Served {
@@ -210,11 +252,12 @@ impl FileServer {
     }
 
     /// Cuts the next answer for `path` after half of its bytes.
-    pub(crate) fn cut_next(&self, path: &str) {
+    pub fn cut_next(&self, path: &str) {
         *self.state.cut.lock().unwrap() = Some(path.to_owned());
     }
 
-    pub(crate) fn requests(&self) -> Requests {
+    /// The requests that the server got, in order.
+    pub fn requests(&self) -> Requests {
         self.state.requests.lock().unwrap().clone()
     }
 }
@@ -263,15 +306,18 @@ type RangeRequests = Vec<(u32, u64)>;
 /// A Replicator gRPC server for a [`SourceIndex`] with its own limit of open `GetRange` streams.
 ///
 /// It refuses a stream above the limit with `RESOURCE_EXHAUSTED`, as the real service does. It
-/// waits [`Self::ANSWER_WAIT`] before it answers a stream that it accepts, thus the streams of
+/// waits `Self::ANSWER_WAIT` before it answers a stream that it accepts, thus the streams of
 /// concurrent fetches overlap. A stream releases its place when it sends its last chunk, thus
 /// before the client sees the end. `GetExportInfo` and `ListRanges` come from
 /// [`ReplicatorService`].
-pub(crate) struct PeerServer {
-    pub(crate) endpoint: Uri,
+#[derive(Debug)]
+pub struct PeerServer {
+    /// The URL of the gRPC endpoint.
+    pub endpoint: Uri,
     peer: Arc<Peer>,
 }
 
+#[derive(Debug)]
 struct Peer {
     service: ReplicatorService,
     index: Arc<Index>,
@@ -291,7 +337,7 @@ impl PeerServer {
     const CUT_PLACE_HOLD: Duration = Duration::from_millis(150);
 
     /// Serves `source` with at most `stream_limit` open `GetRange` streams.
-    pub(crate) async fn start(source: &SourceIndex, stream_limit: usize) -> Self {
+    pub async fn start(source: &SourceIndex, stream_limit: usize) -> Self {
         let (_sender, snapshots) = watch::channel(ServingSnapshot::from(source.state));
         let service =
             ReplicatorService::new(Arc::clone(&source.index), snapshots, &Network::Mainnet);
@@ -312,22 +358,22 @@ impl PeerServer {
     }
 
     /// Cuts the next stream of the range at `start` after half of its bytes.
-    pub(crate) fn cut_next(&self, start: u32) {
+    pub fn cut_next(&self, start: u32) {
         *self.peer.cut.lock().unwrap() = Some(start);
     }
 
     /// The `GetRange` requests that the server accepted, in order.
-    pub(crate) fn requests(&self) -> RangeRequests {
+    pub fn requests(&self) -> RangeRequests {
         self.peer.requests.lock().unwrap().clone()
     }
 
     /// The `GetRange` requests that the server refused.
-    pub(crate) fn refusals(&self) -> usize {
+    pub fn refusals(&self) -> usize {
         self.peer.refusals.load(Ordering::Relaxed)
     }
 
     /// The most `GetRange` streams that were open at one time.
-    pub(crate) fn most_open_streams(&self) -> usize {
+    pub fn most_open_streams(&self) -> usize {
         self.peer.open_streams.lock().unwrap().1
     }
 }

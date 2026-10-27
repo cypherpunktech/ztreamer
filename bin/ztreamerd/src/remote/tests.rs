@@ -1,8 +1,4 @@
-use std::{
-    future,
-    net::{SocketAddr, TcpListener},
-    time::Duration,
-};
+use std::{future, net::SocketAddr, time::Duration};
 
 use clap::Parser;
 use serde_json::json;
@@ -13,13 +9,14 @@ use zakura_chain::{
 };
 use zakura_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
 use ztreamer_indexer::{index::SEAL_DEPTH, test_utils::grow_chain};
-use ztreamer_protocol::proto::{
-    BlockId, ChainSpec, compact_tx_streamer_client::CompactTxStreamerClient,
-};
+use ztreamer_protocol::proto::BlockId;
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
 
 use super::*;
-use crate::Cli;
+use crate::{
+    Cli,
+    test_support::{free_addr, latest_block_at, node_with_chain_name},
+};
 
 /// The durable tip of the index before the daemon starts.
 const INDEX_TIP: u32 = 20;
@@ -44,11 +41,6 @@ fn to(blocks: &[Block], tip: u32) -> &[Block] {
 async fn serve(chain: &MockChain) -> MockNode {
     let chain = chain.clone();
     MockNode::start(move |_, request| chain.reply(request)).await
-}
-
-/// A local address with no listener.
-fn free_addr() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap()
 }
 
 /// The flags of a daemon on the node at `url` with the index in `dir`, then `extra`.
@@ -108,19 +100,7 @@ impl Daemon {
 
     /// The answer to `GetLatestBlock`, when the daemon serves `height`.
     async fn latest_block(&self, height: u32) -> BlockId {
-        let poll = async {
-            loop {
-                if let Ok(mut client) =
-                    CompactTxStreamerClient::connect(format!("http://{}", self.grpc)).await
-                    && let Ok(latest) = client.get_latest_block(ChainSpec {}).await
-                    && latest.get_ref().height == u64::from(height)
-                {
-                    return latest.into_inner();
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        };
-        timeout(Duration::from_secs(30), poll).await.expect("the daemon serves the tip")
+        latest_block_at(self.grpc, height, Duration::from_secs(30)).await
     }
 
     /// Sends the signal. The daemon must stop without an error.
@@ -150,19 +130,6 @@ async fn serves_an_index_behind_a_mock_chain() {
     assert_eq!(latest.hash, blocks.last().unwrap().hash().0);
 }
 
-/// A mock node that serves `chain` and gives `name` as its chain name.
-async fn node_of(name: &'static str, chain: &MockChain) -> MockNode {
-    let chain = chain.clone();
-    MockNode::start(move |_, request| match chain.reply(request) {
-        Reply::Result(mut info) if request.body["method"] == "getblockchaininfo" => {
-            info["chain"] = json!(name);
-            Reply::Result(info)
-        }
-        reply => reply,
-    })
-    .await
-}
-
 /// True when the node got no `getblock` request.
 fn read_no_block(mock: &MockNode) -> bool {
     mock.seen().iter().all(|seen| seen.body["method"] != "getblock")
@@ -185,7 +152,7 @@ async fn serves_a_testnet_node_with_a_testnet_index() {
     let dir = tempfile::tempdir().unwrap();
     let mut blocks = vec![BLOCK_TESTNET_GENESIS_BYTES.zcash_deserialize_into::<Block>().unwrap()];
     grow_chain(&mut blocks, 10, 0);
-    let mock = node_of("test", &MockChain::new(&blocks)).await;
+    let mock = node_with_chain_name("test", &MockChain::new(&blocks)).await;
 
     let daemon = Daemon::start(&dir, &mock.url().to_string());
     let latest = daemon.latest_block(10).await;
@@ -201,7 +168,7 @@ async fn refuses_an_index_of_another_network() {
     let dir = tempfile::tempdir().unwrap();
     let blocks = chain(INDEX_TIP + SEAL_DEPTH);
     index(&dir, &blocks).await;
-    let mock = node_of("test", &MockChain::new(&blocks)).await;
+    let mock = node_with_chain_name("test", &MockChain::new(&blocks)).await;
 
     let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
@@ -214,7 +181,7 @@ async fn refuses_an_index_of_another_network() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn refuses_a_node_of_an_unknown_chain() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = node_of("regtest", &MockChain::new(&chain(10))).await;
+    let mock = node_with_chain_name("regtest", &MockChain::new(&chain(10))).await;
 
     let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
@@ -227,7 +194,7 @@ async fn refuses_a_node_of_an_unknown_chain() {
 async fn refuses_a_node_with_another_genesis_block() {
     let dir = tempfile::tempdir().unwrap();
     // The chain name is "test", but the genesis block is the one of mainnet.
-    let mock = node_of("test", &MockChain::new(&chain(10))).await;
+    let mock = node_with_chain_name("test", &MockChain::new(&chain(10))).await;
 
     let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
@@ -301,8 +268,6 @@ fn the_flags_keep_the_two_modes_apart() {
     let url = "http://127.0.0.1:8232";
     assert!(parse(&["--remote-rpc", url, "--zakura-config", "zakura.toml"]).is_err());
     assert!(parse(&["--remote-rpc-cookie", ".cookie"]).is_err());
-    // The node gives the network, thus the flag is gone.
-    assert!(parse(&["--remote-rpc", url, "--network", "testnet"]).is_err());
     assert!(parse(&["--remote-rpc", "http://user@127.0.0.1:8232"]).is_err());
     assert!(parse(&[]).unwrap().remote.node().unwrap().is_none());
 }

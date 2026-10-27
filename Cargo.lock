@@ -8116,7 +8116,6 @@ dependencies = [
 name = "ztreamerd"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "chrono",
  "clap",
  "ed25519-dalek",
@@ -8124,9 +8123,6 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "http",
- "http-body-util",
- "hyper",
- "hyper-util",
  "percent-encoding",
  "serde_json",
  "tempfile",

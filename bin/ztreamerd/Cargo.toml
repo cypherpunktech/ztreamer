@@ -32,11 +32,7 @@ ztreamer-remote = { path = "../../crates/remote" }
 tokio-util = "0.7"
 
 [dev-dependencies]
-bytes = "1"
 hex = "0.4"
-http-body-util = "0.1"
-hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["fs", "net"] }
@@ -45,3 +41,4 @@ zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../../crates/indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }
+ztreamer-verify = { path = "../../crates/verify", features = ["test-utils"] }

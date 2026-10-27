@@ -1,19 +1,7 @@
-use std::{
-    convert::Infallible,
-    fs, future,
-    net::{SocketAddr, TcpListener},
-    path::Path,
-    sync::Mutex,
-    time::Duration,
-};
+use std::{fs, future, time::Duration};
 
-use bytes::Bytes;
 use clap::Parser;
 use ed25519_dalek::SigningKey;
-use http::{Request, Response, StatusCode};
-use http_body_util::Full;
-use hyper::{body::Incoming, server::conn::http1, service::service_fn};
-use hyper_util::rt::TokioIo;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -23,20 +11,20 @@ use zakura_chain::{
     serialization::ZcashSerialize as _,
 };
 use ztreamer_indexer::{
-    codec::TreeSizes,
-    index::{IndexState, RANGE_SIZE, SEAL_DEPTH, range_meta::VerifyState},
-    parser::parse_block,
-    test_utils::{grow_chain, populate},
+    codec::CompactBlockRecord,
+    index::{RANGE_SIZE, SEAL_DEPTH, range_meta::VerifyState},
+    test_utils::grow_chain,
     types::RawIndexBlock,
 };
-use ztreamer_protocol::proto::{
-    BlockId, ChainSpec, compact_tx_streamer_client::CompactTxStreamerClient,
-};
+use ztreamer_protocol::proto::BlockId;
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
-use ztreamer_service::{InProcessBackend, RangeMetaFiller, ServingSnapshot};
+use ztreamer_verify::test_utils::{FileServer, SourceIndex};
 
 use super::*;
-use crate::{Cli, Command, DaemonArgs, run_daemon};
+use crate::{
+    Cli, Command, DaemonArgs, run_daemon,
+    test_support::{free_addr, latest_block_at, node_with_chain_name},
+};
 
 /// The ranges of the snapshot: three epochs, the last with one range.
 const RANGES: u32 = 21;
@@ -64,8 +52,9 @@ impl Snapshot {
     async fn new() -> Self {
         let mut blocks = Vec::new();
         grow_chain(&mut blocks, TIP, 0);
-        let (source, dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        Self::index(&source, &blocks[..=usize::try_from(SEALED + 10).unwrap()]).await;
+        let records = Self::records(&blocks[..=usize::try_from(SEALED + 10).unwrap()]);
+        let source = SourceIndex::with_range_meta(&records, SEALED).await.into_dir();
+        let dir = tempfile::tempdir().unwrap();
         let key = dir.path().join("key");
         fs::write(&key, SEED).unwrap();
         let out = dir.path().join("snapshot");
@@ -82,39 +71,11 @@ impl Snapshot {
         Self { blocks, server, _dir: dir }
     }
 
-    /// Writes `blocks` to an index in `dir`, sealed through [`SEALED`], with a `range_meta` row
-    /// for each sealed range. Closes the index.
-    async fn index(dir: &TempDir, blocks: &[Block]) {
-        let network = Network::Mainnet;
-        let (index, state) = Self::sealed_index(dir, blocks, SEALED);
-        let index = Arc::new(index);
-        let (_state, read, _tip, _change) =
-            zakura_state::init(zakura_state::Config::ephemeral(), &network, block::Height::MAX, 0)
-                .await
-                .unwrap();
-        let (sender, snapshots) = watch::channel(ServingSnapshot::from(state));
-        drop(sender);
-        let backend = Arc::new(InProcessBackend::new(read));
-        RangeMetaFiller::embedded(Arc::clone(&index), backend).run(snapshots).await;
-    }
-
-    /// Writes `blocks` to an index in `dir`, sealed through `sealed`, with no `range_meta` row.
-    fn sealed_index(dir: &TempDir, blocks: &[Block], sealed: u32) -> (Index, IndexState) {
-        let network = Network::Mainnet;
-        let index =
-            Index::open(dir.path(), 1 << 30, &network.to_string(), network.genesis_hash()).unwrap();
-        let mut sizes = TreeSizes::default();
-        let records: Vec<_> = blocks
-            .iter()
-            .map(|block| {
-                let raw = RawIndexBlock::from_bytes(block.zcash_serialize_to_vec().unwrap());
-                let record = parse_block(&raw.unwrap()).unwrap().into_record(sizes).unwrap();
-                sizes = record.end_tree_sizes;
-                record
-            })
-            .collect();
-        let state = populate(&index, &records, Some(sealed));
-        (index, state)
+    /// The records of `blocks` from genesis, as the parser gives them.
+    fn records(blocks: &[Block]) -> Vec<CompactBlockRecord> {
+        SourceIndex::parse_records(blocks.iter().map(|block| {
+            RawIndexBlock::from_bytes(block.zcash_serialize_to_vec().unwrap()).unwrap()
+        }))
     }
 
     /// A mock node that serves the chain, and the tree states of empty pools at each height.
@@ -138,52 +99,11 @@ impl Snapshot {
         .await;
         (chain, node)
     }
-}
 
-/// An HTTP/1 server for the files below a directory. It keeps the paths that it got.
-struct FileServer {
-    base: String,
-    paths: Arc<Mutex<Vec<String>>>,
-}
-
-impl FileServer {
-    async fn start(root: &Path) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let paths = Arc::new(Mutex::new(Vec::new()));
-        let (root, seen) = (root.to_owned(), Arc::clone(&paths));
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let (root, seen) = (root.clone(), Arc::clone(&seen));
-                let service = service_fn(move |request: Request<Incoming>| {
-                    let path = request.uri().path().trim_start_matches('/').to_owned();
-                    seen.lock().unwrap().push(path.clone());
-                    let file = root.join(path);
-                    async move {
-                        let (status, bytes) = match tokio::fs::read(file).await {
-                            Ok(bytes) => (StatusCode::OK, bytes),
-                            Err(_) => (StatusCode::NOT_FOUND, Vec::new()),
-                        };
-                        let mut response = Response::new(Full::new(Bytes::from(bytes)));
-                        *response.status_mut() = status;
-                        Ok::<_, Infallible>(response)
-                    }
-                });
-                tokio::spawn(http1::Builder::new().serve_connection(TokioIo::new(stream), service));
-            }
-        });
-        Self { base, paths }
-    }
-
-    /// True if a request asked for a range file.
+    /// True if a request to the snapshot server asked for a range file.
     fn fetched_a_range(&self) -> bool {
-        self.paths.lock().unwrap().iter().any(|path| path.starts_with("ranges/"))
+        self.server.requests().iter().any(|(path, _)| path.starts_with("ranges/"))
     }
-}
-
-/// A local address with no listener.
-fn free_addr() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap()
 }
 
 /// The flags of a replica of `snapshot` on the node at `url`, with the index in `dir`, then
@@ -191,7 +111,8 @@ fn free_addr() -> SocketAddr {
 fn cli(dir: &TempDir, url: &str, snapshot: &Snapshot, extra: &[&str]) -> DaemonArgs {
     let dir = dir.path().to_str().unwrap();
     let flags = ["--index-dir", dir, "--index-map-size", "1073741824", "--remote-rpc", url];
-    let flags = flags.into_iter().chain(["--replicate-from", &snapshot.server.base]);
+    let base = snapshot.server.base.to_string();
+    let flags = flags.into_iter().chain(["--replicate-from", &base]);
     Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
 }
 
@@ -217,7 +138,7 @@ async fn refusal(snapshot: &Snapshot, url: &str, seed: [u8; 32]) -> eyre::Report
         daemon(cli(&dir, url, snapshot, &[]), seed, future::pending()),
     );
     let error = run.await.expect("the replica stops by itself").unwrap_err();
-    assert!(!snapshot.server.fetched_a_range(), "{error:?}");
+    assert!(!snapshot.fetched_a_range(), "{error:?}");
     error
 }
 
@@ -235,18 +156,7 @@ async fn serve_until_tip(dir: &TempDir, snapshot: &Snapshot, node: &MockNode) ->
 
     // The servers start after the import and the tail. The tip is ready after the first head
     // reconcile.
-    let serving = async {
-        loop {
-            if let Ok(mut client) = CompactTxStreamerClient::connect(format!("http://{grpc}")).await
-                && let Ok(latest) = client.get_latest_block(ChainSpec {}).await
-                && latest.get_ref().height == u64::from(TIP)
-            {
-                return latest.into_inner();
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    };
-    let latest = timeout(Duration::from_secs(60), serving).await.expect("the replica serves");
+    let latest = latest_block_at(grpc, TIP, Duration::from_secs(60)).await;
     signal.cancel();
     timeout(Duration::from_secs(10), task).await.unwrap().unwrap().unwrap();
     latest
@@ -273,14 +183,13 @@ async fn a_replica_that_the_tail_sealed_continues_with_the_tail() {
     // As after the tail of an older manifest, with no `range_meta` row: one range past the epoch
     // end 9,999 of the snapshot (`EpochBoundary`), then exactly at it (`MissingRow`).
     for sealed in [10_999, 9_999] {
-        let dir = tempfile::tempdir().unwrap();
         let blocks = &snapshot.blocks[..=usize::try_from(sealed + 10).unwrap()];
-        drop(Snapshot::sealed_index(&dir, blocks, sealed));
+        let dir = SourceIndex::sealed(&Snapshot::records(blocks), sealed).into_dir();
 
         let latest = serve_until_tip(&dir, &snapshot, &node).await;
 
         assert_eq!(latest.hash, snapshot.blocks.last().unwrap().hash().0);
-        assert!(!snapshot.server.fetched_a_range());
+        assert!(!snapshot.fetched_a_range());
         let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
         assert_eq!(index.state().unwrap().verified_through(), None);
     }
@@ -307,14 +216,7 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
 
     // A node of the test chain gives the testnet index, and its genesis block is not the one
     // of testnet. The genesis check comes before the prune check.
-    let other = MockNode::start(move |_, request| match chain.reply(request) {
-        Reply::Result(mut info) if request.body["method"] == "getblockchaininfo" => {
-            info["chain"] = json!("test");
-            Reply::Result(info)
-        }
-        reply => reply,
-    })
-    .await;
+    let other = node_with_chain_name("test", &chain).await;
     let error = refusal(&snapshot, &other.url().to_string(), SEED).await;
     let genesis = |cause: &(dyn std::error::Error + 'static)| {
         cause.to_string().starts_with("remote zakura has genesis block")
