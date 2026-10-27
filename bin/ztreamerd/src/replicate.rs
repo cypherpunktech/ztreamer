@@ -48,14 +48,6 @@ impl ReplicateArgs {
         let source = self.replicate_from.clone().expect("--remote-rpc requires --replicate-from");
         Replica { source, key }
     }
-
-    /// Logs the new import state of a replica at info level: `tail` or `following`. Does
-    /// nothing in the embedded mode.
-    pub(crate) fn log_import_state(&self, state: &'static str) {
-        if self.replicate_from.is_some() {
-            info!(import_state = state);
-        }
-    }
 }
 
 /// A `--replicate-from` value.

@@ -256,6 +256,7 @@ impl RemoteNode {
         else {
             return Ok(());
         };
+        info!(import_state = "tail");
         run_application(cli, grpc_server, index, &network, None, sources, shutdown).await
     }
 
