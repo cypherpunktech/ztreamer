@@ -30,7 +30,6 @@ hex = "0.4"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
-hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 pasta_curves.workspace = true
 rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
@@ -44,7 +43,6 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-stream = "0.1"
 tonic = "0.14.6"
 tracing = "0.1"
-webpki-roots = "1"
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true

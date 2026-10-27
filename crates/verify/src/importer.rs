@@ -59,11 +59,10 @@ use ztreamer_indexer::index::{
 
 use self::epoch_import::EpochImport;
 use crate::{
-    attest::{Attestor, EpochError, NodeError},
+    attest::{Attestor, EpochError},
     epoch::Epoch,
     fetch::{FetchError, Fetcher, RangeSource},
     manifest::Manifest,
-    range::Reject,
     sample::{SamplePlan, Sampler},
 };
 
@@ -184,36 +183,16 @@ pub enum ImportError {
         /// The first height of the range.
         start: u32,
     },
-    /// A range of the epoch failed a check. The index keeps the epochs before it.
-    #[error("epoch through {epoch} rejected")]
-    Rejected {
+    /// A range of the epoch failed a check, or the node gave no answer for the epoch. The index
+    /// keeps the epochs before it.
+    #[error("epoch through {epoch} not accepted")]
+    Epoch {
         /// The end height of the epoch.
         epoch: u32,
-        /// The check that failed.
+        /// The failed check, or the node call that failed.
         #[source]
-        reject: Reject,
+        source: EpochError,
     },
-    /// The node gave no answer for the epoch. Try again later.
-    #[error("node gave no answer for height {height} of the epoch through {epoch}")]
-    Node {
-        /// The end height of the epoch.
-        epoch: u32,
-        /// The height that the failed call asked about.
-        height: u32,
-        /// Why the node gave no answer.
-        #[source]
-        source: NodeError,
-    },
-}
-
-impl ImportError {
-    /// The error for the epoch through `epoch` that `error` stopped.
-    fn in_epoch(epoch: u32, error: EpochError) -> Self {
-        match error {
-            EpochError::Reject(reject) => Self::Rejected { epoch, reject },
-            EpochError::Node { height, source } => Self::Node { epoch, height, source },
-        }
-    }
 }
 
 /// Installs the sealed ranges of one source in an index, in verified epochs.
@@ -391,8 +370,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        attest::NodeError,
         fetch::{HttpSource, PEER_RANGE_STREAMS, PeerSource},
-        range::Check,
+        range::{Check, Reject},
         test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex},
     };
 
@@ -724,7 +704,7 @@ mod tests {
 
         let expected = Reject::Rejected { check: Check::TreeSizes, height: 15_500 };
         assert!(
-            matches!(error, ImportError::Rejected { epoch: 19_999, reject } if reject == expected),
+            matches!(error, ImportError::Epoch { epoch: 19_999, source: EpochError::Reject(reject) } if reject == expected),
             "{error:?}"
         );
         let state = import.target.state().unwrap();

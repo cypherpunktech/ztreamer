@@ -11,7 +11,7 @@ use crate::{
     ingest::{IngestError, OrderedBuilder},
     parser::{CompactParseError, parse_block},
     pipeline::PipelineConfig,
-    types::{ParsedCompactBlock, RawBlockError, RawIndexBlock},
+    types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +44,16 @@ pub enum HeadError {
 impl From<RawBlockError> for HeadError {
     fn from(error: RawBlockError) -> Self {
         Self::Decode(error.to_string())
+    }
+}
+
+impl From<BlockAtHeightError> for HeadError {
+    fn from(error: BlockAtHeightError) -> Self {
+        match error {
+            BlockAtHeightError::Rpc(error) => Self::Remote(error),
+            BlockAtHeightError::Decode { source, .. } => source.into(),
+            BlockAtHeightError::Height { expected, actual } => Self::Height { expected, actual },
+        }
     }
 }
 

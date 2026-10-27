@@ -10,8 +10,6 @@ use std::panic;
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
-use zakura_chain::block;
-use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block, types::RawIndexBlock,
 };
@@ -167,16 +165,9 @@ impl JsonRpcSampler {
 
 #[async_trait]
 impl Sampler for JsonRpcSampler {
-    /// The block at `height`. Deserializes it on the blocking thread pool of the runtime.
+    /// The block at `height`, from [`RawIndexBlock::fetch_at_height`].
     async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError> {
-        let bytes = self.node.get_block_raw(HashOrHeight::Height(block::Height(height))).await?.0;
-        let block = tokio::task::spawn_blocking(move || RawIndexBlock::from_bytes(bytes))
-            .await
-            .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))?;
-        if block.height.0 != height {
-            return Err(NodeError::Height { expected: height, actual: block.height.0 });
-        }
-        Ok(block)
+        Ok(RawIndexBlock::fetch_at_height(&self.node, height).await?)
     }
 }
 
@@ -185,6 +176,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use serde_json::json;
+    use zakura_chain::block;
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},

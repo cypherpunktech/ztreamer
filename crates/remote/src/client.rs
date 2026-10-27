@@ -15,15 +15,10 @@ use http::{
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
 use http_body_util::{BodyExt as _, Full};
-use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
-    rt::TokioExecutor,
-};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::{Auth, RpcError, envelope};
+use crate::{Auth, HttpsClient, RpcError, envelope};
 
 /// How many bytes of an unexpected HTTP body end up in the error message.
 const ERROR_BODY_PREVIEW: usize = 512;
@@ -127,7 +122,7 @@ pub(crate) enum Retries {
     Unsent,
 }
 
-type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+type HttpClient = HttpsClient<Full<Bytes>>;
 
 struct Inner {
     http: HttpClient,
@@ -175,7 +170,8 @@ impl RpcClient {
         }
 
         let auth_header = config.auth.header()?;
-        let http = build_http_client()?;
+        let http = HttpClient::new(Some(CONNECT_TIMEOUT))
+            .map_err(|error| RpcError::Config(format!("tls setup failed: {error}")))?;
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -394,31 +390,6 @@ fn preview(body: &[u8]) -> String {
         end -= 1;
     }
     text[..end].to_owned()
-}
-
-fn build_http_client() -> Result<HttpClient, RpcError> {
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .map_err(|error| RpcError::Config(format!("tls setup failed: {error}")))?
-    .with_root_certificates(roots)
-    .with_no_client_auth();
-
-    let mut tcp = HttpConnector::new();
-    tcp.enforce_http(false);
-    tcp.set_connect_timeout(Some(CONNECT_TIMEOUT));
-    tcp.set_nodelay(true);
-    let https = HttpsConnectorBuilder::new()
-        .with_tls_config(tls)
-        .https_or_http()
-        .enable_http1()
-        .wrap_connector(tcp);
-
-    Ok(Client::builder(TokioExecutor::new()).build(https))
 }
 
 #[cfg(test)]

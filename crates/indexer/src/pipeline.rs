@@ -29,7 +29,7 @@ use crate::{
         EncodedBatch, IngestError, OrderedBuilder, WriteBatch, partial_range_flush_threshold,
     },
     parser::CompactParseError,
-    types::RawBlockError,
+    types::{BlockAtHeightError, RawBlockError},
 };
 
 const MIB: usize = 1024 * 1024;
@@ -148,6 +148,18 @@ pub enum PipelineError {
     Worker,
     #[error("pipeline worker panicked")]
     Panic,
+}
+
+impl From<BlockAtHeightError> for PipelineError {
+    fn from(error: BlockAtHeightError) -> Self {
+        match error {
+            BlockAtHeightError::Rpc(error) => Self::Remote(error),
+            BlockAtHeightError::Decode { height, source } => Self::BlockDecode { height, source },
+            BlockAtHeightError::Height { expected, actual } => {
+                Self::SourceGap { expected, actual: Some(actual) }
+            }
+        }
+    }
 }
 
 /// Where the historical pass reads finalized blocks from.

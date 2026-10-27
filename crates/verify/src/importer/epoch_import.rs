@@ -156,9 +156,9 @@ impl EpochImport {
             .previous()
             .filter(|_| at != self.first_epoch)
             .map_or(&self.first_start_frontiers, |previous| &previous.frontiers);
-        let (proof, ranges) = epoch
-            .verify_ranges(&blobs, start)
-            .map_err(|reject| ImportError::Rejected { epoch: epoch.end_height(), reject })?;
+        let (proof, ranges) = epoch.verify_ranges(&blobs, start).map_err(|reject| {
+            ImportError::Epoch { epoch: epoch.end_height(), source: reject.into() }
+        })?;
         Ok((ranges, proof))
     }
 
@@ -175,7 +175,7 @@ impl EpochImport {
         let attest = epoch.attest(&proof, &*node.attestor);
         let sample = epoch.sample(&ranges, &*node.sampler, self.importer.config.verify_sample);
         let (attested, sampled) = tokio::join!(attest, sample);
-        let in_epoch = |error| ImportError::in_epoch(epoch.end_height(), error);
+        let in_epoch = |source| ImportError::Epoch { epoch: epoch.end_height(), source };
         let (attested, sampled) = (attested.map_err(in_epoch)?, sampled.map_err(in_epoch)?);
 
         let verified_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();

@@ -1,13 +1,10 @@
 //! [`CanonicalBlockSource`] over the JSON-RPC interface of a remote zakura node.
 
-use std::panic;
-
 use zakura_chain::block;
-use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
-    types::RawIndexBlock,
+    types::{BlockAtHeightError, RawIndexBlock},
 };
 use ztreamer_remote::ZakuraClient;
 
@@ -58,20 +55,11 @@ impl CanonicalBlockSource for RemoteHeadSource {
     ///
     /// [`poll_canonical_head`]: ztreamer_indexer::head::poll_canonical_head
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
-        let bytes = match self.node.get_block_raw(HashOrHeight::Height(block::Height(height))).await
-        {
-            Ok(bytes) => bytes.0,
-            Err(error) if error.is_block_not_found() => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        let block = tokio::task::spawn_blocking(move || RawIndexBlock::from_bytes(bytes))
-            .await
-            .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
-            .map_err(|error| HeadError::Decode(error.to_string()))?;
-        if block.height.0 != height {
-            return Err(HeadError::Height { expected: height, actual: block.height.0 });
+        match RawIndexBlock::fetch_at_height(&self.node, height).await {
+            Ok(block) => Ok(Some(block)),
+            Err(BlockAtHeightError::Rpc(error)) if error.is_block_not_found() => Ok(None),
+            Err(error) => Err(error.into()),
         }
-        Ok(Some(block))
     }
 
     /// The best-chain hash at `height` from one `getblockhash` call, or `None` when the node has

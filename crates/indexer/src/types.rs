@@ -1,12 +1,14 @@
 //! Compact block and transaction types produced by the parser and stored by the index.
 
-use std::io;
+use std::{io, panic};
 
 use zakura_chain::{
     block::{self, Block},
     serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
+use zakura_state::HashOrHeight;
+use ztreamer_remote::{RpcError, ZakuraClient};
 
 use crate::{
     Ciphertext, Digest, EphemeralKey,
@@ -36,7 +38,45 @@ pub enum RawBlockError {
     Serialize(io::Error),
 }
 
+/// Why [`RawIndexBlock::fetch_at_height`] or [`RawIndexBlock::from_bytes_at_height`] gave no
+/// block.
+#[derive(Debug, thiserror::Error)]
+pub enum BlockAtHeightError {
+    /// The `getblock` call failed. [`RpcError::is_block_not_found`] is `true` when the node has
+    /// no block at the height.
+    #[error(transparent)]
+    Rpc(#[from] RpcError),
+    /// The bytes of the block at `height` do not decode.
+    #[error("block at height {height} does not decode")]
+    Decode { height: u32, source: RawBlockError },
+    /// The block for height `expected` has the coinbase height `actual`.
+    #[error("block for height {expected} is at height {actual}")]
+    Height { expected: u32, actual: u32 },
+}
+
 impl RawIndexBlock {
+    /// The best-chain block at `height` from one `getblock` call with verbosity 0. It decodes
+    /// the block on the blocking thread pool, with [`Self::from_bytes_at_height`].
+    pub async fn fetch_at_height(
+        node: &ZakuraClient,
+        height: u32,
+    ) -> Result<Self, BlockAtHeightError> {
+        let bytes = node.get_block_raw(HashOrHeight::Height(block::Height(height))).await?.0;
+        tokio::task::spawn_blocking(move || Self::from_bytes_at_height(bytes, height))
+            .await
+            .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
+    }
+
+    /// Decodes `bytes` with [`Self::from_bytes`], and refuses a block that is not at `height`.
+    pub fn from_bytes_at_height(bytes: Vec<u8>, height: u32) -> Result<Self, BlockAtHeightError> {
+        let block = Self::from_bytes(bytes)
+            .map_err(|source| BlockAtHeightError::Decode { height, source })?;
+        if block.height.0 != height {
+            return Err(BlockAtHeightError::Height { expected: height, actual: block.height.0 });
+        }
+        Ok(block)
+    }
+
     /// Decodes a serialized block, for example the result of `getblock` with verbosity 0 from a
     /// remote node.
     ///

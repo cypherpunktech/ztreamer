@@ -26,11 +26,6 @@ use bytes::{Bytes, BytesMut};
 use ed25519_dalek::VerifyingKey;
 use http::{Request, StatusCode, Uri, header::RANGE};
 use http_body_util::{BodyExt as _, Empty};
-use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
-    rt::TokioExecutor,
-};
 use tokio::sync::Semaphore;
 use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Code, Streaming, transport::Channel};
@@ -42,6 +37,7 @@ use ztreamer_indexer::index::range_meta::{
 use ztreamer_protocol::replicate::{
     self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
 };
+use ztreamer_remote::HttpsClient;
 
 use crate::{
     importer::MAX_BLOB_BYTES_BEFORE_INSTALL,
@@ -270,7 +266,7 @@ impl Fetcher {
 }
 
 /// The HTTP client of [`HttpSource`].
-type HttpClient = Client<HttpsConnector<HttpConnector>, Empty<Bytes>>;
+type HttpClient = HttpsClient<Empty<Bytes>>;
 
 /// A snapshot directory below a base URL, signed with a key that the caller trusts.
 ///
@@ -293,25 +289,7 @@ impl fmt::Debug for HttpSource {
 impl HttpSource {
     /// A source below `base` whose files `key` signs. It does not contact the server.
     pub fn new(base: Uri, key: VerifyingKey) -> Result<Self, FetchError> {
-        // A copy of the connector of `ztreamer_remote::RpcClient`, which is private, with the
-        // web PKI roots only.
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-        let mut tcp = HttpConnector::new();
-        tcp.enforce_http(false);
-        tcp.set_nodelay(true);
-        let https = HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
-            .https_or_http()
-            .enable_http1()
-            .wrap_connector(tcp);
-        let client = Client::builder(TokioExecutor::new()).build(https);
+        let client = HttpClient::new(None)?;
         let base = base.to_string().trim_end_matches('/').to_owned();
         let blob_requests = RequestLimit::new(HTTP_BLOB_REQUESTS);
         Ok(Self { base, key, client, blob_requests })

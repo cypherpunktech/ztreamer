@@ -133,14 +133,7 @@ impl HistoricalSource for RemoteTailSource {
             }
 
             let started = Instant::now();
-            let block = RawIndexBlock::from_bytes(bytes)
-                .map_err(|source| PipelineError::BlockDecode { height, source })?;
-            if block.height.0 != height {
-                return Err(PipelineError::SourceGap {
-                    expected: height,
-                    actual: Some(block.height.0),
-                });
-            }
+            let block = RawIndexBlock::from_bytes_at_height(bytes, height)?;
             let required = block
                 .txids
                 .len()

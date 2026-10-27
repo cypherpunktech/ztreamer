@@ -25,7 +25,7 @@ use ztreamer_indexer::{
     frontier::{FromRpc, RpcDecodeError},
     index::range_meta::{Attested, NodeBytes, Pool, PoolRoots, SubtreeNode},
     parser::CompactParseError,
-    types::RawBlockError,
+    types::{BlockAtHeightError, RawBlockError},
 };
 use ztreamer_remote::{RpcError, ZakuraClient};
 
@@ -92,6 +92,16 @@ pub enum NodeError {
     /// The record of the node block does not encode.
     #[error("record of the node block does not encode")]
     Encode(#[from] CodecError),
+}
+
+impl From<BlockAtHeightError> for NodeError {
+    fn from(error: BlockAtHeightError) -> Self {
+        match error {
+            BlockAtHeightError::Rpc(error) => Self::Rpc(error),
+            BlockAtHeightError::Decode { source, .. } => Self::RawBlock(source),
+            BlockAtHeightError::Height { expected, actual } => Self::Height { expected, actual },
+        }
+    }
 }
 
 /// Why [`Epoch::attest`] or [`Epoch::sample`](crate::epoch::Epoch::sample) did not accept an
