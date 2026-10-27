@@ -208,7 +208,8 @@ impl Snapshot {
 type Requests = Vec<(String, Option<String>)>;
 
 /// An HTTP/1 server for the files below a directory. It answers a `Range: bytes=<offset>-`
-/// request with 206 and the bytes from the offset.
+/// request with 206 and the bytes from the offset. It waits `Self::ANSWER_WAIT` before each
+/// answer, thus the requests of concurrent fetches overlap.
 #[derive(Debug)]
 pub struct FileServer {
     /// The base URL of the directory.
@@ -222,11 +223,14 @@ struct Served {
     /// The next answer for this path sends half of its bytes, then stops with an error.
     cut: Mutex<Option<String>>,
     requests: Mutex<Requests>,
+    open_requests: Arc<OpenCounts>,
 }
 
 type Body = BoxBody<Bytes, io::Error>;
 
 impl FileServer {
+    const ANSWER_WAIT: Duration = Duration::from_millis(20);
+
     /// Serves the files below `root` on a free local port.
     pub async fn start(root: &Path) -> Self {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
@@ -235,6 +239,7 @@ impl FileServer {
             root: root.to_owned(),
             cut: Mutex::default(),
             requests: Mutex::default(),
+            open_requests: Arc::default(),
         });
         let served = Arc::clone(&state);
         tokio::spawn(async move {
@@ -256,6 +261,11 @@ impl FileServer {
     pub fn requests(&self) -> Requests {
         self.state.requests.lock().unwrap().clone()
     }
+
+    /// The most requests that the server answered at one time.
+    pub fn most_open_requests(&self) -> usize {
+        self.state.open_requests.most()
+    }
 }
 
 impl Served {
@@ -263,6 +273,8 @@ impl Served {
         let path = request.uri().path().trim_start_matches('/').to_owned();
         let range = request.headers().get(RANGE).map(|value| value.to_str().unwrap().to_owned());
         self.requests.lock().unwrap().push((path.clone(), range.clone()));
+        let _open = OpenCounts::open(&self.open_requests);
+        tokio::time::sleep(FileServer::ANSWER_WAIT).await;
         let Ok(bytes) = tokio::fs::read(self.root.join(&path)).await else {
             let empty = Full::default().map_err(io::Error::other).boxed();
             return Ok(Self::response(StatusCode::NOT_FOUND, empty));
@@ -318,8 +330,7 @@ struct Peer {
     service: ReplicatorService,
     index: Arc<Index>,
     stream_places: Arc<Semaphore>,
-    /// The streams that are open now, and the most that were open at one time.
-    open_streams: Arc<Mutex<(usize, usize)>>,
+    open_streams: Arc<OpenCounts>,
     refusals: AtomicUsize,
     /// The next stream for this range sends half of its bytes, then stops with an error. It
     /// keeps its place for [`PeerServer::CUT_PLACE_HOLD`] after the cut.
@@ -370,29 +381,48 @@ impl PeerServer {
 
     /// The most `GetRange` streams that were open at one time.
     pub fn most_open_streams(&self) -> usize {
-        self.peer.open_streams.lock().unwrap().1
+        self.peer.open_streams.most()
+    }
+}
+
+/// The requests or streams that are open now, and the most that were open at one time.
+#[derive(Debug, Default)]
+struct OpenCounts(Mutex<(usize, usize)>);
+
+impl OpenCounts {
+    /// Counts one more open request or stream until the drop of the [`Open`].
+    fn open(counts: &Arc<Self>) -> Open {
+        let mut guard = counts.0.lock().unwrap();
+        guard.0 += 1;
+        guard.1 = guard.1.max(guard.0);
+        drop(guard);
+        Open(Arc::clone(counts))
+    }
+
+    /// The most that were open at one time.
+    fn most(&self) -> usize {
+        self.0.lock().unwrap().1
+    }
+}
+
+/// One open request or stream. The drop closes it.
+struct Open(Arc<OpenCounts>);
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        self.0.0.lock().unwrap().0 -= 1;
     }
 }
 
 /// The place of one open stream on a [`PeerServer`]. The drop releases it.
 struct OpenStream {
-    open_streams: Arc<Mutex<(usize, usize)>>,
+    _open: Open,
     _place: OwnedSemaphorePermit,
 }
 
 impl OpenStream {
-    fn new(open_streams: &Arc<Mutex<(usize, usize)>>, place: OwnedSemaphorePermit) -> Self {
-        let mut counts = open_streams.lock().unwrap();
-        counts.0 += 1;
-        counts.1 = counts.1.max(counts.0);
-        drop(counts);
-        Self { open_streams: Arc::clone(open_streams), _place: place }
-    }
-}
-
-impl Drop for OpenStream {
-    fn drop(&mut self) {
-        self.open_streams.lock().unwrap().0 -= 1;
+    fn new(open_streams: &Arc<OpenCounts>, place: OwnedSemaphorePermit) -> Self {
+        Self { _open: OpenCounts::open(open_streams), _place: place }
     }
 }
 

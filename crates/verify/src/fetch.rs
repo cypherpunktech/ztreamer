@@ -8,6 +8,7 @@
 //!   that it names, and verifies the Ed25519 signature of each with a key that the caller
 //!   gives. It does not use the key in `latest.json`: a source that can change the files can
 //!   also change that key. It reads a blob from its [`RangePath`] with an HTTP `Range` request.
+//!   It sends at most [`HTTP_BLOB_REQUESTS`] blob requests at a time.
 //! - [`PeerSource`] asks a ztreamer that serves the Replicator gRPC service. It builds the
 //!   manifest from `ListRanges`, up to the last listed range that closes an epoch. It opens at
 //!   most [`PEER_RANGE_STREAMS`] `GetRange` streams at a time. When the peer refuses a stream
@@ -54,6 +55,11 @@ pub const MAX_RESUMES: u32 = 3;
 /// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
 /// streams above it, and [`PeerSource`] asks again.
 pub const PEER_RANGE_STREAMS: usize = 4;
+
+/// The blob requests that one [`HttpSource`] sends at a time. Each request in work holds one
+/// HTTP/1 connection. Thus the limit keeps the connections to one server low when many epochs
+/// fetch at the same time.
+pub const HTTP_BLOB_REQUESTS: usize = 32;
 
 /// The bytes of a range blob, in order, from the offset of the request.
 pub type BlobStream = Pin<Box<dyn Stream<Item = Result<Bytes, FetchError>> + Send>>;
@@ -235,11 +241,15 @@ impl Fetcher {
 type HttpClient = Client<HttpsConnector<HttpConnector>, Empty<Bytes>>;
 
 /// A snapshot directory below a base URL, signed with a key that the caller trusts.
+///
+/// The clones of a source share one limit of [`HTTP_BLOB_REQUESTS`] blob requests.
 #[derive(Clone)]
 pub struct HttpSource {
     base: String,
     key: VerifyingKey,
     client: HttpClient,
+    /// One permit for each blob request in work.
+    blob_requests: Arc<Semaphore>,
 }
 
 impl fmt::Debug for HttpSource {
@@ -271,7 +281,9 @@ impl HttpSource {
             .enable_http1()
             .wrap_connector(tcp);
         let client = Client::builder(TokioExecutor::new()).build(https);
-        Ok(Self { base: base.to_string().trim_end_matches('/').to_owned(), key, client })
+        let base = base.to_string().trim_end_matches('/').to_owned();
+        let blob_requests = Arc::new(Semaphore::new(HTTP_BLOB_REQUESTS));
+        Ok(Self { base, key, client, blob_requests })
     }
 
     /// Sends a GET for `path` below the base URL, from byte `offset`, and checks the status.
@@ -339,8 +351,16 @@ impl RangeSource for HttpSource {
         entry: &ManifestEntry,
         offset: u64,
     ) -> Result<BlobStream, FetchError> {
+        let permit = Arc::clone(&self.blob_requests)
+            .acquire_owned()
+            .await
+            .expect("the request permits are never closed");
         let body = self.get(RangePath::from(entry).as_str(), offset).await?.into_body();
-        Ok(Box::pin(body.into_data_stream().map(|chunk| chunk.map_err(FetchError::from))))
+        // The permit lasts until the blob stream is dropped.
+        Ok(Box::pin(body.into_data_stream().map(move |chunk| {
+            let _ = &permit;
+            chunk.map_err(FetchError::from)
+        })))
     }
 }
 
@@ -532,7 +552,11 @@ mod tests {
 
     impl Http {
         async fn new() -> Self {
-            let source = SourceIndex::new(RANGES).await;
+            Self::with_ranges(RANGES).await
+        }
+
+        async fn with_ranges(ranges: u32) -> Self {
+            let source = SourceIndex::new(ranges).await;
             let snapshot = Snapshot::export(&source);
             let server = FileServer::start(snapshot.dir.path()).await;
             Self { source, snapshot, server }
@@ -594,6 +618,20 @@ mod tests {
             requests,
             [(relative.to_owned(), None), (relative.to_owned(), Some(format!("bytes={half}-")))]
         );
+    }
+
+    #[tokio::test]
+    async fn an_http_source_sends_at_most_its_request_limit() {
+        let http = Http::with_ranges(HTTP_BLOB_REQUESTS as u32 + 8).await;
+        let fetcher = http.fetcher(SEED);
+        let entries = http.snapshot.manifest.entries();
+
+        let blobs = future::try_join_all(entries.iter().map(|entry| fetcher.blob(entry)));
+
+        for (entry, blob) in entries.iter().zip(blobs.await.unwrap()) {
+            assert_eq!(blob, http.blob(entry.start_height));
+        }
+        assert_eq!(http.server.most_open_requests(), HTTP_BLOB_REQUESTS);
     }
 
     #[tokio::test]

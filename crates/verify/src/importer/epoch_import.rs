@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_indexer::index::{
     CheckedRange, IndexState,
-    range_meta::{Frontiers, ManifestEntry, RangeMeta, VerifyState},
+    range_meta::{Frontiers, MAX_RANGES, ManifestEntry, RangeMeta, VerifyState},
 };
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
@@ -21,6 +21,15 @@ use crate::{
     epoch::{Epoch, EpochProof, Epochs},
     manifest::Manifest,
 };
+
+/// The blob fetches of one epoch that run at the same time: all the blobs of the epoch. The
+/// epoch holds the bytes of its blobs in the byte budget before its fetch, thus this adds no
+/// memory. The request limit of the source ([`PEER_RANGE_STREAMS`], [`HTTP_BLOB_REQUESTS`]) sets
+/// the requests on the wire.
+///
+/// [`PEER_RANGE_STREAMS`]: crate::fetch::PEER_RANGE_STREAMS
+/// [`HTTP_BLOB_REQUESTS`]: crate::fetch::HTTP_BLOB_REQUESTS
+const BLOB_FETCHES_PER_EPOCH: usize = MAX_RANGES;
 
 /// The checked ranges of an epoch and their `range_meta` rows, in height order.
 pub(crate) type VerifiedRows = Vec<(CheckedRange, RangeMeta)>;
@@ -107,11 +116,16 @@ impl EpochImport {
         self.attest_and_sample(at, ranges, proof).await
     }
 
-    /// The blobs of the epoch at `at`, from the source.
+    /// The blobs of the epoch at `at`, from the source, in height order. At most
+    /// [`BLOB_FETCHES_PER_EPOCH`] fetches run at the same time. The first failed blob in height
+    /// order stops the fetch with its error, and the drop stops the other fetches.
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
-        let entries = self.manifest_epoch(at).entries();
-        let blobs = stream::iter(entries).then(|entry| self.importer.fetcher.blob(entry));
-        Ok(blobs.try_collect().await?)
+        let fetcher = &self.importer.fetcher;
+        // A stream that maps with a closure makes `Importer::run` not `Send` (rust#102211). The
+        // futures in the `Vec` do no work until `buffered` polls them.
+        let fetches: Vec<_> =
+            self.manifest_epoch(at).entries().iter().map(|entry| fetcher.blob(entry)).collect();
+        Ok(stream::iter(fetches).buffered(BLOB_FETCHES_PER_EPOCH).try_collect().await?)
     }
 
     /// Runs [`Epoch::verify`] for the epoch at `at` on the blocking thread pool, with one of

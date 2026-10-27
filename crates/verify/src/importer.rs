@@ -7,8 +7,10 @@
 //!
 //! 1. Take its part of a byte budget of [`MAX_BLOB_BYTES_BEFORE_INSTALL`], in height order.
 //!    The epoch keeps it until its install.
-//! 2. Fetch its blobs with [`Fetcher::blob`]. A blob with a wrong digest, or a fetch that
-//!    fails after its resumes, stops the import.
+//! 2. Fetch its blobs with [`Fetcher::blob`], all at the same time, and keep them in height
+//!    order. The request limit of the source sets the requests on the wire. A blob with a wrong
+//!    digest, or a fetch that fails after its resumes, stops the import with the error of the
+//!    first such blob in height order.
 //! 3. Run [`Epoch::verify`] on the blocking thread pool. At most `import_workers` epochs do
 //!    this at the same time.
 //! 4. Run [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`] at the same
@@ -380,14 +382,16 @@ mod tests {
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_indexer::{
         codec::{RangeDecoder, encode_range},
-        index::range_meta::{Attested, ManifestEntry, Pool, PoolRoots, SubtreeNode, VerifyState},
+        index::range_meta::{
+            Attested, MAX_RANGES, ManifestEntry, Pool, PoolRoots, SubtreeNode, VerifyState,
+        },
         test_utils::raw_block,
         types::RawIndexBlock,
     };
 
     use super::*;
     use crate::{
-        fetch::{HttpSource, PeerSource},
+        fetch::{HttpSource, PEER_RANGE_STREAMS, PeerSource},
         range::Check,
         test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex},
     };
@@ -632,6 +636,39 @@ mod tests {
         }
         assert!(server.refusals() > 0);
         assert_eq!(server.requests().len(), 20);
+    }
+
+    /// One epoch of ten ranges: only its own blob fetches can overlap.
+    #[tokio::test]
+    async fn an_http_import_fetches_the_blobs_of_an_epoch_at_the_same_time() {
+        let import = Import::new(10).await;
+
+        let report = import.run().await.unwrap();
+
+        assert_eq!((report.epochs, report.ranges), (1, 10));
+        import.assert_target_has_source_blobs();
+        assert_eq!(import.server.most_open_requests(), MAX_RANGES);
+    }
+
+    /// One epoch of ten ranges, from a peer with more streams than the limit of the source.
+    #[tokio::test]
+    async fn a_peer_import_fetches_the_blobs_of_an_epoch_up_to_the_stream_limit() {
+        let import = Import::new(10).await;
+        let server = PeerServer::start(&import.source, 64).await;
+        let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
+        let (_stop, shutdown) = watch::channel(false);
+        let importer = import.importer_with_source(
+            Box::new(peer),
+            import.fake_attestor(None),
+            Network::Mainnet,
+        );
+
+        let report = importer.run(shutdown).await.unwrap();
+
+        assert_eq!((report.epochs, report.ranges), (1, 10));
+        import.assert_target_has_source_blobs();
+        assert_eq!(server.most_open_streams(), PEER_RANGE_STREAMS);
+        assert_eq!(server.refusals(), 0);
     }
 
     #[tokio::test]
