@@ -75,7 +75,7 @@ Restart ztreamerd after a certificate change. The Prometheus listener has no TLS
 ztreamerd export-snapshot --index-dir ztreamer-index --out snapshot --signing-key key.seed
 ```
 
-This command writes the sealed ranges of an index as a snapshot. A replica can import this snapshot. The signing key is a raw 32-byte Ed25519 seed. An export into the same directory writes only the new ranges. Give `--index-dir` and `--index-map-size` after the subcommand name.
+This command writes the sealed ranges of an index as a snapshot. The remote mode can import this snapshot. The signing key is a raw 32-byte Ed25519 seed. An export into the same directory writes only the new ranges. Give `--index-dir` and `--index-map-size` after the subcommand name.
 
 ## Index size
 
