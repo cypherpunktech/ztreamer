@@ -3,8 +3,9 @@
 //! A ztreamer can be a snapshot source only when each sealed range has a [`RangeMeta`] row. The
 //! row holds the manifest entry of the range and the node's answers for the range end. The index
 //! writer seals ranges, but it does not write these rows. [`RangeMetaFiller`] writes them from the
-//! index and from the embedded node. It writes one range at a time, in ascending order. ztreamerd
-//! runs it in embedded mode.
+//! index and from the node of a [`StateBackend`]. It writes one range at a time, in ascending
+//! order. ztreamerd runs it in both modes: over the embedded node, and in the remote mode over the
+//! remote node, for the ranges that the replica seals after its import.
 //!
 //! The filler does not write blocks and does not change the generation. It reads LMDB on a
 //! blocking thread and yields between ranges. The writer and the serving path do not wait for it.
@@ -92,14 +93,25 @@ impl std::fmt::Debug for RangeMetaFiller {
 }
 
 impl RangeMetaFiller {
-    /// A filler that asks the embedded Zakura node through `backend`. The rows name the node as
-    /// `embedded`, with Zakura's version.
+    /// A filler that asks the node behind `backend`. Each row names `verified_by` as the node
+    /// that gave its answers.
+    pub fn new(index: Arc<Index>, backend: Arc<dyn StateBackend>, verified_by: NodeId) -> Self {
+        Self { index, backend, verified_by }
+    }
+
+    /// A filler that asks the embedded Zakura node through `backend`. The rows name
+    /// [`RangeMetaFiller::embedded_node`].
     pub fn embedded(index: Arc<Index>, backend: Arc<dyn StateBackend>) -> Self {
-        let verified_by = NodeId {
+        Self::new(index, backend, Self::embedded_node())
+    }
+
+    /// The node that the rows of the embedded Zakura node name: `embedded`, with Zakura's
+    /// version.
+    pub fn embedded_node() -> NodeId {
+        NodeId {
             url: "embedded".into(),
             version: zakurad::application::build_version().to_string(),
-        };
-        Self { index, backend, verified_by }
+        }
     }
 
     /// Fills the missing rows once. Then fills them again each time a new snapshot shows that

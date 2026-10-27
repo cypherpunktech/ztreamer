@@ -24,7 +24,7 @@ use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use zakurad::components::metrics::{self, MetricsEndpoint};
 use ztreamer_indexer::{
-    index::{BlockId, Index},
+    index::{BlockId, Index, range_meta::NodeId},
     pipeline::RemoteTailSource,
 };
 use ztreamer_remote::{Auth, FirstBlockWithBody as _, RpcClient, RpcCode, Secret, ZakuraClient};
@@ -180,6 +180,13 @@ impl RemoteNode {
         Self { client, replica }
     }
 
+    /// The node in `verified_by` of the `range_meta` rows that it answers: of the import, and of
+    /// the filler. The URL has no credentials ([`NodeUrl`]). The version is empty: no call gives
+    /// it.
+    fn id(&self) -> NodeId {
+        NodeId { url: self.client.rpc().url().to_string(), version: String::new() }
+    }
+
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
     /// the Prometheus endpoint, then calls [`Self::run_until`].
     pub(crate) async fn run(
@@ -239,7 +246,8 @@ impl RemoteNode {
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
         let index = cli.open_index(&network).await?;
-        let import = self.replica.import(&self.client, &info, &network, &index, &shutdown);
+        let import =
+            self.replica.import(&self.client, self.id(), &info, &network, &index, &shutdown);
         if import.await?.is_break() {
             return Ok(());
         }
@@ -288,6 +296,7 @@ impl RemoteNode {
             tail: RemoteTailSource::new(self.client.clone(), Handle::current()),
             head: RemoteHeadSource::new(self.client.clone()),
             backend,
+            verified_by: self.id(),
         }))
     }
 

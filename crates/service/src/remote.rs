@@ -24,7 +24,13 @@
 //! | `mempool_transactions` | `getrawmempool`, then `getrawtransaction <txid> 1` |
 //! | `submit_transaction` | `sendrawtransaction` |
 //!
+//! The [`RangeMetaFiller`] also uses the `RemoteBackend`. For each range that the tail or the
+//! head follower seals, it calls `tree_state` and the subtree methods, and writes the
+//! `range_meta` row. Thus the Replicator and `export-snapshot` serve each sealed range of a
+//! replica, not only the imported ranges.
+//!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
+//! [`RangeMetaFiller`]: crate::RangeMetaFiller
 //! [`RemoteTailSource`]: ztreamer_indexer::pipeline::RemoteTailSource
 //! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
 //! [`StateBackend`]: crate::StateBackend

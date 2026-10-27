@@ -2,8 +2,9 @@
 //!
 //! A record is what a replica needs to know about a range without decoding its blocks: the
 //! manifest entry a snapshot publishes for it, how far the range has been verified against a
-//! node, and the node's answers so that they are never asked for twice. In embedded mode, the
-//! `range_meta` filler writes this table. In remote mode, the importer writes it.
+//! node, and the node's answers so that they are never asked for twice. The importer writes the
+//! rows of the ranges that it installs. The `range_meta` filler of `ztreamer-service` writes the
+//! rows of the ranges that the index seals from node blocks, in both modes.
 //!
 //! # Layout
 //!

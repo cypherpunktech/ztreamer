@@ -37,7 +37,7 @@ This is the default mode. The zakura configuration file is optional. The embedde
 
 ztreamerd starts no node. `--remote-rpc` and `--replicate-from` need each other: ztreamerd refuses one without the other. This mode does not serve P2P or JSON-RPC.
 
-First, ztreamerd imports sealed ranges from the one `--replicate-from` source. The remote node verifies the import. Then ztreamerd reads the blocks above the import from the remote node, and follows its head. A source is:
+First, ztreamerd imports sealed ranges from the one `--replicate-from` source. The remote node verifies the import. Then ztreamerd reads the blocks above the import from the remote node, and follows its head. For each range that it seals above the import, ztreamerd writes the snapshot metadata from the remote node. Thus the Replicator and `export-snapshot` of a replica serve each sealed range. A source is:
 
 - the `http://` or `https://` base URL of a snapshot; or
 - the `host:port` of a ztreamerd peer. The peer serves the Replicator service on its gRPC listener, without TLS.

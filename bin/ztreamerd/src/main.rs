@@ -27,7 +27,7 @@ use zakura_chain::parameters::Network;
 use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadSyncError},
-    index::{Index, IndexState},
+    index::{Index, IndexState, range_meta::NodeId},
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
 use ztreamer_node as node;
@@ -233,6 +233,7 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             tail: client.database(),
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
+            verified_by: RangeMetaFiller::embedded_node(),
         };
         if sources.wait_ready(&shutdown).await?.is_break() {
             return Ok(());
@@ -253,6 +254,9 @@ struct NodeSources<T, H, B> {
     head: H,
     /// Chain state and node requests for the gRPC service.
     backend: B,
+    /// The node that answers the `range_meta` filler through `backend`. Each row that the filler
+    /// writes names it in `verified_by`.
+    verified_by: NodeId,
 }
 
 impl<T, B> NodeSources<T, node::NodeClient, B> {
@@ -289,8 +293,8 @@ struct Embedded {
 }
 
 /// Indexes, then serves until shutdown. The node of `sources` must be ready for the historical
-/// index pass. `embedded` is set when a node runs in this process. Then the p2p service gets the
-/// compact service, and the `range_meta` filler runs.
+/// index pass. The `range_meta` filler runs in both modes. `embedded` is set when a node runs in
+/// this process. Then the p2p service gets the compact service.
 async fn run_application<T, H, B>(
     cli: DaemonArgs,
     mut grpc_server: Server,
@@ -305,7 +309,7 @@ where
     H: CanonicalBlockSource + Clone + 'static,
     B: StateBackend,
 {
-    let NodeSources { tail, head, backend } = sources;
+    let NodeSources { tail, head, backend, verified_by } = sources;
 
     let pipeline = PipelineConfig::from(&cli);
     cli.replicate.log_import_state("tail");
@@ -325,13 +329,11 @@ where
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
-    let filler = embedded
-        .map(|Embedded { p2p }| -> Result<_> {
-            p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
-            let filler = RangeMetaFiller::embedded(filler_index, compact.backend());
-            Ok(filler.run(compact.subscribe()))
-        })
-        .transpose()?;
+    if let Some(Embedded { p2p }) = embedded {
+        p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
+    }
+    let filler = RangeMetaFiller::new(filler_index, compact.backend(), verified_by);
+    let filler = filler.run(compact.subscribe());
     cli.replicate.log_import_state("following");
     let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
     let grpc = grpc_server
@@ -412,18 +414,18 @@ async fn reconcile_head(
 }
 
 /// Runs the head follower and the gRPC server until shutdown or until either task stops. The
-/// server serves CompactTxStreamer and Replicator on one listener. If `filler` is set, runs it
-/// beside them and stops it with them.
+/// server serves CompactTxStreamer and Replicator on one listener. Runs `filler` beside them and
+/// stops it with them.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     grpc: Router,
     cli: &DaemonArgs,
-    filler: Option<impl Future<Output = ()> + Send + 'static>,
+    filler: impl Future<Output = ()> + Send + 'static,
     shutdown: &CancellationToken,
 ) -> Result<()> {
-    let filler = filler.map(tokio::spawn);
+    let filler = tokio::spawn(filler);
     let (server_shutdown, _) = watch::channel(false);
     let mut follower = tokio::spawn({
         let compact = compact.clone();
@@ -456,9 +458,7 @@ async fn serve(
     }
     let task_exited = grpc_result.is_some() || follower_result.is_some();
     let _ = server_shutdown.send(true);
-    if let Some(filler) = &filler {
-        filler.abort();
-    }
+    filler.abort();
 
     // Drain both tasks before inspecting either result, including on failure.
     let (grpc_result, follower_result) =

@@ -120,9 +120,10 @@ pub(crate) struct Replica {
 }
 
 impl Replica {
-    /// Imports the epochs of the manifest above the sealed tip of `index`, checked
-    /// against the node of `client`. `info` is the `getblockchaininfo` answer of the node, and
-    /// `network` the network of its chain. Breaks on shutdown.
+    /// Imports the epochs of the manifest above the sealed tip of `index`, checked against the
+    /// node of `client`. Each installed row names the node as `id`. `info` is the
+    /// `getblockchaininfo` answer of the node, and `network` the network of its chain. Breaks on
+    /// shutdown.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
     /// manifest needs no import. Neither does an index whose sealed tip is not the end
@@ -132,6 +133,7 @@ impl Replica {
     pub(crate) async fn import(
         &self,
         client: &ZakuraClient,
+        id: NodeId,
         info: &GetBlockchainInfoResponse,
         network: &Network,
         index: &Arc<Index>,
@@ -170,7 +172,7 @@ impl Replica {
                     .await
                     .wrap_err("read the prune height of the remote zakura node")?,
             ),
-            id: NodeId { url: client.rpc().url().to_string(), version: String::new() },
+            id,
         };
         let seed = getrandom::u64().map_err(|error| eyre!("random sample seed: {error}"))?;
         let config = ImportConfig {
