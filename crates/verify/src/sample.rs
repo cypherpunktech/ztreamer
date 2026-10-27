@@ -230,6 +230,7 @@ mod tests {
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},
+        index::range_meta::ManifestEntry,
         test_utils::{hash, raw_block},
     };
     use ztreamer_remote::{
@@ -238,7 +239,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{epoch::Epochs, range::entry_for};
+    use crate::epoch::Epochs;
 
     /// The height of the one block with shielded data.
     const SHIELDED: u32 = 500;
@@ -297,7 +298,7 @@ mod tests {
         seed: u64,
     ) -> Result<Vec<u32>, EpochError> {
         let blob = encode_range(records).unwrap();
-        let entries = [entry_for(records, &blob)];
+        let entries = [ManifestEntry::from_records_and_blob(records, &blob)];
         let sampler = FakeSampler { blocks: blocks(), prune_height };
         let plan = SamplePlan { per_range, seed };
         Epochs::new(&entries).next().unwrap().sample(&[blob], &sampler, plan).await
@@ -349,7 +350,8 @@ mod tests {
     #[tokio::test]
     async fn a_missing_blob_is_a_blob_count_reject() {
         let records = records();
-        let entries = [entry_for(&records, &encode_range(&records).unwrap())];
+        let entries =
+            [ManifestEntry::from_records_and_blob(&records, &encode_range(&records).unwrap())];
         let sampler = FakeSampler { blocks: blocks(), prune_height: 0 };
         let plan = SamplePlan { per_range: 5, seed: 7 };
 

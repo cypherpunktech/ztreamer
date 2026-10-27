@@ -1,8 +1,10 @@
 //! Compact block and transaction types produced by the parser and stored by the index.
 
+use std::io;
+
 use zakura_chain::{
     block::{self, Block},
-    serialization::{SerializationError, ZcashDeserialize as _},
+    serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
 
@@ -19,7 +21,8 @@ pub struct RawIndexBlock {
     pub txids: Vec<transaction::Hash>,
 }
 
-/// Why [`RawIndexBlock::from_bytes`] refused a serialized block.
+/// Why [`RawIndexBlock::from_bytes`] refused a serialized block, or why
+/// [`RawIndexBlock::try_from`] refused a decoded block.
 #[derive(Debug, thiserror::Error)]
 pub enum RawBlockError {
     /// The bytes are not a Zcash block.
@@ -28,6 +31,9 @@ pub enum RawBlockError {
     /// The block has no coinbase transaction with a height.
     #[error("coinbase height is missing")]
     CoinbaseHeight,
+    /// The serialization of the block failed.
+    #[error(transparent)]
+    Serialize(io::Error),
 }
 
 impl RawIndexBlock {
@@ -42,6 +48,22 @@ impl RawIndexBlock {
         let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
         let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
         Ok(Self { height, hash: block.hash(), bytes, txids })
+    }
+}
+
+impl TryFrom<&Block> for RawIndexBlock {
+    type Error = RawBlockError;
+
+    /// Serializes a decoded block, for example a block from the embedded node.
+    ///
+    /// The height comes from the coinbase input, the hash from the header and the transaction
+    /// ids from the transactions.
+    fn try_from(block: &Block) -> Result<Self, RawBlockError> {
+        let hash = block.hash();
+        let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
+        let bytes = block.zcash_serialize_to_vec().map_err(RawBlockError::Serialize)?;
+        let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
+        Ok(Self { height, hash, bytes, txids })
     }
 }
 

@@ -424,10 +424,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        epoch::{Epochs, synthetic_entries},
-        range::entry_for,
-    };
+    use crate::epoch::{Epochs, synthetic_entries};
 
     const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 
@@ -731,7 +728,7 @@ mod tests {
             .chunks(RANGE_SIZE as usize)
             .map(|range| {
                 let blob = encode_range(range).unwrap();
-                let mut entry = entry_for(range, &blob);
+                let mut entry = ManifestEntry::from_records_and_blob(range, &blob);
                 entry.frontiers = Frontiers {
                     sapling: empty.clone(),
                     orchard: empty.clone(),

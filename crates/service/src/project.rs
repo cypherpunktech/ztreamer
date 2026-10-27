@@ -337,13 +337,8 @@ mod tests {
         let mut saw_mined_index = false;
         for encoded in [&*BLOCK_MAINNET_949496_BYTES, &*BLOCK_TESTNET_1842421_BYTES] {
             let block = Block::zcash_deserialize(encoded.as_slice()).unwrap();
-            let parsed = parse_block(&RawIndexBlock {
-                height: block.coinbase_height().unwrap(),
-                hash: block.hash(),
-                bytes: encoded.to_vec(),
-                txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-            })
-            .unwrap();
+            let parsed =
+                parse_block(&RawIndexBlock::from_bytes(encoded.to_vec()).unwrap()).unwrap();
             let record = CompactBlockRecord {
                 height: parsed.height,
                 hash: parsed.hash,

@@ -173,9 +173,9 @@ mod tests {
         transport::{Channel, Server},
     };
     use zakura_chain::block;
-    use ztreamer_indexer::{
-        codec::RANGE_FORMAT_VERSION,
-        index::range_meta::{BlobDigest, Frontiers, ManifestEntry as Entry, RangeMeta},
+    use ztreamer_indexer::index::{
+        RANGE_SIZE,
+        range_meta::{Frontiers, ManifestEntry as Entry, RangeMeta},
     };
     use ztreamer_protocol::{
         proto::{BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
@@ -209,18 +209,11 @@ mod tests {
                 (4_000, VerifyState::Rejected),
             ] {
                 let blob = index.read_sealed_range_bytes(start).unwrap().unwrap();
-                let last = &records[start as usize + 999];
+                let range = &records[start as usize..][..RANGE_SIZE as usize];
                 let entry = Entry {
-                    range_version: RANGE_FORMAT_VERSION,
-                    start_height: start,
-                    end_height: last.height,
-                    end_hash: last.hash,
-                    end_tree_sizes: last.end_tree_sizes,
                     frontiers: Frontiers { sapling: vec![0xab; 40], ..Frontiers::default() },
-                    subtree_roots: Vec::new(),
-                    blob_digest: BlobDigest::hash(&blob),
-                    blob_len: blob.len() as u64,
                     epoch_end: start == 0,
+                    ..Entry::from_records_and_blob(range, &blob)
                 };
                 let meta = RangeMeta {
                     entry,

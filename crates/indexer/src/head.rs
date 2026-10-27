@@ -1,10 +1,6 @@
 //! Live canonical-head polling, persistence-depth handling, and ordinary or deep reorg recovery.
 
-use zakura_chain::{
-    block::{self, Block},
-    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
-    serialization::ZcashSerialize,
-};
+use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use zakura_state::MAX_BLOCK_REORG_HEIGHT;
 use ztreamer_node::NodeClient;
 use ztreamer_remote::RpcError;
@@ -15,7 +11,7 @@ use crate::{
     ingest::{IngestError, OrderedBuilder},
     parser::{CompactParseError, parse_block},
     pipeline::PipelineConfig,
-    types::{ParsedCompactBlock, RawIndexBlock},
+    types::{ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +39,12 @@ pub enum HeadError {
     Window,
     #[error(transparent)]
     Parse(#[from] CompactParseError),
+}
+
+impl From<RawBlockError> for HeadError {
+    fn from(error: RawBlockError) -> Self {
+        Self::Decode(error.to_string())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,17 +86,6 @@ pub trait CanonicalBlockSource: Send {
     }
 }
 
-fn raw_block(block: &Block) -> Result<RawIndexBlock, HeadError> {
-    let hash = block.hash();
-    let height = block
-        .coinbase_height()
-        .ok_or_else(|| HeadError::Decode("coinbase height is missing".to_owned()))?;
-    let bytes =
-        block.zcash_serialize_to_vec().map_err(|error| HeadError::Decode(error.to_string()))?;
-    let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
-    Ok(RawIndexBlock { height, hash, bytes, txids })
-}
-
 #[tonic::async_trait]
 impl CanonicalBlockSource for NodeClient {
     async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
@@ -105,7 +96,7 @@ impl CanonicalBlockSource for NodeClient {
         let block = NodeClient::block(self, block::Height(height)).await;
         match block {
             Ok(Some(block)) => {
-                let block = raw_block(&block)?;
+                let block = RawIndexBlock::try_from(&*block)?;
                 if block.height.0 != height {
                     return Err(HeadError::Height { expected: height, actual: block.height.0 });
                 }

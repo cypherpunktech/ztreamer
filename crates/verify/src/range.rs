@@ -210,26 +210,6 @@ impl fmt::Debug for RangeBlob<'_> {
     }
 }
 
-/// The manifest entry that describes `blob`, a range of `records`.
-#[cfg(test)]
-pub(crate) fn entry_for(records: &[CompactBlockRecord], blob: &[u8]) -> ManifestEntry {
-    use ztreamer_indexer::index::range_meta::BlobDigest;
-
-    let last = records.last().unwrap();
-    ManifestEntry {
-        range_version: blob[0],
-        start_height: records[0].height,
-        end_height: last.height,
-        end_hash: last.hash,
-        end_tree_sizes: last.end_tree_sizes,
-        frontiers: ztreamer_indexer::index::range_meta::Frontiers::default(),
-        subtree_roots: Vec::new(),
-        blob_digest: BlobDigest::hash(blob),
-        blob_len: blob.len() as u64,
-        epoch_end: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ztreamer_indexer::{
@@ -270,12 +250,18 @@ mod tests {
         let (first, second, blob) = second_range();
         let first_blob = encode_range(&first).unwrap();
 
-        let link = RangeBlob::new(&first_blob, &entry_for(&first, &first_blob))
-            .check(&RangeLink::GENESIS)
+        let link =
+            RangeBlob::new(&first_blob, &ManifestEntry::from_records_and_blob(&first, &first_blob))
+                .check(&RangeLink::GENESIS)
+                .unwrap();
+        let end = RangeBlob::new(&blob, &ManifestEntry::from_records_and_blob(&second, &blob))
+            .check(&link)
             .unwrap();
-        let end = RangeBlob::new(&blob, &entry_for(&second, &blob)).check(&link).unwrap();
 
-        assert_eq!(link, RangeLink::from(&entry_for(&first, &first_blob)));
+        assert_eq!(
+            link,
+            RangeLink::from(&ManifestEntry::from_records_and_blob(&first, &first_blob))
+        );
         assert_eq!(end.end_hash, hash(1_999));
         assert_eq!(end.end_tree_sizes, second.last().unwrap().end_tree_sizes);
         assert!(end.end_tree_sizes.sapling > link.end_tree_sizes.sapling);
@@ -284,7 +270,10 @@ mod tests {
     #[test]
     fn a_flipped_byte_or_a_wrong_length_needs_a_refetch() {
         let (first, second, blob) = second_range();
-        let (entry, link) = (entry_for(&second, &blob), RangeLink::from(first.last().unwrap()));
+        let (entry, link) = (
+            ManifestEntry::from_records_and_blob(&second, &blob),
+            RangeLink::from(first.last().unwrap()),
+        );
         let refetch = |mismatch| Err(Reject::Refetch { start_height: 1_000, mismatch });
 
         let mut flipped = blob.clone();
@@ -304,7 +293,9 @@ mod tests {
         second.swap(500, 501);
         let reordered = assemble(&blob, &second);
 
-        let result = RangeBlob::new(&reordered, &entry_for(&second, &reordered)).check(&link);
+        let result =
+            RangeBlob::new(&reordered, &ManifestEntry::from_records_and_blob(&second, &reordered))
+                .check(&link);
 
         assert_rejected(result, Check::Decode, 1_500);
     }
@@ -316,7 +307,9 @@ mod tests {
         second[500].previous_hash = hash(7);
         let broken = assemble(&blob, &second);
 
-        let result = RangeBlob::new(&broken, &entry_for(&second, &broken)).check(&link);
+        let result =
+            RangeBlob::new(&broken, &ManifestEntry::from_records_and_blob(&second, &broken))
+                .check(&link);
 
         assert_rejected(result, Check::HashChain, 1_500);
     }
@@ -324,7 +317,7 @@ mod tests {
     #[test]
     fn a_wrong_start_link_is_rejected() {
         let (first, second, blob) = second_range();
-        let entry = entry_for(&second, &blob);
+        let entry = ManifestEntry::from_records_and_blob(&second, &blob);
         let link = RangeLink::from(first.last().unwrap());
 
         let other_hash = RangeLink { end_hash: hash(7), ..link };
@@ -364,7 +357,7 @@ mod tests {
         let link = RangeLink::from(first.last().unwrap());
 
         for (case, change, check, height) in cases {
-            let mut entry = entry_for(&second, &blob);
+            let mut entry = ManifestEntry::from_records_and_blob(&second, &blob);
             change(&mut entry);
 
             let result = RangeBlob::new(&blob, &entry).check(&link);
@@ -380,7 +373,7 @@ mod tests {
 
         let smaller =
             RangeLink { end_tree_sizes: TreeSizes { sapling: 0, ..link.end_tree_sizes }, ..link };
-        let entry = entry_for(&second, &blob);
+        let entry = ManifestEntry::from_records_and_blob(&second, &blob);
         assert_rejected(RangeBlob::new(&blob, &entry).check(&smaller), Check::TreeSizes, 1_000);
 
         // A record that claims one more commitment than it holds.
@@ -388,7 +381,7 @@ mod tests {
             record.end_tree_sizes.sapling += 1;
         }
         let blob = encode_range(&second).unwrap();
-        let entry = entry_for(&second, &blob);
+        let entry = ManifestEntry::from_records_and_blob(&second, &blob);
         assert_rejected(RangeBlob::new(&blob, &entry).check(&link), Check::TreeSizes, 1_500);
     }
 }

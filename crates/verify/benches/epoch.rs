@@ -12,7 +12,7 @@ use ztreamer_indexer::{
     codec::{TreeSizes, encode_range},
     index::{
         RANGE_SIZE,
-        range_meta::{BlobDigest, Frontiers, ManifestEntry, SubtreeNode, SubtreeRoot},
+        range_meta::{Frontiers, ManifestEntry, SubtreeNode, SubtreeRoot},
     },
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
@@ -59,18 +59,11 @@ fn peak_range() -> (ManifestEntry, Vec<u8>) {
         })
         .collect();
     let blob = encode_range(&records).unwrap();
-    let last = records.last().unwrap();
     let entry = ManifestEntry {
-        range_version: blob[0],
-        start_height: 0,
-        end_height: last.height,
-        end_hash: last.hash,
-        end_tree_sizes: last.end_tree_sizes,
         frontiers: Frontiers { sapling: tree.to_rpc_bytes(), ..Frontiers::default() },
         subtree_roots,
-        blob_digest: BlobDigest::hash(&blob),
-        blob_len: blob.len() as u64,
         epoch_end: true,
+        ..ManifestEntry::from_records_and_blob(&records, &blob)
     };
     (entry, blob)
 }

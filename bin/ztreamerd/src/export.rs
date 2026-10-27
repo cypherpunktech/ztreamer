@@ -162,9 +162,7 @@ mod tests {
     use tempfile::TempDir;
     use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
     use ztreamer_indexer::{
-        index::range_meta::{
-            BlobDigest, Frontiers, RangeMeta, SubtreeNode, SubtreeRoot, VerifyState,
-        },
+        index::range_meta::{Frontiers, RangeMeta, SubtreeNode, SubtreeRoot, VerifyState},
         test_utils::{populate, record},
     };
     use ztreamer_verify::snapshot::{Latest, RangePath, SignatureFile};
@@ -192,13 +190,8 @@ mod tests {
             .iter()
             .map(|&(start, epoch_end)| {
                 let blob = index.read_sealed_range_bytes(start).unwrap().unwrap();
-                let last = &records[start as usize + 999];
+                let range = &records[start as usize..][..RANGE_SIZE as usize];
                 let entry = ManifestEntry {
-                    range_version: 1,
-                    start_height: start,
-                    end_height: start + 999,
-                    end_hash: last.hash,
-                    end_tree_sizes: last.end_tree_sizes,
                     frontiers: Frontiers {
                         sapling: vec![0x01, 0xab, 0x00],
                         orchard: Vec::new(),
@@ -208,9 +201,8 @@ mod tests {
                         index: NoteCommitmentSubtreeIndex(1),
                         root: SubtreeNode::Orchard(orchard::tree::Node::try_from([2; 32]).unwrap()),
                     }],
-                    blob_digest: BlobDigest::hash(&blob),
-                    blob_len: blob.len() as u64,
                     epoch_end,
+                    ..ManifestEntry::from_records_and_blob(range, &blob)
                 };
                 let meta = RangeMeta {
                     entry: entry.clone(),

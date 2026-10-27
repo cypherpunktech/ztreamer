@@ -2,10 +2,7 @@
 #![allow(missing_docs)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use zakura_chain::{
-    block::Block,
-    serialization::{ZcashDeserialize as _, ZcashSerialize as _},
-};
+use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
 use zakura_test::vectors::{
     BLOCK_MAINNET_396_BYTES, BLOCK_MAINNET_347500_BYTES, BLOCK_MAINNET_419200_BYTES,
     BLOCK_MAINNET_949496_BYTES, BLOCK_MAINNET_1687106_BYTES, BLOCK_MAINNET_1687121_BYTES,
@@ -24,32 +21,14 @@ fn corpus() -> Vec<(&'static str, RawIndexBlock)> {
         ("v6-ironwood", &*BLOCK_TESTNET_1842421_BYTES),
     ]
     .into_iter()
-    .map(|(name, encoded_block)| {
-        let bytes = encoded_block.to_vec();
-        let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
-        let raw = RawIndexBlock {
-            height: block.coinbase_height().unwrap(),
-            hash: block.hash(),
-            bytes,
-            txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-        };
-        (name, raw)
-    })
+    .map(|(name, encoded_block)| (name, RawIndexBlock::from_bytes(encoded_block.to_vec()).unwrap()))
     .collect();
     // Parser stress inputs, not consensus-valid blocks: repeat a real transaction.
     for (name, count) in [("synthetic-64-tx", 64), ("synthetic-1024-tx", 1024)] {
         let mut block = Block::zcash_deserialize(BLOCK_MAINNET_1687121_BYTES.as_slice()).unwrap();
         let transaction = block.transactions.last().unwrap().clone();
         block.transactions.extend(std::iter::repeat_n(transaction, count));
-        corpus.push((
-            name,
-            RawIndexBlock {
-                height: block.coinbase_height().unwrap(),
-                hash: block.hash(),
-                bytes: block.zcash_serialize_to_vec().unwrap(),
-                txids: block.transactions.iter().map(|tx| tx.hash()).collect(),
-            },
-        ));
+        corpus.push((name, RawIndexBlock::try_from(&block).unwrap()));
     }
     corpus
 }

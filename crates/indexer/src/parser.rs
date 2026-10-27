@@ -542,16 +542,10 @@ mod tests {
             &*BLOCK_MAINNET_1687106_BYTES,
             &*BLOCK_TESTNET_1842421_BYTES,
         ] {
-            let bytes = encoded_block.to_vec();
-            let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
+            let block = Block::zcash_deserialize(encoded_block.as_slice()).unwrap();
             let height = block.coinbase_height().unwrap();
-            let parsed = parse_block(&RawIndexBlock {
-                height,
-                hash: block.hash(),
-                bytes,
-                txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-            })
-            .unwrap();
+            let parsed =
+                parse_block(&RawIndexBlock::from_bytes(encoded_block.to_vec()).unwrap()).unwrap();
             let transaction_bytes = block
                 .transactions
                 .iter()

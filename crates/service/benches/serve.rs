@@ -10,7 +10,6 @@ use tokio_stream::StreamExt as _;
 use zakura_chain::{
     block,
     parameters::{GENESIS_PREVIOUS_BLOCK_HASH, Network},
-    serialization::ZcashDeserialize as _,
 };
 use zakura_state::Config;
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
@@ -27,16 +26,8 @@ use ztreamer_service::CompactService;
 const TIP: u32 = 2_005;
 
 fn shielded_transactions() -> Vec<CompactTransaction> {
-    let bytes = BLOCK_MAINNET_1687121_BYTES.to_vec();
-    let block = block::Block::zcash_deserialize(bytes.as_slice()).unwrap();
-    parse_block(&RawIndexBlock {
-        height: block.coinbase_height().unwrap(),
-        hash: block.hash(),
-        bytes,
-        txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-    })
-    .unwrap()
-    .transactions
+    let block = RawIndexBlock::from_bytes(BLOCK_MAINNET_1687121_BYTES.to_vec()).unwrap();
+    parse_block(&block).unwrap().transactions
 }
 
 fn index_through(index: &Index, tip: u32) -> IndexState {

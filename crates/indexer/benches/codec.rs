@@ -4,7 +4,6 @@
 use ztreamer_indexer::test_utils::{self as fixtures, record};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, decode_range_record, encode_range},
@@ -14,16 +13,8 @@ use ztreamer_indexer::{
 };
 
 fn shielded_transactions() -> Vec<CompactTransaction> {
-    let bytes = BLOCK_MAINNET_1687121_BYTES.to_vec();
-    let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
-    parse_block(&RawIndexBlock {
-        height: block.coinbase_height().unwrap(),
-        hash: block.hash(),
-        bytes,
-        txids: block.transactions.iter().map(|transaction| transaction.hash()).collect(),
-    })
-    .unwrap()
-    .transactions
+    let block = RawIndexBlock::from_bytes(BLOCK_MAINNET_1687121_BYTES.to_vec()).unwrap();
+    parse_block(&block).unwrap().transactions
 }
 
 fn block_codec(c: &mut Criterion) {

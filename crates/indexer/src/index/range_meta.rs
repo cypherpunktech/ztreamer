@@ -440,6 +440,39 @@ impl ManifestEntry {
         (BlobDigest::hash(blob) == self.blob_digest).then_some(()).ok_or(BlobMismatch::Digest)
     }
 
+    /// Makes an entry from the records of a range and from a range blob. For tests only.
+    ///
+    /// - `records` gives the start height (first record), and the end height, the end hash and
+    ///   the end tree sizes (last record).
+    /// - `blob` gives the range version (its first byte), the digest and the length.
+    /// - The frontiers and the subtree roots are empty. `epoch_end` is false.
+    ///
+    /// `blob` can be different from the encoding of `records`. Thus a test can make an entry for
+    /// a changed blob. To set other values, use struct update syntax.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `records` or `blob` is empty.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn from_records_and_blob(
+        records: &[crate::codec::CompactBlockRecord],
+        blob: &[u8],
+    ) -> Self {
+        let last = records.last().unwrap();
+        Self {
+            range_version: blob[0],
+            start_height: records[0].height,
+            end_height: last.height,
+            end_hash: last.hash,
+            end_tree_sizes: last.end_tree_sizes,
+            frontiers: Frontiers::default(),
+            subtree_roots: Vec::new(),
+            blob_digest: BlobDigest::hash(blob),
+            blob_len: blob.len() as u64,
+            epoch_end: false,
+        }
+    }
+
     fn encode_into(&self, bytes: &mut Vec<u8>) {
         bytes.push(self.range_version);
         bytes.extend_from_slice(&self.start_height.to_be_bytes());

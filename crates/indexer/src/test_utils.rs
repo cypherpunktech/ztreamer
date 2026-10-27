@@ -38,17 +38,8 @@ pub fn shielded_transactions() -> Vec<CompactTransaction> {
     for bytes in
         [&*BLOCK_MAINNET_949496_BYTES, &*BLOCK_MAINNET_1687121_BYTES, &*BLOCK_TESTNET_1842421_BYTES]
     {
-        let block = Block::zcash_deserialize(bytes.as_slice()).unwrap();
-        transactions.extend(
-            parse_block(&RawIndexBlock {
-                height: block.coinbase_height().unwrap(),
-                hash: block.hash(),
-                bytes: bytes.to_vec(),
-                txids: block.transactions.iter().map(|tx| tx.hash()).collect(),
-            })
-            .unwrap()
-            .transactions,
-        );
+        let block = RawIndexBlock::from_bytes(bytes.to_vec()).unwrap();
+        transactions.extend(parse_block(&block).unwrap().transactions);
     }
     transactions
 }

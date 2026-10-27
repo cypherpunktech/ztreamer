@@ -378,7 +378,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::range::entry_for;
 
     fn sapling(count: u32) -> TreeSizes {
         TreeSizes { sapling: count, ..TreeSizes::default() }
@@ -577,7 +576,7 @@ mod tests {
                 block.end_tree_sizes = sizes;
             }
             let blob = encode_range(range).unwrap();
-            let mut entry = entry_for(range, &blob);
+            let mut entry = ManifestEntry::from_records_and_blob(range, &blob);
             entry.frontiers = trees.frontiers();
             entry.subtree_roots = completed[first_completed..].to_vec();
             entries.push(entry);
