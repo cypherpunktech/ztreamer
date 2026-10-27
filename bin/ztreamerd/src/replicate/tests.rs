@@ -1,4 +1,4 @@
-use std::{fs, future, time::Duration};
+use std::{fs, future, path::Path, time::Duration};
 
 use clap::Parser;
 use ed25519_dalek::SigningKey;
@@ -22,7 +22,8 @@ use ztreamer_verify::test_utils::{FileServer, SourceIndex};
 
 use super::*;
 use crate::{
-    Cli, Command, DaemonArgs, run_daemon,
+    Cli, Command, DaemonArgs,
+    remote::RemoteNode,
     test_support::{free_addr, latest_block_at, node_with_chain_name},
 };
 
@@ -117,16 +118,16 @@ fn cli(dir: &TempDir, url: &str, snapshot: &Snapshot, extra: &[&str]) -> DaemonA
 }
 
 /// The daemon of `cli` until `signal`, with the snapshot key of `seed` in place of the built-in
-/// key.
+/// key, and with no default cookie file.
 async fn daemon(
     cli: DaemonArgs,
     seed: [u8; 32],
     signal: impl Future<Output = Result<()>>,
 ) -> Result<()> {
-    let mut replica = cli.replicate.replica().unwrap();
-    replica.key = SigningKey::from_bytes(&seed).verifying_key();
-    let node = cli.remote.node().unwrap().unwrap().with_replica(Some(replica));
-    node.run_until(cli, Server::builder(), signal).await
+    let replica =
+        Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..cli.replicate.replica() };
+    let client = cli.remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap().unwrap();
+    RemoteNode::new(client, replica).run_until(cli, Server::builder(), signal).await
 }
 
 /// Runs the replica with no signal until it stops by itself, and gives the error. Asserts that
@@ -174,6 +175,21 @@ async fn a_fresh_replica_imports_three_epochs_then_follows_the_chain() {
     let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
     assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
     assert_eq!(index.range_meta(12_000).unwrap().unwrap().state, VerifyState::Verified);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_index_only_replica_stops_after_the_import_and_the_tail() {
+    let snapshot = Snapshot::new().await;
+    let (_chain, node) = snapshot.node().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cli = cli(&dir, &node.url().to_string(), &snapshot, &["--index-only"]);
+
+    let run = timeout(Duration::from_secs(60), daemon(cli, SEED, future::pending()));
+    run.await.expect("the replica stops by itself").unwrap();
+
+    let state = Index::open_existing(dir.path(), 1 << 30).unwrap().state().unwrap();
+    assert_eq!(state.verified_through(), Some(SEALED));
+    assert_eq!(state.durable_tip().map(|tip| tip.height), Some(TIP - SEAL_DEPTH));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -225,23 +241,17 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
 }
 
 #[test]
-fn replicate_from_takes_snapshots_and_peers_and_needs_the_remote_mode() {
+fn replicate_from_takes_snapshots_and_peers() {
     let parse = |flags: &[&str]| {
-        Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
+        let remote = ["ztreamerd", "--remote-rpc", "http://127.0.0.1:8232"];
+        Cli::try_parse_from(remote.iter().chain(flags)).map(|cli| cli.daemon)
     };
     assert!(parse(&["--replicate-from", "peer"]).is_err());
     assert!(parse(&["--replicate-from", "peer:9068/path"]).is_err());
-    assert!(parse(&[]).unwrap().replicate.replica().is_none());
     let two =
         ["--replicate-from", "https://snapshots.example/mainnet", "--replicate-from", "peer:9068"];
-    let replica = parse(&two).unwrap().replicate.replica().unwrap();
+    let replica = parse(&two).unwrap().replicate.replica();
     let sources: Vec<_> = replica.sources.iter().map(ToString::to_string).collect();
     assert_eq!(sources, ["https://snapshots.example/mainnet", "peer:9068"]);
     assert_eq!(replica.sources[1], ReplicaSource::Peer("http://peer:9068".parse().unwrap()));
-
-    let error = run_daemon(parse(&two).unwrap()).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "--replicate-from needs --remote-rpc: the node that attests the import"
-    );
 }

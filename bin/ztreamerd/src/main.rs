@@ -1,5 +1,6 @@
-//! `ztreamerd` process lifecycle: embedded or remote Zakura, replica import, historical indexing,
-//! head following, and servers. The `export-snapshot` subcommand is in [`export`].
+//! `ztreamerd` process lifecycle: an embedded Zakura, or a replica import and a remote Zakura;
+//! historical indexing, head following, and servers. The `export-snapshot` subcommand is in
+//! [`export`].
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
@@ -16,7 +17,7 @@ use std::{
 };
 
 use clap::{Args, Parser, Subcommand};
-use eyre::{Result, WrapErr, ensure, eyre};
+use eyre::{Result, WrapErr, eyre};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig, server::Router};
@@ -52,7 +53,8 @@ const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "CompactTxStreamer daemon backed by an embedded or remote Zakura node",
+    about = "CompactTxStreamer daemon. It runs an embedded Zakura node, or imports sealed ranges \
+             and then follows a remote Zakura node",
     args_conflicts_with_subcommands = true
 )]
 struct Cli {
@@ -193,15 +195,9 @@ fn main() -> Result<()> {
 async fn run_daemon(cli: DaemonArgs) -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
-    let replica = cli.replicate.replica();
-    if let Some(node) = cli.remote.node()? {
-        let node = node.with_replica(replica);
+    if let Some(node) = cli.remote.node(&cli.replicate)? {
         return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
     }
-    ensure!(
-        replica.is_none(),
-        "--replicate-from needs --remote-rpc: the node that attests the import"
-    );
 
     let mut config =
         ZakuradConfig::load(cli.zakura_config.clone()).wrap_err("load Zakura configuration")?;

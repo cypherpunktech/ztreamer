@@ -1,5 +1,6 @@
-//! The `--remote-rpc` mode: `ztreamerd` reads the chain from a remote zakura node over JSON-RPC
-//! and starts no embedded node.
+//! The remote mode: `ztreamerd` imports the sealed ranges of `--replicate-from`, checked against
+//! the `--remote-rpc` zakura node. Then it reads the tail and the head from that node over
+//! JSON-RPC. It starts no embedded node.
 
 use std::{
     fmt,
@@ -29,7 +30,11 @@ use ztreamer_indexer::{
 use ztreamer_remote::{Auth, FirstBlockWithBody as _, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource};
 
-use crate::{DaemonArgs, NodeSources, lifecycle, replicate::Replica, run_application};
+use crate::{
+    DaemonArgs, NodeSources, lifecycle,
+    replicate::{Replica, ReplicateArgs},
+    run_application,
+};
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -38,15 +43,18 @@ const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// [`RemoteNode`] makes them, when the node is ready for the index.
 type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBackend>;
 
-/// The command-line flags of the remote mode. All are off by default.
+/// The command-line flags of the remote node. All are off by default. `--remote-rpc` and
+/// `--replicate-from` need each other.
 #[derive(Debug, Args)]
 pub(crate) struct RemoteArgs {
-    /// JSON-RPC URL of a remote zakura node. ztreamerd then reads the chain from this node and
-    /// starts no embedded node. The node gives the network (mainnet or testnet), and the index
-    /// must be of that network. For HTTP basic auth, put the credentials in the URL:
-    /// https://user:password@host:8232. Without credentials and without --remote-rpc-cookie, a
-    /// loopback URL uses the default cookie file of zakura if it exists.
-    #[arg(long, value_name = "URL", conflicts_with = "zakura_config")]
+    /// JSON-RPC URL of a remote zakura node. Needs --replicate-from. ztreamerd starts no
+    /// embedded node. It imports the sealed ranges of --replicate-from, and this node attests
+    /// them. Then ztreamerd reads the tail and the head from this node. The node gives the
+    /// network (mainnet or testnet), and the index must be of that network. For HTTP basic auth,
+    /// put the credentials in the URL: https://user:password@host:8232. Without credentials and
+    /// without --remote-rpc-cookie, a loopback URL uses the default cookie file of zakura if it
+    /// exists.
+    #[arg(long, value_name = "URL", conflicts_with = "zakura_config", requires = "replicate_from")]
     remote_rpc: Option<NodeUrl>,
 
     /// Cookie file of the --remote-rpc node.
@@ -55,17 +63,18 @@ pub(crate) struct RemoteArgs {
 }
 
 impl RemoteArgs {
-    /// The node of `--remote-rpc`, or `None` without that flag. The default cookie file is the
-    /// one of a zakura with the default configuration. It reads the cookie file, but it does
-    /// not call the node.
-    pub(crate) fn node(&self) -> Result<Option<RemoteNode>> {
+    /// The node of `--remote-rpc` with the import of `replicate`, or `None` in the embedded mode.
+    /// The default cookie file is the one of a zakura with the default configuration. It reads
+    /// the cookie file, but it does not call the node.
+    pub(crate) fn node(&self, replicate: &ReplicateArgs) -> Result<Option<RemoteNode>> {
         let rpc = zakura_rpc::config::rpc::Config::default();
-        self.node_with_default_cookie(&rpc.cookie_dir.join(rpc.cookie_file_name))
+        let client = self.client(&rpc.cookie_dir.join(rpc.cookie_file_name))?;
+        Ok(client.map(|client| RemoteNode::new(client, replicate.replica())))
     }
 
-    /// The node of `--remote-rpc`, or `None` without that flag, with `default_cookie` as the
+    /// The client of `--remote-rpc`, or `None` without that flag, with `default_cookie` as the
     /// default cookie file.
-    fn node_with_default_cookie(&self, default_cookie: &Path) -> Result<Option<RemoteNode>> {
+    pub(crate) fn client(&self, default_cookie: &Path) -> Result<Option<ZakuraClient>> {
         let Some(url) = &self.remote_rpc else {
             return Ok(None);
         };
@@ -73,7 +82,7 @@ impl RemoteArgs {
         info!(?auth, "remote zakura credentials");
         let config = ZakuraClient::config(url.uri.clone()).with_auth(auth);
         let rpc = RpcClient::new(config).wrap_err("configure the --remote-rpc client")?;
-        Ok(Some(RemoteNode::new(ZakuraClient::new(rpc))))
+        Ok(Some(ZakuraClient::new(rpc)))
     }
 
     /// The credentials for the node: `--remote-rpc-cookie`, else the credentials of the URL,
@@ -157,23 +166,18 @@ impl FromStr for NodeUrl {
     }
 }
 
-/// A remote zakura node that replaces the embedded node.
+/// A remote zakura node that replaces the embedded node, and the import that it attests.
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteNode {
     client: ZakuraClient,
-    replica: Option<Replica>,
+    /// The import of `--replicate-from`. It runs before the tail.
+    replica: Replica,
 }
 
 impl RemoteNode {
-    /// The node behind `client`.
-    pub(crate) const fn new(client: ZakuraClient) -> Self {
-        Self { client, replica: None }
-    }
-
-    /// Runs `replica`, the import of `--replicate-from`, before the tail.
-    pub(crate) fn with_replica(mut self, replica: Option<Replica>) -> Self {
-        self.replica = replica;
-        self
+    /// The node behind `client`, with the import `replica`.
+    pub(crate) const fn new(client: ZakuraClient, replica: Replica) -> Self {
+        Self { client, replica }
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
@@ -218,8 +222,8 @@ impl RemoteNode {
     }
 
     /// Reads the network from the node and opens the index of that network, as the embedded
-    /// mode does. Runs the import of `--replicate-from`, if there is one. Then makes the sources
-    /// when the node is ready, and runs the daemon on them until shutdown.
+    /// mode does. Runs the import of `--replicate-from`. Then makes the sources when the node is
+    /// ready, and runs the daemon on them until shutdown.
     ///
     /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
     /// of another network.
@@ -235,9 +239,8 @@ impl RemoteNode {
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
         let index = cli.open_index(&network).await?;
-        if let Some(replica) = &self.replica
-            && replica.import(&self.client, &info, &network, &index, &shutdown).await?.is_break()
-        {
+        let import = self.replica.import(&self.client, &info, &network, &index, &shutdown);
+        if import.await?.is_break() {
             return Ok(());
         }
         let ControlFlow::Continue(sources) =

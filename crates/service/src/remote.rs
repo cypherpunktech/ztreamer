@@ -132,10 +132,11 @@
 //!
 //! # Status
 //!
-//! `ztreamerd --remote-rpc <URL>` uses the three parts and starts no embedded node. Before the
-//! first sync, it waits until the node ends its warm-up and has the tip of the index. It refuses
-//! a node of another network, and a node that pruned the next block that the index needs. The
-//! snapshot import comes in a later PR of the replication plan.
+//! `ztreamerd --remote-rpc <URL> --replicate-from <SOURCE>` starts no embedded node. It waits
+//! until the node ends its warm-up. Then it imports the sealed ranges of the source, checked
+//! against the node, and uses the three parts for the blocks above them. Before the tail, it
+//! waits until the node has the tip of the index. It refuses a node of another network, and a
+//! node that pruned the next block that the index needs.
 //!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`RpcCode`]: ztreamer_remote::RpcCode

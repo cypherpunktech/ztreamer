@@ -1,10 +1,10 @@
 //! JSON-RPC client for a remote zakura node.
 //!
-//! `ztreamerd` can run without an embedded node. Everything it then needs from the chain comes
-//! over zakura's JSON-RPC listener: chain tip, raw blocks, tree state, mempool, transaction
-//! broadcast. This crate is the transport for those calls. [`RpcClient`] knows nothing about the
-//! methods. [`ZakuraClient`] adds typed calls for the methods that `ztreamerd` uses, with the
-//! request and response types of `zakura_rpc`.
+//! In the remote mode, `ztreamerd` runs no embedded node. It imports sealed ranges from a
+//! snapshot or a peer, and gets all other chain data over zakura's JSON-RPC listener: chain
+//! tip, raw blocks, tree state, mempool, transaction broadcast. This crate is the transport for
+//! those calls. [`RpcClient`] knows nothing about the methods. [`ZakuraClient`] adds typed calls
+//! for the methods that `ztreamerd` uses, with the request and response types of `zakura_rpc`.
 //!
 //! What it handles:
 //!

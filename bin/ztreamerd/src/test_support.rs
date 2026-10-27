@@ -1,4 +1,4 @@
-//! Test fixtures for the daemon tests of the remote mode and of the replica: a free local
+//! Test fixtures for the daemon tests of the remote node and of the replica: a free local
 //! address, a poll of `GetLatestBlock`, and a mock node with another chain name.
 
 use std::{

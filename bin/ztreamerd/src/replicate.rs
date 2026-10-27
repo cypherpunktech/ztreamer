@@ -1,6 +1,6 @@
-//! The `--replicate-from` startup path: a replica imports the sealed ranges of snapshots or of
-//! peers, and the `--remote-rpc` node verifies them. Then the daemon indexes the tail and follows
-//! the head, as the remote mode does without an import.
+//! The `--replicate-from` startup path of the remote mode: a replica imports the sealed ranges of
+//! snapshots or of peers, and the `--remote-rpc` node verifies them. Then the daemon indexes the
+//! tail and follows the head from that node.
 //!
 //! Before it fetches a range, the import refuses:
 //!
@@ -37,21 +37,20 @@ pub(crate) struct ReplicateArgs {
     /// Import the sealed ranges from this source before the tail: an http:// or https:// base
     /// URL of a snapshot, or the host:port of a peer that serves the Replicator gRPC service
     /// without TLS. Give it again for more sources: the first is the reference. Needs
-    /// --remote-rpc.
-    #[arg(long, value_name = "URL|HOST:PORT")]
+    /// --remote-rpc: the node that attests the import, and that ztreamerd follows after it.
+    #[arg(long, value_name = "URL|HOST:PORT", requires = "remote_rpc")]
     replicate_from: Vec<ReplicaSource>,
 }
 
 impl ReplicateArgs {
-    /// The import of `--replicate-from`, or `None` without that flag.
-    pub(crate) fn replica(&self) -> Option<Replica> {
+    /// The import of `--replicate-from`. In the remote mode, the flag has at least one source.
+    pub(crate) fn replica(&self) -> Replica {
         let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
-        (!self.replicate_from.is_empty())
-            .then(|| Replica { sources: self.replicate_from.clone(), key })
+        Replica { sources: self.replicate_from.clone(), key }
     }
 
     /// Logs the new import state of a replica at info level: `tail` or `following`. Does
-    /// nothing without `--replicate-from`.
+    /// nothing in the embedded mode.
     pub(crate) fn log_import_state(&self, state: &'static str) {
         if !self.replicate_from.is_empty() {
             info!(import_state = state);
