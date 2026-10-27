@@ -4,7 +4,7 @@ members = ["bin/ztreamerd", "crates/indexer", "crates/node", "crates/protocol", 
 
 [workspace.package]
 edition = "2024"
-repository = "https://github.com/Evalir/ztreamer"
+repository = "https://github.com/cypherpunktech/ztreamer"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "deny", priority = -1 }

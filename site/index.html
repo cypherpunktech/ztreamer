@@ -14,7 +14,7 @@
 <body>
 <header class="wrap">
   <a href="./">ztreamer</a>
-  <nav><a href="docs.html">docs</a><a href="benchmarks.html">benchmarks</a><a href="https://github.com/distractedm1nd/ztreamer">source</a></nav>
+  <nav><a href="docs.html">docs</a><a href="benchmarks.html">benchmarks</a><a href="https://github.com/cypherpunktech/ztreamer">source</a></nav>
 </header>
 
 <main>
@@ -22,7 +22,7 @@
   <h1 class="r">z<em>treamer</em></h1>
   <p class="tag r" style="animation-delay:.15s">heavily optimized zcash indexer backed by an embedded <a href="https://zakura.com/">zakura 🌸</a> node</p>
   <button class="cmd r" style="animation-delay:.3s" id="cmd" type="button" aria-label="copy install command">
-    <span><span class="p">$</span> cargo install --git https://github.com/distractedm1nd/ztreamer ztreamerd</span>
+    <span><span class="p">$</span> cargo install --git https://github.com/cypherpunktech/ztreamer ztreamerd</span>
     <span class="c">copy</span>
   </button>
 </section>
@@ -57,7 +57,7 @@ const n=document.getElementById('n'),t0=performance.now(),N=92;
 n.textContent=Math.round(e*N).toLocaleString('en-US');if(p<1)requestAnimationFrame(f)})();
 requestAnimationFrame(()=>document.getElementById('bars').classList.add('on'));
 const b=document.getElementById('cmd'),c=b.querySelector('.c');
-b.onclick=()=>navigator.clipboard.writeText('cargo install --git https://github.com/distractedm1nd/ztreamer ztreamerd').then(()=>{c.textContent='copied';setTimeout(()=>c.textContent='copy',1400)});
+b.onclick=()=>navigator.clipboard.writeText('cargo install --git https://github.com/cypherpunktech/ztreamer ztreamerd').then(()=>{c.textContent='copied';setTimeout(()=>c.textContent='copy',1400)});
 </script>
 </body>
 </html>

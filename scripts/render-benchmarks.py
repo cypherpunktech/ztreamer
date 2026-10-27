@@ -169,7 +169,7 @@ head=re.sub(r'<meta (?:name="description"|property="og:description") content="[^
 head=head.replace('content="ztreamer"','content="ztreamer benchmarks"')
 head+='<meta name="description" content="RPC, range, concurrency and wallet-download benchmarks for ztreamer v0.1.0 and v0.0.1, with optional zaino comparison.">\n<link rel="stylesheet" href="benchmarks.css?v=2">'
 page='<!doctype html><html lang="en"><head>'+head+'</head><body class="benchmarks-page">'
-page+='<header class="wrap"><a href="./">ztreamer</a><nav><a href="docs.html">docs</a><a href="benchmarks.html" aria-current="page">benchmarks</a><a href="https://github.com/distractedm1nd/ztreamer">source</a></nav></header>'
+page+='<header class="wrap"><a href="./">ztreamer</a><nav><a href="docs.html">docs</a><a href="benchmarks.html" aria-current="page">benchmarks</a><a href="https://github.com/cypherpunktech/ztreamer">source</a></nav></header>'
 page+='<main class="wrap benchmark-report">'
 page+='<div class="eyebrow">Measured September 11–13, 2026</div><h1>ztreamer v0.1.0 vs v0.0.1</h1><p class="sub">Serving and clean historical indexing benchmarks. Compare <strong>ztreamer v0.1.0</strong> and <strong>v0.0.1</strong>, or include <strong>zaino d27ec930</strong> with the toggle below.</p>'
 page+='<label class="compare-toggle"><input id="show-zaino" type="checkbox" role="switch"> Show zaino in comparisons</label>'

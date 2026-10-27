@@ -2,8 +2,8 @@
 
 # ztreamer [![GitHub Actions][gha-badge]][gha] [![X][x-badge]][x]
 
-[gha]: https://github.com/distractedm1nd/ztreamer/actions/workflows/ci.yml
-[gha-badge]: https://github.com/distractedm1nd/ztreamer/actions/workflows/ci.yml/badge.svg?branch=master
+[gha]: https://github.com/cypherpunktech/ztreamer/actions/workflows/ci.yml
+[gha-badge]: https://github.com/cypherpunktech/ztreamer/actions/workflows/ci.yml/badge.svg?branch=master
 [x]: https://x.com/cypherpunk
 [x-badge]: https://img.shields.io/twitter/follow/cypherpunk
 
