@@ -19,13 +19,12 @@ cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamer
 
 ## Modes
 
-ztreamerd has three modes. All modes write the same index and serve the same gRPC API.
+ztreamerd has two modes. Both modes write the same index and serve the same gRPC API.
 
 | Mode | Command | Chain source |
 | --- | --- | --- |
 | Embedded | `ztreamerd --zakura-config zakura.toml` | A zakura node in the ztreamerd process |
-| Remote | `ztreamerd --remote-rpc URL` | A remote zakura node, over JSON-RPC |
-| Replica | `ztreamerd --remote-rpc URL --replicate-from SOURCE` | Sealed ranges from snapshots or peers, then the remote node |
+| Remote | `ztreamerd --remote-rpc URL --replicate-from SOURCE` | Sealed ranges from snapshots or peers, then a remote zakura node over JSON-RPC |
 
 ### Embedded
 
@@ -36,23 +35,21 @@ This is the default mode. The zakura configuration file is optional. The embedde
 
 ### Remote
 
-ztreamerd starts no node. The remote node sets the network (mainnet or testnet). The index must be of the same network. This mode does not serve P2P or JSON-RPC.
+ztreamerd starts no node. `--remote-rpc` and `--replicate-from` need each other: ztreamerd refuses one without the other. This mode does not serve P2P or JSON-RPC.
 
-To give the node credentials, use one of these:
+First, ztreamerd imports sealed ranges from each `--replicate-from` source. The remote node verifies the import. Then ztreamerd reads the blocks above the import from the remote node, and follows its head. A source is:
+
+- the `http://` or `https://` base URL of a snapshot; or
+- the `host:port` of a ztreamerd peer. The peer serves the Replicator service on its gRPC listener, without TLS.
+
+The first source is the reference. The import refuses a manifest that the built-in snapshot key did not sign. It also refuses a manifest of a different network or genesis block.
+
+The remote node sets the network (mainnet or testnet). The index must be of the same network. To give the node credentials, use one of these:
 
 - HTTP basic auth in the URL: `https://user:password@host:8232`;
 - a cookie file: `--remote-rpc-cookie FILE`.
 
 With no credentials and a loopback URL, ztreamerd uses the default zakura cookie file, if it exists. It does not send this cookie to other hosts.
-
-### Replica
-
-Before the tail, ztreamerd imports sealed ranges from each `--replicate-from` source. The remote node verifies the import. A source is:
-
-- the `http://` or `https://` base URL of a snapshot; or
-- the `host:port` of a ztreamerd peer. The peer serves the Replicator service on its gRPC listener, without TLS.
-
-The first source is the reference. The import refuses a manifest that the built-in snapshot key did not sign. It also refuses a manifest of a different network or genesis block. After the import, ztreamerd operates as in the remote mode.
 
 ## Listeners
 
