@@ -233,11 +233,6 @@ impl Service for P2pCompactService {
     }
 }
 
-/// Wraps the p2p frontend for `zakurad::node::run_with_services_ready`.
-pub fn custom_service(compact: CompactService) -> CustomService {
-    Arc::new(P2pCompactService::new(compact)).registration()
-}
-
 fn decode<T: prost::Message + Default>(payload: &[u8]) -> Result<T, ()> {
     T::decode(payload).map_err(|_| ())
 }

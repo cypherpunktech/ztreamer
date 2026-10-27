@@ -147,7 +147,7 @@ pub(crate) fn compact_mempool_txs(
         let transaction = parse_transaction(bytes, *txid, 0).map_err(|error| {
             Status::internal(format!("mempool transaction {txid} is unparsable: {error}"))
         })?;
-        let mut compact_tx = convert_transaction(&transaction, pools, false);
+        let mut compact_tx = convert_transaction(&transaction, pools);
         if pools.transparent {
             let transaction = transaction::Transaction::zcash_deserialize(bytes.as_slice())
                 .map_err(|error| Status::internal(error.to_string()))?;
@@ -209,7 +209,6 @@ pub(crate) fn excluded_txids(
 fn convert_transaction(
     transaction: &CompactTransaction,
     pools: PoolSelection,
-    nullifiers_only: bool,
 ) -> Option<proto::CompactTx> {
     let spends = if pools.sapling {
         transaction
@@ -220,7 +219,7 @@ fn convert_transaction(
     } else {
         Vec::new()
     };
-    let outputs = if pools.sapling && !nullifiers_only {
+    let outputs = if pools.sapling {
         transaction
             .sapling_outputs
             .iter()
@@ -233,46 +232,36 @@ fn convert_transaction(
     } else {
         Vec::new()
     };
-    let actions = if pools.orchard {
-        convert_actions(&transaction.orchard_actions, nullifiers_only)
-    } else {
-        Vec::new()
-    };
-    let ironwood_actions = if pools.ironwood {
-        convert_actions(&transaction.ironwood_actions, nullifiers_only)
-    } else {
-        Vec::new()
-    };
+    let actions =
+        if pools.orchard { convert_actions(&transaction.orchard_actions) } else { Vec::new() };
+    let ironwood_actions =
+        if pools.ironwood { convert_actions(&transaction.ironwood_actions) } else { Vec::new() };
 
     (!spends.is_empty()
         || !outputs.is_empty()
         || !actions.is_empty()
-        || !ironwood_actions.is_empty()
-        || nullifiers_only)
-        .then(|| proto::CompactTx {
-            index: transaction.index,
-            txid: transaction.txid.0.to_vec(),
-            fee: 0,
-            spends,
-            outputs,
-            actions,
-            ironwood_actions,
-            vin: Vec::new(),
-            vout: Vec::new(),
-        })
+        || !ironwood_actions.is_empty())
+    .then(|| proto::CompactTx {
+        index: transaction.index,
+        txid: transaction.txid.0.to_vec(),
+        fee: 0,
+        spends,
+        outputs,
+        actions,
+        ironwood_actions,
+        vin: Vec::new(),
+        vout: Vec::new(),
+    })
 }
 
-fn convert_actions(
-    actions: &[CompactShieldedAction],
-    nullifiers_only: bool,
-) -> Vec<proto::CompactOrchardAction> {
+fn convert_actions(actions: &[CompactShieldedAction]) -> Vec<proto::CompactOrchardAction> {
     actions
         .iter()
         .map(|action| proto::CompactOrchardAction {
             nullifier: action.nullifier.to_vec(),
-            cmx: if nullifiers_only { Vec::new() } else { action.commitment.to_vec() },
-            ephemeral_key: if nullifiers_only { Vec::new() } else { action.ephemeral_key.to_vec() },
-            ciphertext: if nullifiers_only { Vec::new() } else { action.ciphertext.to_vec() },
+            cmx: action.commitment.to_vec(),
+            ephemeral_key: action.ephemeral_key.to_vec(),
+            ciphertext: action.ciphertext.to_vec(),
         })
         .collect()
 }

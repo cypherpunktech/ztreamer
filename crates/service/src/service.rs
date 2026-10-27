@@ -16,7 +16,6 @@ use zakura_chain::{
     transaction,
 };
 use zakura_state::ReadStateService;
-use ztreamer_node::NodeClient;
 
 use crate::{
     backend::{InProcessBackend, StateBackend},
@@ -154,16 +153,6 @@ impl CompactService {
         Self::with_backend(index, state, chain_name, InProcessBackend::new(zakura))
     }
 
-    /// Serves everything through the embedded node's handles.
-    pub fn with_node(
-        index: Arc<Index>,
-        state: IndexState,
-        chain_name: impl Into<Arc<str>>,
-        node: NodeClient,
-    ) -> Self {
-        Self::with_backend(index, state, chain_name, InProcessBackend::with_node(node))
-    }
-
     /// Serves chain state and node requests through any [`StateBackend`].
     pub fn with_backend(
         index: Arc<Index>,
@@ -199,10 +188,6 @@ impl CompactService {
     /// Returns the backend that answers the chain state requests and the node requests.
     pub fn backend(&self) -> Arc<dyn StateBackend> {
         Arc::clone(&self.backend)
-    }
-
-    pub fn publish(&self, state: IndexState) {
-        self.snapshot.send_replace(state.into());
     }
 
     pub fn publish_head(
