@@ -7,27 +7,61 @@
 [x]: https://x.com/cypherpunk
 [x-badge]: https://img.shields.io/twitter/follow/cypherpunk
 
-A high-performance [Zcash](https://z.cash) indexer and light-wallet server. It gets the chain from an embedded [zakura](https://github.com/zakura-core/zakura) node, or from a remote zakura node over JSON-RPC.
-
-Implements `lightwallet-protocol` over gRPC. With the embedded node, it also serves `CompactTxStreamer` over v2 P2P for peer-to-peer light wallets.
+A high-performance [Zcash](https://z.cash) indexer and light-wallet server. ztreamerd reads the chain from a [zakura](https://github.com/zakura-core/zakura) node, writes a compact index, and serves `lightwallet-protocol` from that index.
 
 ## Install
 
-Install [Protocol Buffers](https://protobuf.dev/installation/), then:
+Install [Protocol Buffers](https://protobuf.dev/installation/). Then install ztreamerd from git. It is not on crates.io, because it has git dependencies.
 
 ```console
 cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamerd
 ```
 
-ztreamerd is not on crates.io: it has git dependencies. `--locked` uses the `Cargo.lock` of the repository.
+## Modes
 
-## Run
+ztreamerd has three modes. All modes write the same index and serve the same gRPC API.
 
-```console
-ztreamerd --zakura-config zakura.toml
-```
+| Mode | Command | Chain source |
+| --- | --- | --- |
+| Embedded | `ztreamerd --zakura-config zakura.toml` | A zakura node in the ztreamerd process |
+| Remote | `ztreamerd --remote-rpc URL` | A remote zakura node, over JSON-RPC |
+| Replica | `ztreamerd --remote-rpc URL --replicate-from SOURCE` | Sealed ranges from snapshots or peers, then the remote node |
 
-The gRPC listener is plaintext by default. To serve it over TLS, provide a PEM certificate chain and matching PEM private key together:
+### Embedded
+
+This is the default mode. The zakura configuration file is optional. The embedded node also serves:
+
+- `CompactTxStreamer` over v2 P2P, for peer-to-peer light wallets;
+- the zakura JSON-RPC requests, when the zakura configuration sets `[rpc] listen_addr`.
+
+### Remote
+
+ztreamerd starts no node. The remote node sets the network (mainnet or testnet). The index must be of the same network. This mode does not serve P2P or JSON-RPC.
+
+To give the node credentials, use one of these:
+
+- HTTP basic auth in the URL: `https://user:password@host:8232`;
+- a cookie file: `--remote-rpc-cookie FILE`.
+
+With no credentials and a loopback URL, ztreamerd uses the default zakura cookie file, if it exists. It does not send this cookie to other hosts.
+
+### Replica
+
+Before the tail, ztreamerd imports sealed ranges from each `--replicate-from` source. The remote node verifies the import. A source is:
+
+- the `http://` or `https://` base URL of a snapshot; or
+- the `host:port` of a ztreamerd peer. The peer serves the Replicator service on its gRPC listener, without TLS.
+
+The first source is the reference. The import refuses a manifest that the built-in snapshot key did not sign. It also refuses a manifest of a different network or genesis block. After the import, ztreamerd operates as in the remote mode.
+
+## Listeners
+
+| Listener | Flag | Default | Serves |
+| --- | --- | --- | --- |
+| gRPC | `--grpc-listen` | `127.0.0.1:9067` | `CompactTxStreamer` and Replicator |
+| Prometheus | `--metrics-listen` | `127.0.0.1:9999` | Metrics |
+
+The gRPC listener uses plaintext. For TLS, give a PEM certificate chain and its PEM private key:
 
 ```console
 ztreamerd --zakura-config zakura.toml \
@@ -36,40 +70,7 @@ ztreamerd --zakura-config zakura.toml \
   --tls-key /etc/letsencrypt/live/ztreamer.example/privkey.pem
 ```
 
-Certificate changes require a restart. The Prometheus listener is not covered by these options and should remain private or be secured by a reverse proxy.
-
-The gRPC listener also serves the Replicator service. Replicas use it to copy sealed ranges (see `--replicate-from`).
-
-## Remote node
-
-```console
-ztreamerd --remote-rpc http://127.0.0.1:8232
-```
-
-`--remote-rpc` reads the chain from a remote zakura node over JSON-RPC. ztreamerd then starts no embedded node, and `--zakura-config` is not permitted. The node gives the network (mainnet or testnet). The index must be of that network.
-
-Credentials:
-
-- For HTTP basic auth, put them in the URL: `https://user:password@host:8232`.
-- `--remote-rpc-cookie FILE` gives the cookie file of the node.
-- Without these, a loopback URL uses the default zakura cookie file, if it exists. ztreamerd does not send that cookie to another host.
-
-This mode does not serve P2P or JSON-RPC: no embedded node runs.
-
-## Replica import
-
-```console
-ztreamerd --remote-rpc http://127.0.0.1:8232 \
-  --replicate-from https://snapshots.example/mainnet \
-  --replicate-from peer.example:9067
-```
-
-`--replicate-from` imports the sealed ranges before the tail index starts. It needs `--remote-rpc`: that node verifies the import. A source is one of these:
-
-- the `http://` or `https://` base URL of a snapshot;
-- the `host:port` of a peer that serves the Replicator gRPC service without TLS.
-
-Give the flag again for more sources. The first source is the reference. The import refuses a manifest whose signature does not verify with the built-in snapshot key, and a manifest for another network or genesis block than the index. After the import, ztreamerd indexes the tail and follows the head, as in the remote mode.
+Restart ztreamerd after a certificate change. The Prometheus listener has no TLS. Keep it private, or put it behind a reverse proxy.
 
 ## Snapshot export
 
@@ -77,21 +78,25 @@ Give the flag again for more sources. The first source is the reference. The imp
 ztreamerd export-snapshot --index-dir ztreamer-index --out snapshot --signing-key key.seed
 ```
 
-`export-snapshot` writes the sealed ranges of an index as a snapshot that a replica can import. It starts at genesis and stops at the first sealed range without a `range_meta` row. `--signing-key` is an Ed25519 key as a raw 32-byte seed. It signs the manifest and `latest.json`. An export into the same directory writes only the new ranges, and never replaces a manifest. Give `--index-dir` and `--index-map-size` after the subcommand name.
+This command writes the sealed ranges of an index as a snapshot. A replica can import this snapshot. The signing key is a raw 32-byte Ed25519 seed. An export into the same directory writes only the new ranges. Give `--index-dir` and `--index-map-size` after the subcommand name.
+
+## Index size
+
+`--index-map-size` sets the maximum LMDB map size. The default is 64 GiB. On 2026-10-27, the mainnet index at height 3,532,489 was 17.3 GiB.
 
 ## Protocol compatibility
 
-All `lightwallet-protocol` methods are implemented. `GetBlock` intentionally differs from the protocol by excluding transparent data, which current wallets do not use. `GetBlockRange` accepts transparent filters, but these requests bypass the index; transparent scanning is not a recommended use case.
+ztreamerd implements all `lightwallet-protocol` methods, with these differences:
 
-`GetTaddressBalanceStream` counts each address once and accepts up to 10,000 distinct addresses per request. An additional distinct address returns `ResourceExhausted`; repeated addresses do not count toward the limit.
+- `GetBlock` does not send transparent data. Current wallets do not use it.
+- `GetBlockRange` accepts transparent filters, but these requests do not use the index. Do not use ztreamerd for transparent scans.
+- `GetTaddressBalanceStream` accepts a maximum of 10,000 distinct addresses in one request. It counts a repeated address one time. One more distinct address gives `ResourceExhausted`.
 
-Ztreamer supports direct, in-process Zakura mode. It serves 24 of the 27 JSON-RPC requests provided by Zaino direct mode.
+In the embedded mode, ztreamerd serves 24 of the 27 JSON-RPC requests of Zaino direct mode. It does not serve `getblockdeltas`, `getspentinfo` and `gettxoutsetinfo`.
 
-`getblockdeltas`, `getspentinfo`, and `gettxoutsetinfo` are not yet implemented.
+## Benchmarks
 
-The embedded node serves these requests on the zakura JSON-RPC listener. Set `[rpc] listen_addr` in the zakura configuration to start it.
-
-## Historical indexing benchmark
+### Historical indexing
 
 | Metric                  |          Result |
 | ----------------------- | --------------: |
@@ -101,14 +106,8 @@ The embedded node serves these requests on the zakura JSON-RPC listener. Set `[r
 | Peak Physical Footprint |        3.66 GiB |
 | Total CPU seconds       |             493 |
 
-The benchmark indexed mainnet from genesis (to height 3,459,912) on an M3 Ultra with 512 GiB RAM and a warm cache.
+This benchmark indexed mainnet from genesis to height 3,459,912. It used an M3 Ultra with 512 GiB RAM and a warm cache.
 
-The index grows with the chain. On 2026-10-27, a mainnet index at height 3,532,489 was 17.3 GiB. `--index-map-size` sets the maximum LMDB map size. The default is 64 GiB.
+### Serving
 
-## Serving benchmarks
-
-`scripts/benchmark-serving.sh` measures RPC latencies, range-size scaling,
-concurrent serving, and compact-block wallet sync against a running server. It
-exports request samples and summaries as CSV and JSON for comparisons and later
-plotting. See [the benchmark guide](benchmarks/README.md) for workloads, fixtures,
-and HEAD-versus-release instructions.
+`scripts/benchmark-serving.sh` measures a running server: RPC latency, range-size scaling, concurrent requests and compact-block wallet sync. It writes the request samples and the summaries as CSV and JSON. [The benchmark guide](benchmarks/README.md) gives the workloads, the fixtures, and how to compare HEAD with a release.
