@@ -7,11 +7,10 @@
 //! cache, and a cache hit makes no call to the node.
 
 use std::{
-    collections::HashSet,
-    hash::Hash,
-    mem::size_of,
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
     ops::RangeInclusive,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
@@ -47,17 +46,12 @@ use crate::backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 
-/// The bytes that the tree-state cache can hold: approximately 4,000 tree states.
-const TREE_CACHE_BYTES: usize = 16 << 20;
+/// The tree states that the cache can hold. A tree state is at most three frontiers of 32
+/// nodes, approximately 3.5 KiB, so the full cache is approximately 14 MiB.
+const TREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(4_096).unwrap();
 
 /// The most `getrawtransaction` calls in flight for one mempool read.
 const MEMPOOL_FETCHES: usize = 16;
-
-/// The bytes that the mempool cache can hold. zakura's default mempool holds at most 80 MB of
-/// transaction cost (`tx_cost_limit`), and a decoded transaction takes about two times its
-/// serialized bytes. The cache keeps only the transactions of the latest `getrawmempool`
-/// answer, so it is normally smaller.
-const MEMPOOL_CACHE_BYTES: usize = 160 << 20;
 
 /// Why [`RemoteBackend::connect`] refused the node.
 #[derive(Debug, thiserror::Error)]
@@ -112,8 +106,10 @@ impl From<RpcError> for BackendError {
 pub struct RemoteBackend {
     node: ZakuraClient,
     network: Network,
-    tree_states: LruMap<block::Hash, TreeState>,
-    mempool: LruMap<transaction::Hash, UnminedTx>,
+    /// The tree states that the node gave. They do not change.
+    tree_states: Mutex<LruCache<block::Hash, TreeState>>,
+    /// The transactions of the latest `getrawmempool` answer. The node mempool bounds it.
+    mempool: Mutex<HashMap<transaction::Hash, UnminedTx>>,
 }
 
 impl std::fmt::Debug for RemoteBackend {
@@ -142,9 +138,19 @@ impl RemoteBackend {
         Ok(Self {
             node,
             network,
-            tree_states: LruMap::new("tree_states", TREE_CACHE_BYTES),
-            mempool: LruMap::new("mempool", MEMPOOL_CACHE_BYTES),
+            tree_states: Mutex::new(LruCache::new(TREE_CACHE_ENTRIES)),
+            mempool: Mutex::default(),
         })
+    }
+
+    /// Locks the tree-state cache. A panic in another holder leaves the cache valid.
+    fn lock_tree_states(&self) -> MutexGuard<'_, LruCache<block::Hash, TreeState>> {
+        self.tree_states.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Locks the mempool cache. A panic in another holder leaves the cache valid.
+    fn lock_mempool(&self) -> MutexGuard<'_, HashMap<transaction::Hash, UnminedTx>> {
+        self.mempool.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Completed subtrees of `P` from `start`, at most `limit` of them.
@@ -200,8 +206,9 @@ impl RemoteBackend {
         &self,
         id: transaction::Hash,
     ) -> Result<Option<UnminedTx>, BackendError> {
-        if let Some(cached) = self.mempool.get(&id) {
-            return Ok(Some(cached));
+        let cached = self.lock_mempool().get(&id).cloned();
+        if cached.is_some() {
+            return Ok(cached);
         }
         let Some(fetched) = self.fetch_transaction(id).await? else {
             return Ok(None);
@@ -210,7 +217,7 @@ impl RemoteBackend {
             return Ok(None);
         }
         let unmined = UnminedTx::from(fetched.decode().await?);
-        self.mempool.insert(id, unmined.clone());
+        self.lock_mempool().insert(id, unmined.clone());
         Ok(Some(unmined))
     }
 }
@@ -421,141 +428,6 @@ impl Pool for IronwoodPool {
     }
 }
 
-/// A map in front of node answers that holds at most a budget of bytes. When an insert goes
-/// above the budget, the map drops the entries that were used least recently.
-///
-/// The bytes of an entry are an estimate: the size of the key and the value, a fixed overhead
-/// for the map, and [`HeapBytes::heap_bytes`] of the value. The map reports its bytes, its
-/// entries, and its hits, misses and evictions as metrics with the label `cache`.
-///
-/// The tree states in it do not change. The backend uses a mempool entry only while
-/// `getrawmempool` still lists its id.
-struct LruMap<K, V> {
-    budget: usize,
-    inner: Mutex<LruMapInner<K, V>>,
-    metrics: CacheMetrics,
-}
-
-struct LruMapInner<K, V> {
-    entries: LruCache<K, (V, usize)>,
-    bytes: usize,
-}
-
-/// The bytes that an entry of [`LruMap`] uses for the hash table and the list links.
-const ENTRY_OVERHEAD: usize = 64;
-
-/// The heap bytes of a cached value, as an estimate.
-trait HeapBytes {
-    fn heap_bytes(&self) -> usize;
-}
-
-impl HeapBytes for TreeState {
-    /// The trees and their `Arc`s. A tree keeps one 32-byte node for each 1 bit of its note
-    /// count, so it holds at most 32 of them.
-    fn heap_bytes(&self) -> usize {
-        fn tree<T>(count: Option<u64>) -> usize {
-            count.map_or(0, |count| size_of::<T>() + 16 + 32 * count.count_ones() as usize)
-        }
-        tree::<sapling::tree::NoteCommitmentTree>(self.sapling.as_ref().map(|tree| tree.count()))
-            + tree::<orchard::tree::NoteCommitmentTree>(
-                self.orchard.as_ref().map(|tree| tree.count()),
-            )
-            + tree::<ironwood::tree::NoteCommitmentTree>(
-                self.ironwood.as_ref().map(|tree| tree.count()),
-            )
-    }
-}
-
-impl HeapBytes for UnminedTx {
-    /// Two times the serialized size: the decoded transaction keeps the proofs and the
-    /// signatures as bytes, and adds its own structure.
-    fn heap_bytes(&self) -> usize {
-        2 * self.size()
-    }
-}
-
-impl<K: Hash + Eq, V: Clone + HeapBytes> LruMap<K, V> {
-    fn new(name: &'static str, budget: usize) -> Self {
-        Self {
-            budget,
-            inner: Mutex::new(LruMapInner { entries: LruCache::unbounded(), bytes: 0 }),
-            metrics: CacheMetrics::new(name),
-        }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, LruMapInner<K, V>> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn get(&self, key: &K) -> Option<V> {
-        let value = self.lock().entries.get(key).map(|(value, _)| value.clone());
-        match value {
-            Some(_) => self.metrics.hits.increment(1),
-            None => self.metrics.misses.increment(1),
-        }
-        value
-    }
-
-    /// Drops every entry whose key `keep` refuses.
-    fn retain(&self, keep: impl Fn(&K) -> bool)
-    where
-        K: Clone,
-    {
-        let mut inner = self.lock();
-        let refused: Vec<K> =
-            inner.entries.iter().map(|(key, _)| key).filter(|key| !keep(key)).cloned().collect();
-        for key in refused {
-            if let Some((_, bytes)) = inner.entries.pop(&key) {
-                inner.bytes -= bytes;
-            }
-        }
-        self.metrics.report(&inner);
-    }
-
-    fn insert(&self, key: K, value: V) {
-        let bytes = size_of::<(K, V, usize)>() + ENTRY_OVERHEAD + value.heap_bytes();
-        let mut inner = self.lock();
-        if let Some((_, (_, old))) = inner.entries.push(key, (value, bytes)) {
-            inner.bytes -= old;
-        }
-        inner.bytes += bytes;
-        while inner.bytes > self.budget {
-            let Some((_, (_, dropped))) = inner.entries.pop_lru() else {
-                break;
-            };
-            inner.bytes -= dropped;
-            self.metrics.evictions.increment(1);
-        }
-        self.metrics.report(&inner);
-    }
-}
-
-/// The metrics of one [`LruMap`].
-struct CacheMetrics {
-    bytes: metrics::Gauge,
-    entries: metrics::Gauge,
-    hits: metrics::Counter,
-    misses: metrics::Counter,
-    evictions: metrics::Counter,
-}
-
-impl CacheMetrics {
-    fn new(cache: &'static str) -> Self {
-        Self {
-            bytes: metrics::gauge!("ztreamer.remote_cache.bytes", "cache" => cache),
-            entries: metrics::gauge!("ztreamer.remote_cache.entries", "cache" => cache),
-            hits: metrics::counter!("ztreamer.remote_cache.hits_total", "cache" => cache),
-            misses: metrics::counter!("ztreamer.remote_cache.misses_total", "cache" => cache),
-            evictions: metrics::counter!("ztreamer.remote_cache.evictions_total", "cache" => cache),
-        }
-    }
-
-    fn report<K: Hash + Eq, V>(&self, inner: &LruMapInner<K, V>) {
-        self.bytes.set(inner.bytes as f64);
-        self.entries.set(inner.entries.len() as f64);
-    }
-}
-
 #[tonic::async_trait]
 impl StateBackend for RemoteBackend {
     fn network(&self) -> Network {
@@ -597,7 +469,8 @@ impl StateBackend for RemoteBackend {
     }
 
     async fn tree_state(&self, hash: block::Hash) -> Result<TreeState, BackendError> {
-        if let Some(trees) = self.tree_states.get(&hash) {
+        let cached = self.lock_tree_states().get(&hash).cloned();
+        if let Some(trees) = cached {
             return Ok(trees);
         }
         let response = match self.node.z_get_treestate(HashOrHeight::Hash(hash)).await {
@@ -625,7 +498,7 @@ impl StateBackend for RemoteBackend {
         })
         .await
         .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))??;
-        self.tree_states.insert(hash, trees.clone());
+        self.lock_tree_states().put(hash, trees.clone());
         Ok(trees)
     }
 
@@ -734,7 +607,7 @@ impl StateBackend for RemoteBackend {
             .collect::<Result<_, _>>()?;
         // The cache keeps only the transactions that the node still has in its mempool.
         let listed: HashSet<transaction::Hash> = ids.iter().copied().collect();
-        self.mempool.retain(|id| listed.contains(id));
+        self.lock_mempool().retain(|id, _| listed.contains(id));
         stream::iter(ids)
             .map(|id| async move {
                 let fetched = self.mempool_transaction(id).await;
@@ -779,7 +652,7 @@ impl StateBackend for RemoteBackend {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::{BTreeMap, HashMap},
+        collections::BTreeMap,
         sync::atomic::{AtomicBool, Ordering},
     };
 
@@ -969,44 +842,6 @@ mod tests {
         assert!(matches!(&error, BackendError::Unexpected(message) if message.contains("65535")));
     }
 
-    #[test]
-    fn lru_map_keeps_its_byte_budget_and_reports_it() {
-        let recorder = metrics_util::debugging::DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        let map: LruMap<u16, TreeState> =
-            metrics::with_local_recorder(&recorder, || LruMap::new("test", 1_000));
-        let entry = size_of::<(u16, TreeState, usize)>() + ENTRY_OVERHEAD;
-        (0..100).for_each(|index| map.insert(index, TreeState::default()));
-        let kept = 1_000 / entry;
-        assert_eq!(map.lock().entries.len(), kept);
-        assert!(map.lock().bytes <= 1_000);
-        // The oldest entries are gone, the newest stay.
-        assert!(map.get(&0).is_none());
-        assert!(map.get(&99).is_some());
-
-        let values: HashMap<_, _> = snapshotter
-            .snapshot()
-            .into_vec()
-            .into_iter()
-            .map(|(key, _, _, value)| (key.key().name().to_owned(), value))
-            .collect();
-        use metrics_util::debugging::DebugValue;
-        assert_eq!(
-            values["ztreamer.remote_cache.entries"],
-            DebugValue::Gauge((kept as f64).into())
-        );
-        assert_eq!(
-            values["ztreamer.remote_cache.bytes"],
-            DebugValue::Gauge(((kept * entry) as f64).into())
-        );
-        assert_eq!(
-            values["ztreamer.remote_cache.evictions_total"],
-            DebugValue::Counter(100 - kept as u64)
-        );
-        assert_eq!(values["ztreamer.remote_cache.hits_total"], DebugValue::Counter(1));
-        assert_eq!(values["ztreamer.remote_cache.misses_total"], DebugValue::Counter(1));
-    }
-
     fn tree_state_answer(hash: block::Hash, orchard_root: Option<Vec<u8>>) -> Value {
         let sapling: sapling::tree::NoteCommitmentTree = (1..=3u8)
             .map(|i| {
@@ -1069,8 +904,7 @@ mod tests {
         assert_eq!(trees.sapling.unwrap().count(), 3);
         assert_eq!(trees.orchard.unwrap().count(), 5);
         assert!(trees.ironwood.is_none());
-        let cached = backend.tree_states.lock().bytes;
-        assert!(cached > 0 && cached <= TREE_CACHE_BYTES, "{cached}");
+        assert_eq!(backend.lock_tree_states().len(), 1);
         let requests = mock.seen().len();
         assert_eq!(backend.tree_state(good).await.unwrap().orchard.unwrap().count(), 5);
         assert_eq!(mock.seen().len(), requests);
@@ -1202,17 +1036,12 @@ mod tests {
         .await;
         let backend = backend(&mock).await;
         assert_eq!(backend.mempool_transactions().await.unwrap().len(), 1);
-        assert_eq!(backend.mempool.lock().entries.len(), 1);
-        assert!(
-            backend.mempool.lock().bytes
-                > 2 * block_1().transactions[0].zcash_serialize_to_vec().unwrap().len()
-        );
+        assert!(backend.lock_mempool().contains_key(&id));
 
         // The transaction left the mempool, so the cache drops it.
         listed.store(false, Ordering::SeqCst);
         assert!(backend.mempool_transactions().await.unwrap().is_empty());
-        assert_eq!(backend.mempool.lock().entries.len(), 0);
-        assert_eq!(backend.mempool.lock().bytes, 0);
+        assert!(backend.lock_mempool().is_empty());
     }
 
     #[tokio::test]
