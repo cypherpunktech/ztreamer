@@ -11,7 +11,7 @@ A high-performance [Zcash](https://z.cash) indexer and light-wallet server. ztre
 
 ## Install
 
-Install [Protocol Buffers](https://protobuf.dev/installation/). Then install ztreamerd from git. It is not on crates.io, because it has git dependencies.
+Install [Protocol Buffers](https://protobuf.dev/installation/), then:
 
 ```console
 cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamerd
