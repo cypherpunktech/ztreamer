@@ -345,36 +345,38 @@ mod tests {
         );
     }
 
+    /// Each row changes one field of the entry of an honest blob. The check must reject the
+    /// blob at the expected check and height.
     #[test]
-    fn a_wrong_range_version_is_rejected() {
+    fn a_wrong_entry_field_is_rejected() {
+        type ChangeEntry = fn(&mut ManifestEntry);
+        let cases: [(&str, ChangeEntry, Check, u32); 3] = [
+            ("a wrong range version", |entry| entry.range_version = 2, Check::RangeVersion, 1_000),
+            ("a wrong end hash", |entry| entry.end_hash = hash(7), Check::EndHash, 1_999),
+            (
+                "wrong end tree sizes",
+                |entry| entry.end_tree_sizes.orchard += 1,
+                Check::EndTreeSizes,
+                1_999,
+            ),
+        ];
         let (first, second, blob) = second_range();
-        let mut entry = entry_for(&second, &blob);
-        entry.range_version = 2;
+        let link = RangeLink::from(first.last().unwrap());
 
-        let result = RangeBlob::new(&blob, &entry).check(&RangeLink::from(first.last().unwrap()));
+        for (case, change, check, height) in cases {
+            let mut entry = entry_for(&second, &blob);
+            change(&mut entry);
 
-        assert_rejected(result, Check::RangeVersion, 1_000);
-    }
+            let result = RangeBlob::new(&blob, &entry).check(&link);
 
-    #[test]
-    fn a_wrong_end_hash_is_rejected() {
-        let (first, second, blob) = second_range();
-        let mut entry = entry_for(&second, &blob);
-        entry.end_hash = hash(7);
-
-        let result = RangeBlob::new(&blob, &entry).check(&RangeLink::from(first.last().unwrap()));
-
-        assert_rejected(result, Check::EndHash, 1_999);
+            assert_eq!(result, Err(Reject::Rejected { check, height }), "{case}");
+        }
     }
 
     #[test]
     fn wrong_tree_sizes_are_rejected() {
         let (first, mut second, blob) = second_range();
         let link = RangeLink::from(first.last().unwrap());
-
-        let mut entry = entry_for(&second, &blob);
-        entry.end_tree_sizes.orchard += 1;
-        assert_rejected(RangeBlob::new(&blob, &entry).check(&link), Check::EndTreeSizes, 1_999);
 
         let smaller =
             RangeLink { end_tree_sizes: TreeSizes { sapling: 0, ..link.end_tree_sizes }, ..link };

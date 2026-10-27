@@ -439,10 +439,6 @@ mod tests {
         two_entry_manifest().0
     }
 
-    fn refused(fields: ManifestFields) -> ManifestError {
-        Manifest::try_from(fields).unwrap_err()
-    }
-
     #[test]
     fn manifest_round_trips_through_json() {
         let manifest = two_entry_manifest();
@@ -495,102 +491,104 @@ mod tests {
         assert!(matches!(error, ManifestError::Json(_)), "{error:?}");
     }
 
+    /// Each row breaks one rule of [`two_entry_manifest`]. `Manifest::try_from` must refuse the
+    /// fields with the expected error.
     #[test]
-    fn entries_out_of_order_are_refused() {
-        let mut manifest = fields();
-        manifest.entries.swap(0, 1);
-
-        let error = refused(manifest.clone());
-
-        assert!(
-            matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 }),
-            "{error:?}"
-        );
-    }
-
-    #[test]
-    fn a_gap_is_refused() {
-        let mut manifest = fields();
-        manifest.entries = synthetic_entries(&[TreeSizes::default(); 3]);
-        manifest.entries.remove(1);
-
-        let error = refused(manifest.clone());
-
-        assert!(
-            matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 }),
-            "{error:?}"
-        );
-    }
-
-    #[test]
-    fn a_wrong_range_length_or_a_shrinking_tree_is_refused() {
-        let mut manifest = fields();
-        manifest.entries[1].end_height += 1;
-        let error = refused(manifest.clone());
-        assert!(matches!(error, ManifestError::RangeLength { index: 1 }), "{error:?}");
-
-        let mut manifest = fields();
-        manifest.entries[1].end_tree_sizes.orchard = 2;
-        let error = refused(manifest.clone());
-        assert!(matches!(error, ManifestError::TreeSizes { index: 1 }), "{error:?}");
-    }
-
-    #[test]
-    fn a_wrong_version_or_sealed_through_is_refused() {
-        let mut manifest = fields();
-        manifest.manifest_version = 2;
-        let error = refused(manifest.clone());
-        assert!(matches!(error, ManifestError::Version { version: 2 }), "{error:?}");
-
-        let mut manifest = fields();
-        manifest.sealed_through = 2_999;
-        let error = refused(manifest.clone());
-        assert!(
-            matches!(
-                error,
-                ManifestError::SealedThrough { sealed_through: 2_999, last_end: Some(1_999) }
+    fn fields_that_break_a_rule_are_refused() {
+        type IsExpected = fn(&ManifestError) -> bool;
+        type BreakRule = fn(&mut ManifestFields);
+        let cases: [(&str, BreakRule, IsExpected); 11] = [
+            (
+                "entries out of order",
+                |manifest| manifest.entries.swap(0, 1),
+                |error| {
+                    matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 })
+                },
             ),
-            "{error:?}"
-        );
+            (
+                "a gap",
+                |manifest| {
+                    manifest.entries = synthetic_entries(&[TreeSizes::default(); 3]);
+                    manifest.entries.remove(1);
+                },
+                |error| {
+                    matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 })
+                },
+            ),
+            (
+                "a wrong range length",
+                |manifest| manifest.entries[1].end_height += 1,
+                |error| matches!(error, ManifestError::RangeLength { index: 1 }),
+            ),
+            (
+                "a shrinking tree",
+                |manifest| manifest.entries[1].end_tree_sizes.orchard = 2,
+                |error| matches!(error, ManifestError::TreeSizes { index: 1 }),
+            ),
+            (
+                "a wrong version",
+                |manifest| manifest.manifest_version = 2,
+                |error| matches!(error, ManifestError::Version { version: 2 }),
+            ),
+            (
+                "sealed_through after the last entry",
+                |manifest| manifest.sealed_through = 2_999,
+                |error| {
+                    matches!(
+                        error,
+                        ManifestError::SealedThrough {
+                            sealed_through: 2_999,
+                            last_end: Some(1_999)
+                        }
+                    )
+                },
+            ),
+            (
+                "sealed_through with no entries",
+                |manifest| {
+                    manifest.sealed_through = 2_999;
+                    manifest.entries.clear();
+                },
+                |error| matches!(error, ManifestError::SealedThrough { last_end: None, .. }),
+            ),
+            (
+                "a pool that becomes inactive",
+                |manifest| manifest.entries[1].frontiers.orchard.clear(),
+                |error| matches!(error, ManifestError::PoolInactive { index: 1 }),
+            ),
+            (
+                "an epoch end before the epoch closes",
+                |manifest| manifest.entries[0].epoch_end = true,
+                |error| matches!(error, ManifestError::EpochEnd { index: 0, expected: false }),
+            ),
+            (
+                "no epoch end where the epoch closes",
+                |manifest| {
+                    manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+                    manifest.sealed_through = 11_999;
+                    manifest.entries[9].epoch_end = false;
+                },
+                |error| matches!(error, ManifestError::EpochEnd { index: 9, expected: true }),
+            ),
+            // The last entry of the manifest always closes an epoch.
+            (
+                "no epoch end at the last entry",
+                |manifest| {
+                    manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+                    manifest.sealed_through = 11_999;
+                    manifest.entries[11].epoch_end = false;
+                },
+                |error| matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
+            ),
+        ];
 
-        manifest.entries.clear();
-        let error = refused(manifest.clone());
-        assert!(matches!(error, ManifestError::SealedThrough { last_end: None, .. }), "{error:?}");
-    }
+        for (case, break_rule, expected) in cases {
+            let mut manifest = fields();
+            break_rule(&mut manifest);
 
-    #[test]
-    fn a_pool_that_becomes_inactive_is_refused() {
-        let mut manifest = fields();
-        manifest.entries[1].frontiers.orchard.clear();
+            let error = Manifest::try_from(manifest).unwrap_err();
 
-        let error = refused(manifest.clone());
-
-        assert!(matches!(error, ManifestError::PoolInactive { index: 1 }), "{error:?}");
-    }
-
-    #[test]
-    fn a_wrong_epoch_end_is_refused() {
-        let mut manifest = fields();
-        manifest.entries[0].epoch_end = true;
-        let error = refused(manifest.clone());
-        assert!(
-            matches!(error, ManifestError::EpochEnd { index: 0, expected: false }),
-            "{error:?}"
-        );
-
-        manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
-        manifest.sealed_through = 11_999;
-        manifest.entries[9].epoch_end = false;
-        let error = refused(manifest.clone());
-        assert!(matches!(error, ManifestError::EpochEnd { index: 9, expected: true }), "{error:?}");
-
-        // The last entry of the manifest always closes an epoch.
-        manifest.entries[9].epoch_end = true;
-        manifest.entries[11].epoch_end = false;
-        let error = refused(manifest.clone());
-        assert!(
-            matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
-            "{error:?}"
-        );
+            assert!(expected(&error), "{case}: {error:?}");
+        }
     }
 }

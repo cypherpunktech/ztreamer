@@ -629,31 +629,39 @@ mod tests {
         assert_eq!(fixture.entries[2].subtree_roots, fixture.completed);
     }
 
+    /// Each row forges the blocks of the second epoch. The epoch must refuse the forged blobs
+    /// at the expected check and height.
     #[test]
-    fn a_mutated_commitment_is_rejected() {
-        let result = verify_forged(|blocks| {
-            blocks[500].transactions[0].sapling_outputs[0].cmu = cmu(99);
-        });
+    fn forged_blocks_are_rejected() {
+        type Forge = fn(&mut [CompactBlockRecord]);
+        let cases: [(&str, Forge, Check, u32); 3] = [
+            (
+                "a mutated commitment",
+                |blocks| blocks[500].transactions[0].sapling_outputs[0].cmu = cmu(99),
+                Check::Frontier,
+                1_999,
+            ),
+            (
+                "a dropped output",
+                |blocks| {
+                    blocks[500].transactions[0].sapling_outputs.pop();
+                },
+                Check::Frontier,
+                1_999,
+            ),
+            (
+                "a commitment that is not a field element",
+                |blocks| blocks[500].transactions[0].sapling_outputs[0].cmu = [0xff; 32],
+                Check::Commitment,
+                1_500,
+            ),
+        ];
 
-        assert_rejected(result, Check::Frontier, 1_999);
-    }
+        for (case, forge, check, height) in cases {
+            let result = verify_forged(forge);
 
-    #[test]
-    fn a_dropped_output_is_rejected() {
-        let result = verify_forged(|blocks| {
-            blocks[500].transactions[0].sapling_outputs.pop();
-        });
-
-        assert_rejected(result, Check::Frontier, 1_999);
-    }
-
-    #[test]
-    fn a_commitment_that_is_not_a_field_element_is_rejected() {
-        let result = verify_forged(|blocks| {
-            blocks[500].transactions[0].sapling_outputs[0].cmu = [0xff; 32];
-        });
-
-        assert_rejected(result, Check::Commitment, 1_500);
+            assert_eq!(result, Err(Reject::Rejected { check, height }), "{case}");
+        }
     }
 
     #[test]

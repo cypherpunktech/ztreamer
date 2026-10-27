@@ -706,60 +706,70 @@ mod tests {
         assert_eq!(import.target.range_meta(10_000).unwrap(), None);
     }
 
+    /// Each row changes a byte in the blob files of some entries in every source. The import
+    /// must stop with a digest error, and keep the verified prefix before the bad blob.
     #[tokio::test]
-    async fn a_blob_with_a_wrong_digest_stops_the_import_at_its_epoch() {
-        let import = Import::new(RANGES).await;
-        import.flip_byte_in_blob_files(0, &import.snapshots[0].manifest.entries()[15..16]);
+    async fn a_blob_with_a_wrong_digest_from_every_source_stops_the_import() {
+        type Prefix = (Option<u32>, Option<u32>);
+        let cases: [(&str, usize, std::ops::Range<usize>, u32, Prefix); 2] = [
+            ("one source, blob 15", 1, 15..16, 15_000, (Some(9_999), Some(9_999))),
+            ("two sources, blob 0", 2, 0..1, 0, (None, None)),
+        ];
 
-        let error = import.run().await.unwrap_err();
+        for (case, sources, flipped, start_height, prefix) in cases {
+            let import = Import::with_sources(RANGES, sources).await;
+            for source in 0..sources {
+                let entries = &import.snapshots[source].manifest.entries()[flipped.clone()];
+                import.flip_byte_in_blob_files(source, entries);
+            }
 
-        let digest =
-            matches!(error, ImportError::Fetch(FetchError::Digest { start_height: 15_000, .. }));
-        assert!(digest, "{error:?}");
-        let state = import.target.state().unwrap();
-        assert_eq!((state.sealed_through(), state.verified_through()), (Some(9_999), Some(9_999)));
-    }
+            let error = import.run().await.unwrap_err();
 
-    #[tokio::test]
-    async fn a_wrong_blob_from_one_source_comes_again_from_the_other_source() {
-        let import = Import::with_sources(RANGES, 2).await;
-        import.flip_byte_in_blob_files(1, import.snapshots[1].manifest.entries());
-
-        let report = import.run().await.unwrap();
-
-        assert_eq!(report.ranges, 25);
-        import.assert_target_has_source_blobs();
-        // Source 0 sends each blob once: first, or after the wrong blob of source 1.
-        assert_eq!(import.blob_requests_to(0), 25);
-    }
-
-    #[tokio::test]
-    async fn a_blob_that_one_source_cannot_send_comes_from_the_other_source() {
-        let import = Import::with_sources(RANGES, 2).await;
-        for entry in &import.snapshots[1].manifest.entries()[..10] {
-            std::fs::remove_file(import.snapshots[1].range_path(entry)).unwrap();
+            let digest = matches!(
+                error,
+                ImportError::Fetch(FetchError::Digest { start_height: at, .. }) if at == start_height
+            );
+            assert!(digest, "{case}: {error:?}");
+            let state = import.target.state().unwrap();
+            assert_eq!((state.sealed_through(), state.verified_through()), prefix, "{case}");
         }
-
-        let report = import.run().await.unwrap();
-
-        assert_eq!(report.ranges, 25);
-        import.assert_target_has_source_blobs();
     }
 
+    /// Each row breaks the blobs of source 1 in a different way. The import must fetch them
+    /// again from source 0 and complete.
     #[tokio::test]
-    async fn a_wrong_blob_from_all_sources_stops_the_import() {
-        let import = Import::with_sources(RANGES, 2).await;
-        for source in 0..2 {
-            import
-                .flip_byte_in_blob_files(source, &import.snapshots[source].manifest.entries()[..1]);
+    async fn a_blob_that_one_source_cannot_give_comes_from_the_other_source() {
+        type BreakSource = fn(&Import);
+        let cases: [(&str, BreakSource, Option<usize>); 2] = [
+            // Source 0 sends each blob once: first, or after the wrong blob of source 1.
+            (
+                "a wrong blob",
+                |import| import.flip_byte_in_blob_files(1, import.snapshots[1].manifest.entries()),
+                Some(25),
+            ),
+            (
+                "a missing blob file",
+                |import| {
+                    for entry in &import.snapshots[1].manifest.entries()[..10] {
+                        std::fs::remove_file(import.snapshots[1].range_path(entry)).unwrap();
+                    }
+                },
+                None,
+            ),
+        ];
+
+        for (case, break_source_1, source_0_requests) in cases {
+            let import = Import::with_sources(RANGES, 2).await;
+            break_source_1(&import);
+
+            let report = import.run().await.unwrap();
+
+            assert_eq!(report.ranges, 25, "{case}");
+            import.assert_target_has_source_blobs();
+            if let Some(requests) = source_0_requests {
+                assert_eq!(import.blob_requests_to(0), requests, "{case}");
+            }
         }
-
-        let error = import.run().await.unwrap_err();
-
-        let digest =
-            matches!(error, ImportError::Fetch(FetchError::Digest { start_height: 0, .. }));
-        assert!(digest, "{error:?}");
-        assert_eq!(import.target.state().unwrap().sealed_through(), None);
     }
 
     #[tokio::test]
