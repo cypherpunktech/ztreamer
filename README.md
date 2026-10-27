@@ -54,7 +54,7 @@ Credentials:
 - `--remote-rpc-cookie FILE` gives the cookie file of the node.
 - Without these, a loopback URL uses the default zakura cookie file, if it exists. ztreamerd does not send that cookie to another host.
 
-This mode does not serve P2P.
+This mode does not serve P2P or JSON-RPC: no embedded node runs.
 
 ## Replica import
 
@@ -85,7 +85,11 @@ All `lightwallet-protocol` methods are implemented. `GetBlock` intentionally dif
 
 `GetTaddressBalanceStream` counts each address once and accepts up to 10,000 distinct addresses per request. An additional distinct address returns `ResourceExhausted`; repeated addresses do not count toward the limit.
 
-ztreamerd has no JSON-RPC server. It serves gRPC and P2P only. In the `--remote-rpc` mode, it is a JSON-RPC client of a zakura node.
+Ztreamer supports direct, in-process Zakura mode. It serves 24 of the 27 JSON-RPC requests provided by Zaino direct mode.
+
+`getblockdeltas`, `getspentinfo`, and `gettxoutsetinfo` are not yet implemented.
+
+The embedded node serves these requests on the zakura JSON-RPC listener. Set `[rpc] listen_addr` in the zakura configuration to start it.
 
 ## Historical indexing benchmark
 
