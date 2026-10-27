@@ -42,4 +42,4 @@ pub mod test_utils;
 pub use auth::{Auth, Secret};
 pub use client::{RetryPolicy, RpcClient, RpcConfig};
 pub use error::{RpcCode, RpcError, RpcErrorObject};
-pub use methods::{FirstBlockWithBody, Method, ZakuraClient};
+pub use methods::{Method, ZakuraClient};

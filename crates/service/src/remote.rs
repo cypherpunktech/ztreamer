@@ -17,7 +17,7 @@
 //! | `tip_height` | `getblockcount` |
 //! | `block` | `getblock <hash> 0` |
 //! | `transaction` | `getrawtransaction <txid> 1` |
-//! | `tree_state` | `z_gettreestate <hash>`, then `getblockchaininfo` when the block is not found |
+//! | `tree_state` | `z_gettreestate <hash>` |
 //! | `sapling_subtrees`, `orchard_subtrees`, `ironwood_subtrees` | `z_getsubtreesbyindex` |
 //! | `address_transaction_ids` | `getblockcount` when the start is above 0, then `getaddresstxids` |
 //! | `address_balance`, `address_utxos` | `getaddressbalance`, `getaddressutxos` |

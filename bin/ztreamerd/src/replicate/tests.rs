@@ -6,10 +6,7 @@ use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use tonic::transport::Server;
-use zakura_chain::{
-    block::{self, Block},
-    serialization::ZcashSerialize as _,
-};
+use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 use ztreamer_indexer::{
     codec::CompactBlockRecord,
     index::{RANGE_SIZE, SEAL_DEPTH, range_meta::VerifyState},
@@ -321,17 +318,8 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
     assert_eq!(error.to_string(), "import the sealed ranges");
     assert!(error.chain().any(|cause| cause.to_string().contains("signature")), "{error:?}");
 
-    chain.set_prune_height(Some(block::Height(15_000)));
-    let error = refusal(&snapshot, &url, SEED).await;
-    assert_eq!(
-        error.to_string(),
-        "the import needs block 0, but the remote zakura node keeps block bodies only from height \
-         15000: use a node that does not prune, or an index that is sealed through height \
-         14999 or above"
-    );
-
     // A node of the test chain gives the testnet index, and its genesis block is not the one
-    // of testnet. The genesis check comes before the prune check.
+    // of testnet.
     let other = node_with_chain_name("test", &chain).await;
     let error = refusal(&snapshot, &other.url().to_string(), SEED).await;
     let genesis = |cause: &(dyn std::error::Error + 'static)| {

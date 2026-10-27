@@ -93,23 +93,6 @@ const DEFAULT_METHOD_TIMEOUTS: [(Method, Duration); 7] = [
     (Method::GetAddressUtxos, Duration::from_secs(60)),
 ];
 
-/// The lowest height whose block body a node keeps, from its `getblockchaininfo` answer.
-///
-/// # Implementation guide
-///
-/// Only [`GetBlockchainInfoResponse`] implements it. A node that prunes keeps the bodies from
-/// its `pruneheight`. A node that does not prune keeps all bodies, from genesis.
-pub trait FirstBlockWithBody {
-    /// The lowest height whose block body the node keeps.
-    fn first_block_with_body(&self) -> block::Height;
-}
-
-impl FirstBlockWithBody for GetBlockchainInfoResponse {
-    fn first_block_with_body(&self) -> block::Height {
-        self.prune_height().unwrap_or(block::Height::MIN)
-    }
-}
-
 /// Typed calls to one zakura node, on an [`RpcClient`].
 ///
 /// ```no_run
@@ -269,21 +252,6 @@ mod tests {
             assert_eq!(rpc.timeout_for(method.name()), timeout, "{method}");
         }
         assert_eq!(rpc.timeout_for("getbestblockhash"), Duration::from_secs(15));
-    }
-
-    #[test]
-    fn first_block_with_body_is_the_prune_height_or_genesis() {
-        let mut info: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/vectors/getblockchaininfo.json")).unwrap();
-        let first = |info: &serde_json::Value| {
-            serde_json::from_value::<GetBlockchainInfoResponse>(info.clone())
-                .unwrap()
-                .first_block_with_body()
-        };
-        assert_eq!(first(&info), block::Height::MIN);
-        info["pruned"] = true.into();
-        info["pruneheight"] = 40.into();
-        assert_eq!(first(&info), block::Height(40));
     }
 
     #[test]

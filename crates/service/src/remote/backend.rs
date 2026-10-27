@@ -41,7 +41,7 @@ use ztreamer_indexer::{
     frontier::FromRpc,
     index::range_meta::{self, NodeBytes, SubtreeNode},
 };
-use ztreamer_remote::{FirstBlockWithBody as _, RpcError, ZakuraClient};
+use ztreamer_remote::{RpcError, ZakuraClient};
 
 use crate::backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
@@ -161,22 +161,6 @@ impl RemoteBackend {
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<Subtrees<P::Node>, BackendError> {
         P::parse_subtrees(self.node.z_get_subtrees_by_index(P::NAME, start, limit).await?, start)
-    }
-
-    /// The error for a `z_gettreestate` that did not find the block of `hash`.
-    ///
-    /// `z_gettreestate` of zakura reads the block body, also when the node keeps the trees. A
-    /// node that prunes thus has no tree state below its prune height. The error says so.
-    async fn no_tree_state(&self, hash: block::Hash, error: RpcError) -> BackendError {
-        match self.node.get_blockchain_info().await.map(|info| info.first_block_with_body()) {
-            Ok(first) if first > block::Height::MIN => BackendError::Unavailable(format!(
-                "remote zakura has no tree state for {hash}: the block is not in its best chain, \
-                 or it is below height {}, and the node prunes the block bodies below that \
-                 height. z_gettreestate reads the block body",
-                first.0
-            )),
-            _ => error.into(),
-        }
     }
 
     /// The `getrawtransaction` answer for `id` with verbose 1. `None` when the node does not
@@ -474,13 +458,7 @@ impl StateBackend for RemoteBackend {
         if let Some(trees) = cached {
             return Ok(trees);
         }
-        let response = match self.node.z_get_treestate(HashOrHeight::Hash(hash)).await {
-            Ok(response) => response,
-            Err(error) if error.is_block_not_found() => {
-                return Err(self.no_tree_state(hash, error).await);
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
         if response.hash() != hash {
             return Err(BackendError::Unexpected(format!(
                 "remote zakura sent the tree state of {} for {hash}",
@@ -865,28 +843,6 @@ mod tests {
             Treestate::default(),
         ))
         .unwrap()
-    }
-
-    #[tokio::test]
-    async fn tree_state_names_the_prune_height_of_a_pruned_node() {
-        let mock = MockNode::start(|_, seen| match seen.body["method"].as_str().unwrap() {
-            "getblockchaininfo" => {
-                let mut info = serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap();
-                info["pruned"] = json!(true);
-                info["pruneheight"] = json!(500);
-                Reply::Result(info)
-            }
-            "z_gettreestate" => {
-                Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "not in main chain" }
-            }
-            method => chain_reply(method, 1_000).unwrap(),
-        })
-        .await;
-        let error = backend(&mock).await.tree_state(block::Hash([1; 32])).await.unwrap_err();
-        assert!(
-            matches!(&error, BackendError::Unavailable(message) if message.contains("below height 500")),
-            "{error}"
-        );
     }
 
     #[tokio::test]

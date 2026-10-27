@@ -227,7 +227,6 @@ pub struct MockChain {
 struct ChainState {
     /// The hash and the serialized bytes of the block at each height, from genesis.
     blocks: Vec<(block::Hash, Vec<u8>)>,
-    prune_height: Option<block::Height>,
 }
 
 impl MockChain {
@@ -244,12 +243,6 @@ impl MockChain {
             .iter()
             .map(|block| (block.hash(), block.zcash_serialize_to_vec().unwrap()))
             .collect();
-    }
-
-    /// Sets the prune height that `getblockchaininfo` reports. `None` reports a node that does
-    /// not prune.
-    pub fn set_prune_height(&self, height: Option<block::Height>) {
-        self.state.lock().unwrap().prune_height = height;
     }
 
     /// The reply of zakura with this chain to `request`.
@@ -331,7 +324,7 @@ impl ChainState {
         .map(|(_, bytes)| bytes)
     }
 
-    /// The `getblockchaininfo` answer of a mainnet zakura, with the tip and the prune fields of
+    /// The `getblockchaininfo` answer of a mainnet zakura that does not prune, with the tip of
     /// this chain.
     fn blockchain_info(&self) -> Reply {
         let Some((hash, _)) = self.blocks.last() else {
@@ -344,10 +337,6 @@ impl ChainState {
         info["headers"] = json!(tip);
         info["estimatedheight"] = json!(tip);
         info["bestblockhash"] = json!(hash.to_string());
-        info["pruned"] = json!(self.prune_height.is_some());
-        if let Some(height) = self.prune_height {
-            info["pruneheight"] = json!(height.0);
-        }
         Reply::Result(info)
     }
 }

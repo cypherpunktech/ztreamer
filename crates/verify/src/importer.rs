@@ -452,8 +452,8 @@ mod tests {
 
     #[async_trait]
     impl Sampler for FakeSampler {
-        async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
-            Ok(Some(raw_block(height)))
+        async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError> {
+            Ok(raw_block(height))
         }
     }
 
