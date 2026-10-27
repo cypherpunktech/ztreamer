@@ -8042,7 +8042,6 @@ dependencies = [
  "clap",
  "criterion",
  "futures-util",
- "hdrhistogram",
  "hex",
  "lru",
  "metrics",

@@ -34,10 +34,6 @@ bench-grpc *args:
 bench-index *args:
     cargo bench --locked --bench index {{ args }}
 
-# JSON latency/throughput report; accepts --endpoint for an existing server.
-load *args:
-    bash scripts/benchmark-grpc.sh {{ args }}
-
 # RPC latency, range scaling, concurrency, and wallet download; CSV + JSON.
 bench-serving *args:
     bash scripts/benchmark-serving.sh {{ args }}

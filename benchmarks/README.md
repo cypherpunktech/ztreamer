@@ -28,8 +28,7 @@ Branch protection should require `Bench`; `Benchmark comparison` is optional.
 gRPC server. It measures RPC latency, range scaling, sustained concurrent
 serving, and sequential compact-block wallet sync. It writes data, not plots.
 It does not build or start the server, modify its index, or switch revisions.
-The existing `benchmark-grpc.sh` remains available for a quick single-range load
-test, including its local synthetic fixture.
+For a quick load test against the local synthetic fixture, use `just bench-grpc`.
 
 ## Compare two versions
 
