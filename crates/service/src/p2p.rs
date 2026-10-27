@@ -289,27 +289,19 @@ async fn send_bytes(send: &FramedSend, message: Message, payload: Vec<u8>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zakura_chain::{block, parameters::Network};
+    use zakura_chain::block;
     use zakura_network::zakura::framed_channel;
-    use zakura_state::Config;
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes},
-        index::{Index, IndexState},
+        index::IndexState,
     };
+
+    use crate::test_utils::EphemeralService;
 
     #[tokio::test]
     async fn forwards_streaming_compact_ranges() {
-        let directory = tempfile::tempdir().unwrap();
-        let index = Arc::new(
-            Index::open(directory.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
-                .unwrap(),
-        );
-        let (_state, read_state, _tip, _change) =
-            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                .await
-                .expect("ephemeral state initializes");
-        let compact = CompactService::new(index, IndexState::default(), "main", read_state);
-        compact
+        let ctx = EphemeralService::empty().await;
+        ctx.service
             .publish_head(
                 IndexState::default(),
                 vec![
@@ -321,7 +313,7 @@ mod tests {
         let service = Arc::new(P2pCompactService::pending());
         let registration = service.registration();
         assert_eq!(registration.provides[0].as_str(), SERVICE_ID);
-        assert!(service.install(compact).is_ok());
+        assert!(service.install(ctx.service).is_ok());
         let (send, mut recv) = framed_channel(3);
         let request = proto::BlockRange {
             start: Some(proto::BlockId { height: 0, hash: Vec::new() }),

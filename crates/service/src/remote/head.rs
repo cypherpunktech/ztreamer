@@ -87,24 +87,19 @@ impl CanonicalBlockSource for RemoteHeadSource {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::time::Duration;
 
     use serde_json::json;
     use tokio::sync::watch;
-    use zakura_chain::{block::Block, parameters::Network, serialization::ZcashSerialize as _};
-    use zakura_state::Config;
-    use ztreamer_indexer::{
-        index::{Index, IndexState},
-        pipeline::PipelineConfig,
-        test_utils::grow_chain,
-    };
+    use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
+    use ztreamer_indexer::{pipeline::PipelineConfig, test_utils::grow_chain};
     use ztreamer_remote::{
         RpcClient, RpcCode,
         test_utils::{MockChain, MockNode, Reply},
     };
 
     use super::*;
-    use crate::{CompactService, HeadFollowerConfig};
+    use crate::{CompactService, HeadFollowerConfig, test_utils::EphemeralService};
 
     /// A mock node that serves `chain`, and a source over it.
     async fn node(chain: &MockChain) -> (MockNode, RemoteHeadSource) {
@@ -116,17 +111,6 @@ mod tests {
         let source =
             RemoteHeadSource::new(ZakuraClient::new(RpcClient::new(mock.config()).unwrap()));
         (mock, source)
-    }
-
-    async fn service(dir: &tempfile::TempDir) -> (CompactService, Arc<Index>) {
-        let index = Arc::new(
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
-        );
-        let (_state_service, read_service, _tip, _change) =
-            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                .await
-                .expect("ephemeral state initializes");
-        (CompactService::new(index.clone(), IndexState::default(), "main", read_service), index)
     }
 
     fn chain(tip: u32) -> Vec<Block> {
@@ -202,27 +186,26 @@ mod tests {
 
     #[tokio::test]
     async fn sync_head_reaches_a_moving_tip_and_replaces_a_reorged_head() {
-        let dir = tempfile::tempdir().unwrap();
-        let (service, index) = service(&dir).await;
+        let ctx = EphemeralService::empty().await;
         let mut blocks = chain(20);
         let chain = MockChain::new(&blocks);
         let (_mock, mut source) = node(&chain).await;
 
-        service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-        assert_eq!(visible_tip(&service), Some(id(&blocks[20])));
+        ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+        assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[20])));
 
         grow_chain(&mut blocks, 25, 0);
         chain.set_blocks(&blocks);
-        let state = service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-        assert_eq!(visible_tip(&service), Some(id(&blocks[25])));
+        let state = ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+        assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[25])));
         assert_eq!(state.durable_tip().unwrap().height, 15);
 
         // A reorg above the durable tip replaces only the volatile head.
         let mut fork = blocks[..=21].to_vec();
         grow_chain(&mut fork, 26, 1);
         chain.set_blocks(&fork);
-        let next = service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-        let snapshot = service.snapshot();
+        let next = ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+        let snapshot = ctx.service.snapshot();
         assert_eq!(snapshot.visible_tip, Some(id(&fork[26])));
         assert_eq!(next.durable_tip().unwrap().height, 16);
         assert!(
@@ -232,19 +215,18 @@ mod tests {
                 .all(|record| record.hash == fork[record.height as usize].hash())
         );
         assert_ne!(fork[22].hash(), blocks[22].hash());
-        index.verify_continuity().unwrap();
+        ctx.index.verify_continuity().unwrap();
     }
 
     #[tokio::test]
     async fn follow_head_reaches_a_moving_tip() {
-        let dir = tempfile::tempdir().unwrap();
-        let (service, _index) = service(&dir).await;
+        let ctx = EphemeralService::empty().await;
         let mut blocks = chain(12);
         let chain = MockChain::new(&blocks);
         let (_mock, source) = node(&chain).await;
         let (shutdown, receiver) = watch::channel(false);
         let follower = tokio::spawn({
-            let service = service.clone();
+            let service = ctx.service.clone();
             async move {
                 service
                     .follow_head(
@@ -261,7 +243,7 @@ mod tests {
             }
         });
         let reaches = |tip: BlockId| {
-            let service = service.clone();
+            let service = ctx.service.clone();
             tokio::time::timeout(Duration::from_secs(5), async move {
                 while visible_tip(&service) != Some(tip) {
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -278,7 +260,7 @@ mod tests {
         grow_chain(&mut fork, 31, 1);
         chain.set_blocks(&fork);
         reaches(id(&fork[31])).await.unwrap();
-        assert!(service.readiness().tip);
+        assert!(ctx.service.readiness().tip);
 
         shutdown.send(true).unwrap();
         follower.await.unwrap().unwrap();
@@ -293,24 +275,23 @@ mod tests {
 
     #[tokio::test]
     async fn a_tip_change_costs_requests_for_the_new_blocks_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let (service, _index) = service(&dir).await;
+        let ctx = EphemeralService::empty().await;
         let mut blocks = chain(150);
         let chain = MockChain::new(&blocks);
         let (mock, mut source) = node(&chain).await;
-        service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+        ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
 
         for (tip, new) in [(151, 1), (154, 3)] {
             grow_chain(&mut blocks, tip, 0);
             chain.set_blocks(&blocks);
             let before = mock.seen().len();
-            service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+            ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
 
             // The poll sends one `getblockchaininfo` and three `getblockhash`: the anchor, the old
             // tip and the re-check of the new tip. It sends one `getblock` for each new block and
             // one `getblock` for the height above the new tip.
             assert_eq!(requests_since(&mock, before), (5 + new, new + 1));
-            assert_eq!(visible_tip(&service), Some(id(&blocks[tip as usize])));
+            assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[tip as usize])));
         }
     }
 }

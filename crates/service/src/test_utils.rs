@@ -14,7 +14,10 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Channel, Server};
 use zakura_chain::{block, parameters::Network};
 use zakura_state::Config;
-use ztreamer_indexer::index::Index;
+use ztreamer_indexer::{
+    codec::CompactBlockRecord,
+    index::{Index, IndexState},
+};
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
 
@@ -24,6 +27,53 @@ pub use ztreamer_indexer::test_utils as fixtures;
 pub type Client = CompactTxStreamerClient<Channel>;
 /// The error type returned by [`consume`].
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
+/// A [`CompactService`] over a temporary index and an ephemeral Zakura state.
+///
+/// A test keeps the whole value, for example as `ctx`, and reads its fields. It owns the index
+/// directory, so the directory stays until the test ends.
+#[derive(Debug)]
+pub struct EphemeralService {
+    pub service: CompactService,
+    pub index: Arc<Index>,
+    /// The durable index state that the service starts from.
+    pub state: IndexState,
+    /// The index directory. Keep it alive until the service has stopped.
+    pub dir: tempfile::TempDir,
+}
+
+impl EphemeralService {
+    /// Writes `records` into a new temporary index, seals the ranges through `seal_through`, and
+    /// builds the service over it. With no records, the index stays empty.
+    pub async fn with_records(records: &[CompactBlockRecord], seal_through: Option<u32>) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Arc::new(
+            Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
+        );
+        let state = match records {
+            [] => index.state().unwrap(),
+            records => fixtures::populate(&index, records, seal_through),
+        };
+        let (_state, read, _tip, _change) =
+            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
+                .await
+                .unwrap();
+        let service = CompactService::new(Arc::clone(&index), state, "main", read);
+        Self { service, index, state, dir }
+    }
+
+    /// A service over an empty index.
+    pub async fn empty() -> Self {
+        Self::with_records(&[], None).await
+    }
+
+    /// A service over empty blocks from 0 to `tip`, sealed through `tip`.
+    pub async fn sealed_through(tip: u32) -> Self {
+        let records: Vec<_> =
+            (0..=tip).map(|height| fixtures::record(height, Vec::new())).collect();
+        Self::with_records(&records, Some(tip)).await
+    }
+}
 
 /// A [`CompactService`] over a temporary index with 2,200 durable blocks and 10 volatile ones.
 #[derive(Debug)]
@@ -36,39 +86,37 @@ pub struct Fixture {
 impl Fixture {
     /// Builds the index and service.
     pub async fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let index = Arc::new(
-            Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
-        );
         let records = fixtures::mixed_records(2_210);
-        let state = fixtures::populate(&index, &records[..2_200], Some(1_999));
-        let (_state, read, _tip, _change) =
-            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                .await
-                .unwrap();
-        let service = CompactService::new(index, state, "main", read);
+        let EphemeralService { service, state, dir, .. } =
+            EphemeralService::with_records(&records[..2_200], Some(1_999)).await;
         service.publish_head(state, records[2_200..].to_vec()).unwrap();
         Self { service, _dir: dir }
     }
 }
 
-/// A [`Fixture`] served over gRPC on a local TCP port.
+/// A [`CompactService`] served over gRPC on a local TCP port.
 #[derive(Debug)]
 pub struct LocalServer {
     pub endpoint: String,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<Result<(), tonic::transport::Error>>,
-    _fixture: Fixture,
+    _fixture: Option<Fixture>,
 }
 
 impl LocalServer {
     /// Builds a [`Fixture`] and serves it on `127.0.0.1` at a free port.
     pub async fn start() -> Self {
         let fixture = Fixture::new().await;
+        let server = Self::serve(fixture.service.clone()).await;
+        Self { _fixture: Some(fixture), ..server }
+    }
+
+    /// Serves `service` on `127.0.0.1` at a free port. The caller keeps the index and the state of
+    /// `service` alive until [`stop`](Self::stop).
+    pub async fn serve(service: CompactService) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (shutdown, stopped) = oneshot::channel();
-        let service = fixture.service.clone();
         let task = tokio::spawn(async move {
             Server::builder()
                 .add_service(CompactTxStreamerServer::new(service))
@@ -77,7 +125,7 @@ impl LocalServer {
                 })
                 .await
         });
-        Self { endpoint, shutdown, task, _fixture: fixture }
+        Self { endpoint, shutdown, task, _fixture: None }
     }
 
     /// Shuts the server down and waits for it to stop.

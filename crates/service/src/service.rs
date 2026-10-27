@@ -414,30 +414,19 @@ pub(crate) fn index_status(error: IndexError) -> Status {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zakura_chain::{block, parameters::Network};
-    use zakura_state::Config;
+    use crate::test_utils::EphemeralService;
 
-    #[test]
-    fn ping_answers_only_when_enabled() {
-        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let dir = tempfile::tempdir().unwrap();
-            let index = Arc::new(
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
-            );
-            let (_state_service, read_service, _tip, _change) =
-                zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                    .await
-                    .expect("ephemeral state initializes");
-            let service = CompactService::new(index, IndexState::default(), "main", read_service);
+    #[tokio::test]
+    async fn ping_answers_only_when_enabled() {
+        let ctx = EphemeralService::empty().await;
 
-            assert_eq!(
-                service.clone().with_ping_enabled(false).ping().unwrap_err().code(),
-                tonic::Code::Unimplemented
-            );
-            assert_eq!(
-                service.with_ping_enabled(true).ping().unwrap(),
-                proto::PingResponse { entry: 1, exit: 0 }
-            );
-        });
+        assert_eq!(
+            ctx.service.clone().with_ping_enabled(false).ping().unwrap_err().code(),
+            tonic::Code::Unimplemented
+        );
+        assert_eq!(
+            ctx.service.with_ping_enabled(true).ping().unwrap(),
+            proto::PingResponse { entry: 1, exit: 0 }
+        );
     }
 }

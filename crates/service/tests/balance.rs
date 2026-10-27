@@ -2,9 +2,8 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use tokio::{net::TcpListener, sync::oneshot, task::JoinSet, time::timeout};
-use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
-use tonic::transport::Server;
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
 use tower::ServiceExt;
 use zakura_chain::{
     block, parameters::Network, serialization::ZcashDeserializeInto, transaction::Transaction,
@@ -13,11 +12,8 @@ use zakura_chain::{
 use zakura_state::{Config, Request};
 use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_GENESIS_BYTES};
 use ztreamer_indexer::index::{Index, IndexState};
-use ztreamer_protocol::{
-    proto::{self, compact_tx_streamer_client::CompactTxStreamerClient},
-    wire::compact_tx_streamer_server::CompactTxStreamerServer,
-};
-use ztreamer_service::CompactService;
+use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
+use ztreamer_service::{CompactService, test_utils::LocalServer};
 
 #[tokio::test]
 async fn streamed_balance_deduplicates_and_limits_addresses() {
@@ -68,23 +64,8 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         }
 
         let service = CompactService::new(index, IndexState::default(), "main", read);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let (shutdown, stopped) = oneshot::channel();
-        // JoinSet aborts the server if a failed assertion or timeout ends the test early.
-        let mut server = JoinSet::new();
-        server.spawn(async move {
-            let _state = state;
-            let _dir = dir;
-            Server::builder()
-                .add_service(CompactTxStreamerServer::new(service))
-                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
-                    let _ = stopped.await;
-                })
-                .await
-                .unwrap();
-        });
-        let mut client = CompactTxStreamerClient::connect(endpoint).await.unwrap();
+        let server = LocalServer::serve(service).await;
+        let mut client = CompactTxStreamerClient::connect(server.endpoint.clone()).await.unwrap();
 
         let a = funded.as_str();
         let b = unfunded.as_str();
@@ -173,8 +154,7 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
         assert_eq!(balance, expected_balance, "request after an address limit error");
 
         drop(client);
-        shutdown.send(()).unwrap();
-        server.join_next().await.unwrap().unwrap();
+        server.stop().await;
 
         // Collect all responses and stop the server before asserting the regression.
         for (case, streamed, unary) in observed {

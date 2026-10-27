@@ -149,12 +149,9 @@ impl CompactService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use zakura_chain::{block, parameters::Network};
-    use zakura_state::Config;
-    use ztreamer_indexer::{head::HeadError, index::Index, types::RawIndexBlock};
+    use ztreamer_indexer::{head::HeadError, types::RawIndexBlock};
 
-    use crate::service::test_utils::raw_block;
+    use crate::{service::test_utils::raw_block, test_utils::EphemeralService};
 
     struct HeadSource(Vec<RawIndexBlock>);
 
@@ -165,55 +162,37 @@ mod tests {
         }
     }
 
-    #[test]
-    fn follower_polls_until_shutdown() {
-        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(
-            async {
-                let dir = tempfile::tempdir().unwrap();
-                let index = Arc::new(
-                    Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
-                        .unwrap(),
-                );
-                let (_state_service, read_service, _tip, _change) = zakura_state::init(
-                    Config::ephemeral(),
-                    &Network::Mainnet,
-                    block::Height::MAX,
-                    0,
-                )
-                .await
-                .expect("ephemeral state initializes");
-                let service =
-                    CompactService::new(index, IndexState::default(), "main", read_service);
-                let (shutdown, receiver) = watch::channel(false);
-                let follower = {
-                    let service = service.clone();
-                    tokio::spawn(async move {
-                        service
-                            .follow_head(
-                                HeadSource((0..=12).map(raw_block).collect()),
-                                PipelineConfig::default(),
-                                HeadFollowerConfig {
-                                    poll_interval: Duration::from_millis(1),
-                                    attempt_timeout: Duration::from_millis(100),
-                                    freshness_timeout: Duration::from_millis(100),
-                                },
-                                receiver,
-                            )
-                            .await
-                    })
-                };
+    #[tokio::test]
+    async fn follower_polls_until_shutdown() {
+        let ctx = EphemeralService::empty().await;
+        let (shutdown, receiver) = watch::channel(false);
+        let follower = {
+            let service = ctx.service.clone();
+            tokio::spawn(async move {
+                service
+                    .follow_head(
+                        HeadSource((0..=12).map(raw_block).collect()),
+                        PipelineConfig::default(),
+                        HeadFollowerConfig {
+                            poll_interval: Duration::from_millis(1),
+                            attempt_timeout: Duration::from_millis(100),
+                            freshness_timeout: Duration::from_millis(100),
+                        },
+                        receiver,
+                    )
+                    .await
+            })
+        };
 
-                tokio::time::timeout(Duration::from_secs(1), async {
-                    while !service.readiness().tip {
-                        tokio::time::sleep(Duration::from_millis(1)).await;
-                    }
-                })
-                .await
-                .unwrap();
-                assert_eq!(service.snapshot().visible_tip.unwrap().height, 12);
-                shutdown.send(true).unwrap();
-                follower.await.unwrap().unwrap();
-            },
-        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !ctx.service.readiness().tip {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(ctx.service.snapshot().visible_tip.unwrap().height, 12);
+        shutdown.send(true).unwrap();
+        follower.await.unwrap().unwrap();
     }
 }

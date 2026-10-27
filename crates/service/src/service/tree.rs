@@ -128,35 +128,24 @@ impl CompactService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio_stream::StreamExt;
-    use zakura_chain::{block, parameters::Network};
-    use zakura_state::Config;
-    use ztreamer_indexer::index::Index;
 
-    use crate::service::test_utils::{hash, index_through, record};
+    use crate::{
+        service::test_utils::{hash, record},
+        test_utils::EphemeralService,
+    };
 
-    #[test]
-    fn subtree_stream_resolves_volatile_completion_blocks() {
-        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let dir = tempfile::tempdir().unwrap();
-            let index = Arc::new(
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
-            );
-            let state = index_through(&index, 1_005);
-            let (_state_service, read_service, _tip, _change) =
-                zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                    .await
-                    .expect("ephemeral state initializes");
-            let service = CompactService::new(index, state, "main", read_service);
-            service.publish_head(state, vec![record(1_006), record(1_007)]).unwrap();
+    #[tokio::test]
+    async fn subtree_stream_resolves_volatile_completion_blocks() {
+        let ctx = EphemeralService::sealed_through(1_005).await;
+        ctx.service.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
 
-            let mut stream = service.subtree_stream(vec![(vec![7; 32], 1_007)], service.snapshot());
-            let root = stream.next().await.unwrap().unwrap();
+        let mut stream =
+            ctx.service.subtree_stream(vec![(vec![7; 32], 1_007)], ctx.service.snapshot());
+        let root = stream.next().await.unwrap().unwrap();
 
-            assert_eq!(root.root_hash, vec![7; 32]);
-            assert_eq!(root.completing_block_hash, hash(1_007).0);
-            assert_eq!(root.completing_block_height, 1_007);
-        });
+        assert_eq!(root.root_hash, vec![7; 32]);
+        assert_eq!(root.completing_block_hash, hash(1_007).0);
+        assert_eq!(root.completing_block_height, 1_007);
     }
 }

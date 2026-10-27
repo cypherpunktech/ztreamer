@@ -420,25 +420,23 @@ mod tests {
         assert_eq!(Status::from(BackendError::Rejected("b".into())).message(), "b");
     }
 
-    #[test]
-    fn read_only_backend_has_no_mempool() {
-        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let (_state, read, _tip, _change) = zakura_state::init(
-                zakura_state::Config::ephemeral(),
-                &Network::Mainnet,
-                block::Height::MAX,
-                0,
-            )
-            .await
-            .expect("ephemeral state initializes");
-            let backend = InProcessBackend::new(read);
-            assert_eq!(backend.network(), Network::Mainnet);
-            assert_eq!(backend.tip_height().await.unwrap(), None);
-            let error = backend.mempool_transactions().await.unwrap_err();
-            assert_eq!(
-                error,
-                BackendError::Unavailable("embedded Zakura node handle is unavailable".into())
-            );
-        });
+    #[tokio::test]
+    async fn read_only_backend_has_no_mempool() {
+        let (_state, read, _tip, _change) = zakura_state::init(
+            zakura_state::Config::ephemeral(),
+            &Network::Mainnet,
+            block::Height::MAX,
+            0,
+        )
+        .await
+        .expect("ephemeral state initializes");
+        let backend = InProcessBackend::new(read);
+        assert_eq!(backend.network(), Network::Mainnet);
+        assert_eq!(backend.tip_height().await.unwrap(), None);
+        let error = backend.mempool_transactions().await.unwrap_err();
+        assert_eq!(
+            error,
+            BackendError::Unavailable("embedded Zakura node handle is unavailable".into())
+        );
     }
 }
