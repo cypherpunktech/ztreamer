@@ -3,8 +3,9 @@
 //! Each method calls the node through [`ZakuraClient`] and parses the answer into the
 //! `zakura_chain` type of the trait. A parse failure is [`BackendError::Unexpected`].
 //!
-//! Some answers do not change once the node gives them. The backend keeps them in a bounded
-//! cache, and a cache hit makes no call to the node.
+//! The backend keeps two caches, and a cache hit makes no call to the node. The tree state of a
+//! block hash does not change, and that cache holds at most 4,096 of them. The mempool cache
+//! holds the transactions of the latest `getrawmempool` answer, so the node mempool bounds it.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -913,6 +914,28 @@ mod tests {
             let error = backend.tree_state(hash).await.unwrap_err();
             assert!(matches!(error, BackendError::Unexpected(_)), "{error}");
         }
+    }
+
+    #[tokio::test]
+    async fn tree_state_cache_keeps_at_most_its_cap() {
+        let mock = mainnet(1, |_, _| Reply::Close).await;
+        let backend = backend(&mock).await;
+        let hash = |index: u32| {
+            let mut bytes = [0; 32];
+            bytes[..4].copy_from_slice(&index.to_le_bytes());
+            block::Hash(bytes)
+        };
+        let cap = TREE_CACHE_ENTRIES.get() as u32;
+        let mut cache = backend.lock_tree_states();
+        for index in 0..cap {
+            cache.put(hash(index), TreeState::default());
+        }
+        // A hit makes hash 0 the most recent entry, so the next insert drops hash 1.
+        assert!(cache.get(&hash(0)).is_some());
+        cache.put(hash(cap), TreeState::default());
+        assert_eq!(cache.len(), cap as usize);
+        assert!(cache.contains(&hash(0)) && cache.contains(&hash(cap)));
+        assert!(!cache.contains(&hash(1)));
     }
 
     const ADDRESS: &str = "t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak";
