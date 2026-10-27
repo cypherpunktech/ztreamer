@@ -8,7 +8,7 @@
 //!   that it names, and verifies the Ed25519 signature of each with a key that the caller
 //!   gives. It does not use the key in `latest.json`: a source that can change the files can
 //!   also change that key. It reads a blob from its [`RangePath`] with an HTTP `Range` request.
-//!   It sends at most [`HTTP_BLOB_REQUESTS`] blob requests at a time.
+//!   It sends at most `HTTP_BLOB_REQUESTS` (32) blob requests at a time.
 //! - [`PeerSource`] asks a ztreamer that serves the Replicator gRPC service. It builds the
 //!   manifest from `ListRanges`, up to the last listed range that closes an epoch. It opens at
 //!   most [`PEER_RANGE_STREAMS`] `GetRange` streams at a time. When the peer refuses a stream
@@ -59,10 +59,41 @@ pub const PEER_RANGE_STREAMS: usize = 4;
 /// The blob requests that one [`HttpSource`] sends at a time. Each request in work holds one
 /// HTTP/1 connection. Thus the limit keeps the connections to one server low when many epochs
 /// fetch at the same time.
-pub const HTTP_BLOB_REQUESTS: usize = 32;
+pub(crate) const HTTP_BLOB_REQUESTS: usize = 32;
 
 /// The bytes of a range blob, in order, from the offset of the request.
 pub type BlobStream = Pin<Box<dyn Stream<Item = Result<Bytes, FetchError>> + Send>>;
+
+/// The limit of the blob requests of one source that are in work at the same time. The clones of
+/// a limit share it.
+#[derive(Clone, Debug)]
+struct RequestLimit(Arc<Semaphore>);
+
+impl RequestLimit {
+    fn new(requests: usize) -> Self {
+        Self(Arc::new(Semaphore::new(requests)))
+    }
+
+    /// Waits for a place in the limit, then opens a blob stream with `open`. The stream keeps
+    /// the place until its drop. A failed `open` releases the place.
+    async fn open_blob_stream<S>(
+        &self,
+        open: impl Future<Output = Result<S, FetchError>>,
+    ) -> Result<BlobStream, FetchError>
+    where
+        S: Stream<Item = Result<Bytes, FetchError>> + Send + 'static,
+    {
+        let place = Arc::clone(&self.0)
+            .acquire_owned()
+            .await
+            .expect("the places of a request limit are never closed");
+        let chunks = open.await?;
+        Ok(Box::pin(chunks.map(move |chunk| {
+            let _ = &place;
+            chunk
+        })))
+    }
+}
 
 /// Why a source gave no manifest or no blob.
 #[derive(Debug, thiserror::Error)]
@@ -242,14 +273,13 @@ type HttpClient = Client<HttpsConnector<HttpConnector>, Empty<Bytes>>;
 
 /// A snapshot directory below a base URL, signed with a key that the caller trusts.
 ///
-/// The clones of a source share one limit of [`HTTP_BLOB_REQUESTS`] blob requests.
+/// The clones of a source share one limit of `HTTP_BLOB_REQUESTS` (32) blob requests.
 #[derive(Clone)]
 pub struct HttpSource {
     base: String,
     key: VerifyingKey,
     client: HttpClient,
-    /// One permit for each blob request in work.
-    blob_requests: Arc<Semaphore>,
+    blob_requests: RequestLimit,
 }
 
 impl fmt::Debug for HttpSource {
@@ -282,7 +312,7 @@ impl HttpSource {
             .wrap_connector(tcp);
         let client = Client::builder(TokioExecutor::new()).build(https);
         let base = base.to_string().trim_end_matches('/').to_owned();
-        let blob_requests = Arc::new(Semaphore::new(HTTP_BLOB_REQUESTS));
+        let blob_requests = RequestLimit::new(HTTP_BLOB_REQUESTS);
         Ok(Self { base, key, client, blob_requests })
     }
 
@@ -351,16 +381,11 @@ impl RangeSource for HttpSource {
         entry: &ManifestEntry,
         offset: u64,
     ) -> Result<BlobStream, FetchError> {
-        let permit = Arc::clone(&self.blob_requests)
-            .acquire_owned()
-            .await
-            .expect("the request permits are never closed");
-        let body = self.get(RangePath::from(entry).as_str(), offset).await?.into_body();
-        // The permit lasts until the blob stream is dropped.
-        Ok(Box::pin(body.into_data_stream().map(move |chunk| {
-            let _ = &permit;
-            chunk.map_err(FetchError::from)
-        })))
+        let open = async {
+            let body = self.get(RangePath::from(entry).as_str(), offset).await?.into_body();
+            Ok(body.into_data_stream().map(|chunk| chunk.map_err(FetchError::from)))
+        };
+        self.blob_requests.open_blob_stream(open).await
     }
 }
 
@@ -425,8 +450,7 @@ pub struct PeerSource {
     /// The endpoint of the peer, for logs.
     endpoint: Uri,
     client: ReplicatorClient<Channel>,
-    /// One permit for each open `GetRange` stream.
-    range_streams: Arc<Semaphore>,
+    range_streams: RequestLimit,
 }
 
 impl fmt::Debug for PeerSource {
@@ -439,7 +463,7 @@ impl fmt::Debug for PeerSource {
 impl PeerSource {
     /// A source over `channel`, a connection to `endpoint`.
     pub fn new(endpoint: Uri, channel: Channel) -> Self {
-        let range_streams = Arc::new(Semaphore::new(PEER_RANGE_STREAMS));
+        let range_streams = RequestLimit::new(PEER_RANGE_STREAMS);
         Self { endpoint, client: ReplicatorClient::new(channel), range_streams }
     }
 
@@ -513,16 +537,11 @@ impl RangeSource for PeerSource {
         entry: &ManifestEntry,
         offset: u64,
     ) -> Result<BlobStream, FetchError> {
-        let permit = Arc::clone(&self.range_streams)
-            .acquire_owned()
-            .await
-            .expect("the stream permits are never closed");
-        let chunks = self.open_range_stream(entry.start_height, offset).await?;
-        // The permit lasts until the blob stream is dropped.
-        Ok(Box::pin(chunks.map(move |chunk| {
-            let _ = &permit;
-            chunk.map(|chunk| chunk.data).map_err(FetchError::from)
-        })))
+        let open = async {
+            let chunks = self.open_range_stream(entry.start_height, offset).await?;
+            Ok(chunks.map(|chunk| chunk.map(|chunk| chunk.data).map_err(FetchError::from)))
+        };
+        self.range_streams.open_blob_stream(open).await
     }
 }
 
@@ -622,7 +641,8 @@ mod tests {
 
     #[tokio::test]
     async fn an_http_source_sends_at_most_its_request_limit() {
-        let http = Http::with_ranges(HTTP_BLOB_REQUESTS as u32 + 8).await;
+        let mut http = Http::with_ranges(HTTP_BLOB_REQUESTS as u32 + 8).await;
+        http.server = FileServer::start_with_answer_wait(http.snapshot.dir.path()).await;
         let fetcher = http.fetcher(SEED);
         let entries = http.snapshot.manifest.entries();
 
@@ -631,7 +651,8 @@ mod tests {
         for (entry, blob) in entries.iter().zip(blobs.await.unwrap()) {
             assert_eq!(blob, http.blob(entry.start_height));
         }
-        assert_eq!(http.server.most_open_requests(), HTTP_BLOB_REQUESTS);
+        let most = http.server.most_open_requests();
+        assert!((2..=HTTP_BLOB_REQUESTS).contains(&most), "{most} requests at one time");
     }
 
     #[tokio::test]

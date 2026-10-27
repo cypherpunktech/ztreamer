@@ -208,8 +208,7 @@ impl Snapshot {
 type Requests = Vec<(String, Option<String>)>;
 
 /// An HTTP/1 server for the files below a directory. It answers a `Range: bytes=<offset>-`
-/// request with 206 and the bytes from the offset. It waits `Self::ANSWER_WAIT` before each
-/// answer, thus the requests of concurrent fetches overlap.
+/// request with 206 and the bytes from the offset.
 #[derive(Debug)]
 pub struct FileServer {
     /// The base URL of the directory.
@@ -224,6 +223,8 @@ struct Served {
     cut: Mutex<Option<String>>,
     requests: Mutex<Requests>,
     open_requests: Arc<OpenCounts>,
+    /// The wait before each answer.
+    answer_wait: Duration,
 }
 
 type Body = BoxBody<Bytes, io::Error>;
@@ -233,6 +234,17 @@ impl FileServer {
 
     /// Serves the files below `root` on a free local port.
     pub async fn start(root: &Path) -> Self {
+        Self::start_with_wait(root, Duration::ZERO).await
+    }
+
+    /// Serves the files below `root` on a free local port, and waits `Self::ANSWER_WAIT` before
+    /// each answer. Thus the requests of concurrent fetches overlap, and
+    /// [`Self::most_open_requests`] counts them.
+    pub async fn start_with_answer_wait(root: &Path) -> Self {
+        Self::start_with_wait(root, Self::ANSWER_WAIT).await
+    }
+
+    async fn start_with_wait(root: &Path, answer_wait: Duration) -> Self {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap()).parse().unwrap();
         let state = Arc::new(Served {
@@ -240,6 +252,7 @@ impl FileServer {
             cut: Mutex::default(),
             requests: Mutex::default(),
             open_requests: Arc::default(),
+            answer_wait,
         });
         let served = Arc::clone(&state);
         tokio::spawn(async move {
@@ -274,7 +287,7 @@ impl Served {
         let range = request.headers().get(RANGE).map(|value| value.to_str().unwrap().to_owned());
         self.requests.lock().unwrap().push((path.clone(), range.clone()));
         let _open = OpenCounts::open(&self.open_requests);
-        tokio::time::sleep(FileServer::ANSWER_WAIT).await;
+        tokio::time::sleep(self.answer_wait).await;
         let Ok(bytes) = tokio::fs::read(self.root.join(&path)).await else {
             let empty = Full::default().map_err(io::Error::other).boxed();
             return Ok(Self::response(StatusCode::NOT_FOUND, empty));

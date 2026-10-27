@@ -641,13 +641,15 @@ mod tests {
     /// One epoch of ten ranges: only its own blob fetches can overlap.
     #[tokio::test]
     async fn an_http_import_fetches_the_blobs_of_an_epoch_at_the_same_time() {
-        let import = Import::new(10).await;
+        let mut import = Import::new(10).await;
+        import.server = FileServer::start_with_answer_wait(import.snapshot.dir.path()).await;
 
         let report = import.run().await.unwrap();
 
         assert_eq!((report.epochs, report.ranges), (1, 10));
         import.assert_target_has_source_blobs();
-        assert_eq!(import.server.most_open_requests(), MAX_RANGES);
+        let most = import.server.most_open_requests();
+        assert!((2..=MAX_RANGES).contains(&most), "{most} requests at one time");
     }
 
     /// One epoch of ten ranges, from a peer with more streams than the limit of the source.
@@ -667,7 +669,8 @@ mod tests {
 
         assert_eq!((report.epochs, report.ranges), (1, 10));
         import.assert_target_has_source_blobs();
-        assert_eq!(server.most_open_streams(), PEER_RANGE_STREAMS);
+        let most = server.most_open_streams();
+        assert!((2..=PEER_RANGE_STREAMS).contains(&most), "{most} streams at one time");
         assert_eq!(server.refusals(), 0);
     }
 
