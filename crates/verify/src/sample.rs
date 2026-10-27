@@ -5,14 +5,8 @@
 //! commits to, for example the ciphertexts. [`Epoch::sample`] picks some heights of each range,
 //! asks the node for the full block at each height, parses it with the parser of the indexer, and
 //! compares the record byte for byte with the record in the blob.
-//!
-//! A pruned node has no block bodies below its prune height. The sampler gives no block at these
-//! heights, and [`Epoch::sample`] skips them.
 
-use std::{
-    panic,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use std::panic;
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
@@ -21,7 +15,7 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block, types::RawIndexBlock,
 };
-use ztreamer_remote::{FirstBlockWithBody as _, ZakuraClient};
+use ztreamer_remote::ZakuraClient;
 
 use crate::{
     attest::{EpochError, NodeError},
@@ -33,12 +27,12 @@ use crate::{
 ///
 /// # Implementation
 ///
-/// Give the best-chain block at a height. Return `None` when the source does not store the body
-/// of the block, and an error when a call fails. [`Epoch::sample`] skips a height with no block.
+/// Give the best-chain block at a height, and an error when a call fails or the source has no
+/// block at the height.
 #[async_trait]
 pub trait Sampler: Send + Sync {
-    /// The full block at `height`, or `None` when the source does not store its body.
-    async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError>;
+    /// The full block at `height`.
+    async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError>;
 }
 
 /// How [`Epoch::sample`] picks the heights to compare.
@@ -119,9 +113,7 @@ impl Epoch<'_> {
                 let record =
                     decoder.record(offset as usize).map_err(|_| Check::Decode.at(height))?;
                 let node = |source| EpochError::Node { height, source };
-                let Some(block) = sampler.full_block(height).await.map_err(node)? else {
-                    continue;
-                };
+                let block = sampler.full_block(height).await.map_err(node)?;
                 let same = tokio::task::spawn_blocking(move || -> Result<bool, NodeError> {
                     // `Epoch::verify` checked that each record adds its own commitments. Thus
                     // the tree sizes before the block are the end sizes minus the additions.
@@ -155,7 +147,7 @@ impl Epoch<'_> {
 ///
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
-/// let sampler = JsonRpcSampler::connect(ZakuraClient::new(RpcClient::new(config)?)).await?;
+/// let sampler = JsonRpcSampler::new(ZakuraClient::new(RpcClient::new(config)?));
 /// let block = sampler.full_block(3_524_999).await?;
 /// # let _ = block;
 /// # Ok(())
@@ -164,60 +156,27 @@ impl Epoch<'_> {
 #[derive(Debug)]
 pub struct JsonRpcSampler {
     node: ZakuraClient,
-    prune_height: AtomicU32,
 }
 
 impl JsonRpcSampler {
-    /// Reads the prune height of the node with `getblockchaininfo`. A node that does not prune
-    /// has the prune height 0.
-    ///
-    /// A pruning node raises its prune height while it runs. When the node has no block at or
-    /// above the known prune height, [`Sampler::full_block`] reads the prune height again.
-    pub async fn connect(node: ZakuraClient) -> Result<Self, NodeError> {
-        let sampler = Self { node, prune_height: AtomicU32::new(0) };
-        sampler.refresh_prune_height().await?;
-        Ok(sampler)
-    }
-
-    /// Reads the prune height of the node, keeps it if it is higher, and returns it.
-    async fn refresh_prune_height(&self) -> Result<u32, NodeError> {
-        let height = self.node.get_blockchain_info().await?.first_block_with_body().0;
-        Ok(self.prune_height.fetch_max(height, Ordering::Relaxed).max(height))
-    }
-
-    /// The last read prune height of the node.
-    fn prune_height(&self) -> u32 {
-        self.prune_height.load(Ordering::Relaxed)
+    /// The sampler over `node`.
+    pub const fn new(node: ZakuraClient) -> Self {
+        Self { node }
     }
 }
 
 #[async_trait]
 impl Sampler for JsonRpcSampler {
     /// The block at `height`. Deserializes it on the blocking thread pool of the runtime.
-    async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
-        if height < self.prune_height() {
-            return Ok(None);
-        }
-        let bytes = match self.node.get_block_raw(HashOrHeight::Height(block::Height(height))).await
-        {
-            Ok(bytes) => bytes.0,
-            // The node pruned the block after the last read of its prune height.
-            Err(error) if error.is_block_not_found() => {
-                return if height < self.refresh_prune_height().await? {
-                    Ok(None)
-                } else {
-                    Err(error.into())
-                };
-            }
-            Err(error) => return Err(error.into()),
-        };
+    async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError> {
+        let bytes = self.node.get_block_raw(HashOrHeight::Height(block::Height(height))).await?.0;
         let block = tokio::task::spawn_blocking(move || RawIndexBlock::from_bytes(bytes))
             .await
             .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))?;
         if block.height.0 != height {
             return Err(NodeError::Height { expected: height, actual: block.height.0 });
         }
-        Ok(Some(block))
+        Ok(block)
     }
 }
 
@@ -226,7 +185,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use serde_json::json;
-    use zakura_rpc::client::GetBlockchainInfoResponse;
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},
@@ -234,7 +192,7 @@ mod tests {
         test_utils::{hash, raw_block},
     };
     use ztreamer_remote::{
-        RpcClient, RpcCode,
+        RpcClient,
         test_utils::{MockNode, Reply},
     };
 
@@ -244,17 +202,15 @@ mod tests {
     /// The height of the one block with shielded data.
     const SHIELDED: u32 = 500;
 
-    /// Full blocks from a table. A call below the prune height gives no block, as a pruned node
-    /// does.
+    /// Full blocks from a table.
     struct FakeSampler {
         blocks: BTreeMap<u32, RawIndexBlock>,
-        prune_height: u32,
     }
 
     #[async_trait]
     impl Sampler for FakeSampler {
-        async fn full_block(&self, height: u32) -> Result<Option<RawIndexBlock>, NodeError> {
-            Ok(self.blocks.get(&height).filter(|_| height >= self.prune_height).cloned())
+        async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError> {
+            Ok(self.blocks[&height].clone())
         }
     }
 
@@ -293,13 +249,12 @@ mod tests {
     /// Samples the range of `records` against [`blocks`].
     async fn sample(
         records: &[CompactBlockRecord],
-        prune_height: u32,
         per_range: usize,
         seed: u64,
     ) -> Result<Vec<u32>, EpochError> {
         let blob = encode_range(records).unwrap();
         let entries = [ManifestEntry::from_records_and_blob(records, &blob)];
-        let sampler = FakeSampler { blocks: blocks(), prune_height };
+        let sampler = FakeSampler { blocks: blocks() };
         let plan = SamplePlan { per_range, seed };
         Epochs::new(&entries).next().unwrap().sample(&[blob], &sampler, plan).await
     }
@@ -308,14 +263,14 @@ mod tests {
     async fn matching_records_return_the_sampled_heights() {
         let records = records();
 
-        let heights = sample(&records, 0, 5, 7).await.unwrap();
+        let heights = sample(&records, 5, 7).await.unwrap();
 
         assert_eq!(heights.len(), 5);
         assert!(heights.windows(2).all(|pair| pair[0] < pair[1]), "{heights:?}");
         assert!(heights.iter().all(|&height| height < RANGE_SIZE), "{heights:?}");
-        assert_eq!(sample(&records, 0, 5, 7).await.unwrap(), heights);
-        assert_ne!(sample(&records, 0, 5, 8).await.unwrap(), heights);
-        let all = sample(&records, 0, 2 * RANGE_SIZE as usize, 7).await.unwrap();
+        assert_eq!(sample(&records, 5, 7).await.unwrap(), heights);
+        assert_ne!(sample(&records, 5, 8).await.unwrap(), heights);
+        let all = sample(&records, 2 * RANGE_SIZE as usize, 7).await.unwrap();
         assert_eq!(all, (0..RANGE_SIZE).collect::<Vec<_>>());
     }
 
@@ -326,7 +281,7 @@ mod tests {
         let output = transactions.iter_mut().flat_map(|tx| &mut tx.sapling_outputs).next().unwrap();
         output.ciphertext[0] ^= 1;
 
-        let result = sample(&records, 0, RANGE_SIZE as usize, 7).await;
+        let result = sample(&records, RANGE_SIZE as usize, 7).await;
 
         assert!(
             matches!(
@@ -341,18 +296,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn heights_with_no_block_are_skipped() {
-        let heights = sample(&records(), 600, RANGE_SIZE as usize, 7).await.unwrap();
-
-        assert_eq!(heights, (600..RANGE_SIZE).collect::<Vec<_>>());
-    }
-
-    #[tokio::test]
     async fn a_missing_blob_is_a_blob_count_reject() {
         let records = records();
         let entries =
             [ManifestEntry::from_records_and_blob(&records, &encode_range(&records).unwrap())];
-        let sampler = FakeSampler { blocks: blocks(), prune_height: 0 };
+        let sampler = FakeSampler { blocks: blocks() };
         let plan = SamplePlan { per_range: 5, seed: 7 };
 
         let result =
@@ -365,21 +313,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn json_rpc_sampler_reads_the_prune_height_and_the_block() {
-        let mut info = serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap();
-        info["pruneheight"] = json!(949_000);
+    async fn json_rpc_sampler_reads_the_block() {
         let node = MockNode::start(move |_, seen| match seen.body["method"].as_str().unwrap() {
-            "getblockchaininfo" => Reply::Result(info.clone()),
             "getblock" => Reply::Result(json!(hex::encode(&*BLOCK_MAINNET_949496_BYTES))),
             method => panic!("unexpected method {method}"),
         })
         .await;
         let client = ZakuraClient::new(RpcClient::new(node.config()).unwrap());
 
-        let sampler = JsonRpcSampler::connect(client).await.unwrap();
-        assert_eq!(sampler.prune_height(), 949_000);
-        assert!(sampler.full_block(948_999).await.unwrap().is_none());
-        let block = sampler.full_block(949_496).await.unwrap().unwrap();
+        let sampler = JsonRpcSampler::new(client);
+        let block = sampler.full_block(949_496).await.unwrap();
         let error = sampler.full_block(949_497).await.unwrap_err();
 
         assert_eq!(block.height, block::Height(949_496));
@@ -389,32 +332,6 @@ mod tests {
             matches!(error, NodeError::Height { expected: 949_497, actual: 949_496 }),
             "{error:?}"
         );
-        assert_eq!(node.seen().len(), 3);
-    }
-
-    #[tokio::test]
-    async fn json_rpc_sampler_reads_the_prune_height_again_for_a_pruned_block() {
-        // The node prunes up to 950,000 after the first `getblockchaininfo`, and has no block.
-        let info = |prune_height| {
-            let mut info = serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap();
-            info["pruneheight"] = json!(prune_height);
-            info
-        };
-        let node = MockNode::start(move |nth, seen| match seen.body["method"].as_str().unwrap() {
-            "getblockchaininfo" => Reply::Result(info(if nth == 0 { 949_000 } else { 950_000 })),
-            "getblock" => Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "not found" },
-            method => panic!("unexpected method {method}"),
-        })
-        .await;
-        let client = ZakuraClient::new(RpcClient::new(node.config()).unwrap());
-        let sampler = JsonRpcSampler::connect(client).await.unwrap();
-
-        assert!(sampler.full_block(949_500).await.unwrap().is_none());
-        assert_eq!(sampler.prune_height(), 950_000);
-        // A missing block above the new prune height stays an error.
-        let error = sampler.full_block(950_001).await.unwrap_err();
-
-        assert!(matches!(&error, NodeError::Rpc(error) if error.is_block_not_found()), "{error:?}");
-        assert_eq!(node.seen().len(), 5);
+        assert_eq!(node.seen().len(), 2);
     }
 }

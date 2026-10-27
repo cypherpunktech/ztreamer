@@ -32,12 +32,6 @@ fn chain(tip: u32) -> Vec<Block> {
     chain
 }
 
-/// A mock node that serves `chain`.
-async fn serve(chain: &MockChain) -> MockNode {
-    let chain = chain.clone();
-    MockNode::start(move |_, request| chain.reply(request)).await
-}
-
 /// The flags of a daemon on the node at `url` with the index in `dir` and the import of
 /// [`NO_SNAPSHOT`], then `extra`.
 fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> DaemonArgs {
@@ -173,27 +167,27 @@ async fn refuses_a_node_with_another_genesis_block() {
     assert!(read_no_block(&mock));
 }
 
-#[tokio::test]
-async fn refuses_an_index_tip_below_the_prune_height() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refuses_a_node_that_prunes() {
     let dir = tempfile::tempdir().unwrap();
-    let blocks = chain(70);
-    let chain = MockChain::new(&blocks);
-    chain.set_prune_height(Some(Height(50)));
-    let mock = serve(&chain).await;
-    let node = node(&cli(&dir, &mock.url().to_string(), &[]));
-    let info = node.client.get_blockchain_info().await.unwrap();
-    let tip = |height: u32| {
-        let hash = blocks[usize::try_from(height).unwrap()].hash();
-        IndexTip(Some(BlockId::new(height, hash)))
-    };
+    let chain = MockChain::new(&chain(10));
+    let mock = MockNode::start(move |_, request| match chain.reply(request) {
+        Reply::Result(mut info) if request.body["method"] == "getblockchaininfo" => {
+            info["pruned"] = json!(true);
+            info["pruneheight"] = json!(5);
+            Reply::Result(info)
+        }
+        reply => reply,
+    })
+    .await;
 
-    assert_eq!(
-        tip(20).served_by(&info).unwrap_err().to_string(),
-        "the index needs block 21, but the remote zakura node keeps block bodies only from height \
-         50: use a node that keeps these blocks, or an index with a tip at or above 49"
-    );
-    assert!(IndexTip(None).served_by(&info).is_err());
-    assert!(tip(49).served_by(&info).unwrap());
+    let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
+
+    let expected =
+        "remote zakura prunes the block bodies below height 5: use a node that does not prune";
+    assert!(error.chain().any(|cause| cause.to_string() == expected), "{error:?}");
+    assert!(read_no_block(&mock));
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "no index is made");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

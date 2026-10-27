@@ -5,7 +5,6 @@
 //! Before it fetches a range, the import refuses:
 //!
 //! - a node that runs another genesis block than the network of its chain;
-//! - a node that prunes the next block that the import needs;
 //! - in [`Importer::run`], a manifest whose signature does not verify with [`SNAPSHOT_PUBKEY`],
 //!   and a manifest for another network or genesis block than the index.
 
@@ -13,15 +12,14 @@ use std::{fmt, ops::ControlFlow, str::FromStr, sync::Arc};
 
 use clap::Args;
 use ed25519_dalek::VerifyingKey;
-use eyre::{Result, WrapErr, ensure, eyre};
+use eyre::{Result, WrapErr, eyre};
 use http::Uri;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use zakura_chain::{block::Height, parameters::Network};
-use zakura_rpc::client::GetBlockchainInfoResponse;
+use zakura_chain::parameters::Network;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
-use ztreamer_remote::{FirstBlockWithBody as _, ZakuraClient};
+use ztreamer_remote::ZakuraClient;
 use ztreamer_service::RemoteBackend;
 use ztreamer_verify::{
     attest::JsonRpcAttestor,
@@ -119,8 +117,7 @@ pub(crate) struct Replica {
 
 impl Replica {
     /// Imports the epochs of the reference manifest above the sealed tip of `index`, checked
-    /// against the node of `client`. `info` is the `getblockchaininfo` answer of the node, and
-    /// `network` the network of its chain. Breaks on shutdown.
+    /// against the node of `client`. `network` is the network of its chain. Breaks on shutdown.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
     /// reference manifest needs no import. Neither does an index whose sealed tip is not the end
@@ -130,7 +127,6 @@ impl Replica {
     pub(crate) async fn import(
         &self,
         client: &ZakuraClient,
-        info: &GetBlockchainInfoResponse,
         network: &Network,
         index: &Arc<Index>,
         shutdown: &CancellationToken,
@@ -146,19 +142,6 @@ impl Replica {
                 .wrap_err("index state task panicked")??
                 .sealed_through()
         };
-        // The tail, the samples and the tree states of zakura v1.5.1 (zakura-core/zakura#1725)
-        // need the blocks from the next block on.
-        let next = Height(sealed.map_or(0, |sealed| sealed + 1));
-        let first = info.first_block_with_body();
-        ensure!(
-            next >= first,
-            "the import needs block {}, but the remote zakura node keeps block bodies only from \
-             height {}: use a node that does not prune, or an index that is sealed through \
-             height {} or above",
-            next.0,
-            first.0,
-            first.0 - 1
-        );
 
         let mut sources = Vec::with_capacity(self.sources.len());
         for source in &self.sources {
@@ -166,11 +149,7 @@ impl Replica {
         }
         let node = TrustedNode {
             attestor: Arc::new(JsonRpcAttestor::new(client.clone())),
-            sampler: Arc::new(
-                JsonRpcSampler::connect(client.clone())
-                    .await
-                    .wrap_err("read the prune height of the remote zakura node")?,
-            ),
+            sampler: Arc::new(JsonRpcSampler::new(client.clone())),
             id: NodeId { url: client.rpc().url().to_string(), version: String::new() },
         };
         let seed = getrandom::u64().map_err(|error| eyre!("random sample seed: {error}"))?;

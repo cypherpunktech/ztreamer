@@ -43,4 +43,4 @@ pub mod test_utils;
 pub use auth::{Auth, Secret, read_cookie};
 pub use client::{RetryPolicy, RpcClient, RpcConfig};
 pub use error::{RpcCode, RpcError, RpcErrorObject};
-pub use methods::{DEFAULT_METHOD_TIMEOUTS, FirstBlockWithBody, Method, ZakuraClient};
+pub use methods::{DEFAULT_METHOD_TIMEOUTS, Method, ZakuraClient};

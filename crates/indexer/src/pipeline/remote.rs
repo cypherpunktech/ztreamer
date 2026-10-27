@@ -8,7 +8,7 @@ use tokio::{
 };
 use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
-use ztreamer_remote::{FirstBlockWithBody as _, Method, RpcError, ZakuraClient};
+use ztreamer_remote::{Method, RpcError, ZakuraClient};
 
 use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentSender};
 use crate::{index::SEAL_DEPTH, parser::parse_block, types::RawIndexBlock};
@@ -81,16 +81,6 @@ impl RemoteTailSource {
         }
         Ok((tail, self.node.get_block_hash(tail).await?.hash()))
     }
-
-    /// The error for a block at `height` that the node did not find: [`PipelineError::MissingBody`]
-    /// when the node pruned it, else [`PipelineError::SourceGap`].
-    fn missing_block(&self, height: u32) -> PipelineError {
-        match self.prune_height() {
-            Ok(prune_height) if height < prune_height => PipelineError::MissingBody { height },
-            Ok(_) => PipelineError::SourceGap { expected: height, actual: None },
-            Err(error) => error,
-        }
-    }
 }
 
 impl HistoricalSource for RemoteTailSource {
@@ -108,10 +98,10 @@ impl HistoricalSource for RemoteTailSource {
         }
     }
 
-    /// The `pruneheight` field of `getblockchaininfo`. Zero when the node does not prune.
+    /// Zero: the remote node is an archive node. `RemoteNode` in ztreamerd refuses a node that
+    /// prunes.
     fn prune_height(&self) -> Result<u32, PipelineError> {
-        let info = self.runtime.block_on(self.node.get_blockchain_info())?;
-        Ok(info.first_block_with_body().0)
+        Ok(0)
     }
 
     fn process_segment(
@@ -219,7 +209,7 @@ impl<'a> BlockRequests<'a> {
     }
 
     /// The result of the request for `height`. A block that the node does not have is
-    /// [`PipelineError::MissingBody`] when the node pruned it, else [`PipelineError::SourceGap`].
+    /// [`PipelineError::SourceGap`].
     fn block(
         &self,
         height: u32,
@@ -227,7 +217,9 @@ impl<'a> BlockRequests<'a> {
     ) -> Result<Vec<u8>, PipelineError> {
         match result {
             Ok(Ok(bytes)) => Ok(bytes),
-            Ok(Err(error)) if error.is_block_not_found() => Err(self.source.missing_block(height)),
+            Ok(Err(error)) if error.is_block_not_found() => {
+                Err(PipelineError::SourceGap { expected: height, actual: None })
+            }
             Ok(Err(error)) => Err(error.into()),
             Err(error) if error.is_panic() => panic::resume_unwind(error.into_panic()),
             // The runtime shut down and dropped the request.
@@ -310,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_tail_tip_and_the_prune_height() {
+    fn reads_the_tail_tip() {
         let runtime = runtime();
         let blocks = chain(100);
         let chain = MockChain::new(&blocks);
@@ -319,9 +311,6 @@ mod tests {
         assert_eq!(source.tip().unwrap(), Some((Height(100), blocks[100].hash())));
         assert_eq!(source.block_hash(7).unwrap(), Some(blocks[7].hash()));
         assert_eq!(source.block_hash(5_000).unwrap(), None);
-        assert_eq!(source.prune_height().unwrap(), 0);
-        chain.set_prune_height(Some(Height(40)));
-        assert_eq!(source.prune_height().unwrap(), 40);
 
         // A chain shorter than the seal depth has only genesis in the tail.
         chain.set_blocks(&blocks[..=10]);
@@ -336,7 +325,6 @@ mod tests {
 
         assert!(matches!(source.tip(), Err(PipelineError::Remote(_))));
         assert!(matches!(source.block_hash(7), Err(PipelineError::Remote(_))));
-        assert!(matches!(source.prune_height(), Err(PipelineError::Remote(_))));
     }
 
     #[test]
@@ -398,29 +386,6 @@ mod tests {
             matches!(result, Err(PipelineError::SourceGap { expected: 150, actual: None })),
             "{result:?}"
         );
-    }
-
-    #[test]
-    fn a_block_pruned_during_the_pass_is_a_missing_body() {
-        let runtime = runtime();
-        let chain = MockChain::new(&chain(300));
-        let serve = serve(&chain);
-        let (_mock, source) = node(&runtime, move |n, request| {
-            if request.body["method"] == "getblock" && request.body["params"][0] == "150" {
-                chain.set_prune_height(Some(Height(200)));
-                return Reply::Error {
-                    code: RpcCode::INVALID_PARAMETER,
-                    message: "Block not found",
-                };
-            }
-            serve(n, request)
-        });
-        let dir = tempfile::tempdir().unwrap();
-        let index = open_index(dir.path());
-
-        let result = HistoricalPipeline::new(&index, &source, config()).unwrap().sync();
-
-        assert!(matches!(result, Err(PipelineError::MissingBody { height: 150 })), "{result:?}");
     }
 
     #[test]

@@ -140,7 +140,7 @@
 //! until the node ends its warm-up. Then it imports the sealed ranges of the source, checked
 //! against the node, and uses the three parts for the blocks above them. Before the tail, it
 //! waits until the node has the tip of the index. It refuses a node of another network, and a
-//! node that pruned the next block that the index needs.
+//! node that prunes.
 //!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`RpcCode`]: ztreamer_remote::RpcCode
