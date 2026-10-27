@@ -3,7 +3,8 @@
 //! # Architecture
 //!
 //! In remote mode, no node runs in the `ztreamerd` process. Three parts read one remote zakura
-//! node over JSON-RPC. Each part holds a [`ZakuraClient`] from `ztreamer-remote`.
+//! node over JSON-RPC, and the importer reads it too. Each part holds a [`ZakuraClient`] from
+//! `ztreamer-remote`.
 //!
 //! - [`RemoteTailSource`] and [`RemoteHeadSource`] read blocks for the two parts that write the
 //!   compact index: [`HistoricalPipeline`] and the head follower. They replace the embedded node
@@ -11,6 +12,8 @@
 //! - [`RemoteBackend`] does not write the index. It answers the wallet requests that the index
 //!   cannot answer, at the time of the request. It replaces [`InProcessBackend`] as the
 //!   [`StateBackend`] of [`CompactService`].
+//! - The importer reads no blocks for the index from the node. It reads sealed ranges from
+//!   snapshots or peers, and checks them against the node.
 //!
 //! ```text
 //!   wallet ---- gRPC ----> CompactService
@@ -25,10 +28,10 @@
 //!        +-----------------+--------------+---------------------+             |
 //!        |                                |                     |             |
 //!   HistoricalPipeline              head follower           importer          |
-//!   (sync_until_stable)             (follow_head)           (planned)         |
+//!   (sync_until_stable)             (follow_head)           (Importer::run)   |
 //!        ^                                ^                     ^             |
 //!        | blocks                         | blocks              | ranges      |
-//!   RemoteTailSource               RemoteHeadSource        snapshot hosts     |
+//!   RemoteTailSource               RemoteHeadSource        snapshots, peers   |
 //!        |                                |                                   |
 //!        +----------------+---------------+-----------------------------------+
 //!                         |   ZakuraClient (ztreamer-remote)
@@ -48,15 +51,17 @@
 //! - **The head follower** ([`CompactService::follow_head`]) writes the newest blocks and
 //!   replaces them on a reorg. Its source is the embedded node today and [`RemoteHeadSource`] in
 //!   remote mode.
-//! - **The importer** (planned, not written yet) downloads the sealed ranges of a snapshot from
-//!   snapshot hosts, verifies them against the node, and writes them with
-//!   [`Index::install_sealed_range`]. Each range goes in with its [`RangeMeta`]. The importer does
-//!   not use the block pipeline. It comes with the `--replicate-from` startup path of the
-//!   replication plan.
+//! - **The importer** (`ztreamer_verify::importer::Importer`) runs in remote mode before the
+//!   tail (see `bin/ztreamerd/src/replicate.rs`). It downloads the sealed ranges of the
+//!   `--replicate-from` sources: snapshots over HTTP, or peers over the Replicator gRPC service.
+//!   It verifies each epoch, then checks it against the node: `JsonRpcAttestor` compares the tree
+//!   roots with `z_gettreestate`, and `JsonRpcSampler` compares sampled blocks with `getblock`.
+//!   It writes each range with [`Index::install_sealed_range`] and its [`RangeMeta`]. The
+//!   importer does not use the block pipeline.
 //!
 //! # Who writes which heights
 //!
-//! The writers share the chain by height. `S` is the tip of the index when the run starts.
+//! The writers share the chain by height. `S` is the tip of the index when the tail starts.
 //! `B` is the best height of the node.
 //!
 //! ```text
@@ -66,9 +71,8 @@
 //!           |                 |  Source, in bulk      |  Source, with reorgs   |
 //! ```
 //!
-//! - **Below `S`.** The index holds these blocks from an earlier run. With replication, the
-//!   importer installs them as verified sealed ranges, and `S` is the sealed tip of the
-//!   snapshot.
+//! - **Below `S`.** The importer installs these blocks as verified sealed ranges, or the index
+//!   holds them from an earlier run. After an import, `S` is the end of the reference manifest.
 //! - **`S` to `B - SEAL_DEPTH`.** [`HistoricalPipeline`] reads from [`RemoteTailSource`], a
 //!   [`HistoricalSource`]. The tip of the source is [`SEAL_DEPTH`] blocks below the best tip,
 //!   because the index seals blocks at that depth. The pipeline workers read these blocks in bulk
@@ -121,7 +125,7 @@
 //!
 //! # Shared parts
 //!
-//! - All three parts use the typed calls of [`ZakuraClient`] and the error codes on
+//! - All parts, the importer too, use the typed calls of [`ZakuraClient`] and the error codes on
 //!   [`RpcCode`]. A block that the node does not have is [`RpcCode::INVALID_PARAMETER`], or
 //!   for `getblockhash` above the tip [`RpcCode::MISC`] with a fixed message (see
 //!   [`RpcError::is_block_not_found`]). A transaction that the node does not have is
