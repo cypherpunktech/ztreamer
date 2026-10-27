@@ -45,3 +45,7 @@ bench-serving *args:
 # Historical genesis→tip. Needs a writable Zakura cache and config.
 snapshot cache config *args:
     scripts/benchmark-snapshot.sh {{ cache }} {{ config }} {{ args }}
+
+# Times per height band of a `just snapshot` run: RUN_DIR [--band BLOCKS].
+snapshot-stages run *args:
+    python3 scripts/benchmark-stages.py {{ run }} {{ args }}

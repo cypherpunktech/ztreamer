@@ -168,3 +168,7 @@ bash scripts/benchmark-serving.sh \
   --repeats 1 --range-sizes 10,100 --range-requests 2 \
   --clients 1,2 --concurrency-blocks 100 --seconds 1 --sync-chunk 100
 ```
+
+## Snapshot stage times
+
+`just snapshot-stages RUN_DIR [--band BLOCKS]` (`scripts/benchmark-stages.py`) shows, for each band of heights of a `just snapshot` run, the wall time, the blocks per second, the I/O, the CPU time and the time of each pipeline stage.
