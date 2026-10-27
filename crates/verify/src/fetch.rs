@@ -42,6 +42,7 @@ use ztreamer_protocol::replicate::{
 };
 
 use crate::{
+    importer::MAX_BLOB_BYTES_BEFORE_INSTALL,
     manifest::{Manifest, ManifestError},
     snapshot::{Latest, LatestError, RangePath, SignatureFile},
 };
@@ -384,6 +385,16 @@ pub const PEER_STREAM_WINDOW_BYTES: u32 = 16 << 20;
 /// streams and gives 52 MB/s at 100 ms. It is also the most received bytes that wait in memory
 /// for the client to read them.
 pub const PEER_CONNECTION_WINDOW_BYTES: u32 = PEER_STREAM_WINDOW_BYTES * PEER_RANGE_STREAMS as u32;
+
+/// The largest [`PEER_CONNECTION_WINDOW_BYTES`]: 1/16 of the blob budget of the import,
+/// [`MAX_BLOB_BYTES_BEFORE_INSTALL`], thus 128 MiB. The connection window grows with
+/// [`PEER_RANGE_STREAMS`]. A higher stream limit can thus need a smaller stream window.
+const MAX_PEER_CONNECTION_WINDOW_BYTES: u64 = MAX_BLOB_BYTES_BEFORE_INSTALL / 16;
+
+const _: () = assert!(
+    PEER_CONNECTION_WINDOW_BYTES as u64 <= MAX_PEER_CONNECTION_WINDOW_BYTES,
+    "the peer connection window is above its limit: lower PEER_STREAM_WINDOW_BYTES"
+);
 
 /// A ztreamer that serves the Replicator gRPC service.
 ///
