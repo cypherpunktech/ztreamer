@@ -145,11 +145,6 @@ impl<'a> RangeBlob<'a> {
         Self { bytes, entry }
     }
 
-    /// The manifest entry of the range.
-    pub const fn entry(&self) -> &'a ManifestEntry {
-        self.entry
-    }
-
     /// Returns `true` if the length and the BLAKE3 digest of the blob are `blob_len` and
     /// `blob_digest` of the entry: step 1 of the module docs.
     pub fn matches_digest(&self) -> bool {
