@@ -116,12 +116,12 @@ impl Epoch<'_> {
             let decoder = RangeDecoder::new(blob.as_ref()).map_err(|_| Check::Decode.at(start))?;
             for offset in plan.offsets(start) {
                 let height = start.saturating_add(offset);
+                let record =
+                    decoder.record(offset as usize).map_err(|_| Check::Decode.at(height))?;
                 let node = |source| EpochError::Node { height, source };
                 let Some(block) = sampler.full_block(height).await.map_err(node)? else {
                     continue;
                 };
-                let record =
-                    decoder.record(offset as usize).map_err(|_| Check::Decode.at(height))?;
                 let same = tokio::task::spawn_blocking(move || -> Result<bool, NodeError> {
                     // `Epoch::verify` checked that each record adds its own commitments. Thus
                     // the tree sizes before the block are the end sizes minus the additions.

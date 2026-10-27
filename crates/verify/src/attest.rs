@@ -12,7 +12,7 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use async_trait::async_trait;
@@ -289,15 +289,44 @@ impl JsonRpcAttestor {
         Self { node, roots: Mutex::new(BTreeMap::new()) }
     }
 
-    /// The cell of the tree roots at `height`. Adds an empty cell, and drops the lowest heights
-    /// above [`CACHE_CAPACITY`]. The map is valid after a panic, because each change is one call.
+    /// The map of the tree roots. The map is valid after a panic, because no change leaves it
+    /// half done.
+    fn lock_roots(&self) -> MutexGuard<'_, BTreeMap<u32, Arc<OnceCell<PoolRoots>>>> {
+        self.roots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The cell of the tree roots at `height`. A new cell is empty. Before it adds a cell to a
+    /// full map, it drops the filled cells of the lowest heights. It never drops a cell that a
+    /// call still fills.
     fn tree_roots_cell(&self, height: u32) -> Arc<OnceCell<PoolRoots>> {
-        let mut map = self.roots.lock().unwrap_or_else(PoisonError::into_inner);
-        let cell = Arc::clone(map.entry(height).or_default());
-        while map.len() > CACHE_CAPACITY {
-            map.pop_first();
+        let mut map = self.lock_roots();
+        if let Some(cell) = map.get(&height) {
+            return Arc::clone(cell);
         }
-        cell
+        while map.len() >= CACHE_CAPACITY {
+            let Some(lowest) = map
+                .iter()
+                .find(|(_, cell)| cell.initialized())
+                .map(|(&kept_height, _)| kept_height)
+            else {
+                break;
+            };
+            map.remove(&lowest);
+        }
+        Arc::clone(map.entry(height).or_default())
+    }
+
+    /// Removes the cell of a failed call at `height`, when the cell is still empty and no other
+    /// call holds it. Thus a failed call keeps no place in the map.
+    fn forget_failed_cell(&self, height: u32, cell: &Arc<OnceCell<PoolRoots>>) {
+        let mut map = self.lock_roots();
+        // The map and `cell` are the two holders. Another call gets a holder only under the lock.
+        let unused = map.get(&height).is_some_and(|kept| {
+            Arc::ptr_eq(kept, cell) && !kept.initialized() && Arc::strong_count(kept) == 2
+        });
+        if unused {
+            map.remove(&height);
+        }
     }
 
     /// Asks the node for the tree roots at `height` with `z_gettreestate`.
@@ -323,7 +352,11 @@ impl Attestor for JsonRpcAttestor {
 
     async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError> {
         let cell = self.tree_roots_cell(height);
-        cell.get_or_try_init(|| self.ask_tree_roots(height)).await.copied()
+        let roots = cell.get_or_try_init(|| self.ask_tree_roots(height)).await.copied();
+        if roots.is_err() {
+            self.forget_failed_cell(height, &cell);
+        }
+        roots
     }
 
     async fn subtree_roots(
@@ -637,11 +670,33 @@ mod tests {
 
     #[tokio::test]
     async fn json_rpc_attestor_rejects_an_answer_for_another_height() {
-        let (_node, attestor) = json_rpc_attestor(treestate(2_998)).await;
+        let (node, attestor) = json_rpc_attestor(treestate(2_998)).await;
 
         let error = attestor.tree_roots(2_999).await.unwrap_err();
 
         assert!(matches!(error, NodeError::Height { expected: 2_999, actual: 2_998 }), "{error:?}");
+        // The attestor keeps no failed answer: a retry asks the node again.
+        assert!(attestor.lock_roots().is_empty());
+        attestor.tree_roots(2_999).await.unwrap_err();
+        assert_eq!(node.seen().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_full_json_rpc_attestor_drops_the_lowest_filled_height() {
+        let (_node, attestor) = json_rpc_attestor(treestate(2_999)).await;
+        let filled = || Arc::new(OnceCell::new_with(Some(roots())));
+        let heights = (0..CACHE_CAPACITY as u32).map(|at| 10_000 + at);
+        attestor.lock_roots().extend(heights.map(|height| (height, filled())));
+        // A call fills the cell of the lowest height. The map must not drop it.
+        attestor.lock_roots().insert(9_000, Arc::new(OnceCell::new()));
+        attestor.lock_roots().remove(&(10_000 + CACHE_CAPACITY as u32 - 1));
+
+        attestor.tree_roots(2_999).await.unwrap();
+
+        let map = attestor.lock_roots();
+        assert_eq!(map.len(), CACHE_CAPACITY);
+        assert!(map.contains_key(&2_999) && map.contains_key(&9_000));
+        assert!(!map.contains_key(&10_000) && map.contains_key(&10_001));
     }
 
     #[tokio::test]

@@ -230,11 +230,18 @@ impl Fetcher {
 type HttpClient = Client<HttpsConnector<HttpConnector>, Empty<Bytes>>;
 
 /// A snapshot directory below a base URL, signed with a key that the caller trusts.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct HttpSource {
     base: String,
     key: VerifyingKey,
     client: HttpClient,
+}
+
+impl fmt::Debug for HttpSource {
+    /// The base URL only. The client holds no data for a log.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpSource").field("base", &self.base).finish_non_exhaustive()
+    }
 }
 
 impl HttpSource {
@@ -369,23 +376,33 @@ impl Iterator for RefusalBackoff {
 ///
 /// The clones of a source share one connection and one limit of [`PEER_RANGE_STREAMS`] open
 /// `GetRange` streams.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PeerSource {
+    /// The endpoint of the peer, for logs.
+    endpoint: Uri,
     client: ReplicatorClient<Channel>,
     /// One permit for each open `GetRange` stream.
     range_streams: Arc<Semaphore>,
 }
 
+impl fmt::Debug for PeerSource {
+    /// The endpoint only. The client holds no data for a log.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PeerSource").field("endpoint", &self.endpoint).finish_non_exhaustive()
+    }
+}
+
 impl PeerSource {
-    /// A source over `channel`.
-    pub fn new(channel: Channel) -> Self {
+    /// A source over `channel`, a connection to `endpoint`.
+    pub fn new(endpoint: Uri, channel: Channel) -> Self {
         let range_streams = Arc::new(Semaphore::new(PEER_RANGE_STREAMS));
-        Self { client: ReplicatorClient::new(channel), range_streams }
+        Self { endpoint, client: ReplicatorClient::new(channel), range_streams }
     }
 
     /// Connects to the Replicator service at `endpoint`.
     pub async fn connect(endpoint: Uri) -> Result<Self, FetchError> {
-        Ok(Self::new(Channel::builder(endpoint).connect().await?))
+        let channel = Channel::builder(endpoint.clone()).connect().await?;
+        Ok(Self::new(endpoint, channel))
     }
 
     /// Opens the `GetRange` stream of the range at `start_height` from byte `offset`.
@@ -508,6 +525,8 @@ mod tests {
         let fetcher = http.fetcher(SEED);
 
         assert_eq!(fetcher.manifest().await.unwrap(), http.snapshot.manifest);
+        let base = http.server.base.to_string();
+        assert!(format!("{fetcher:?}").contains(base.trim_end_matches('/')), "{fetcher:?}");
         let entry = &http.snapshot.manifest.entries()[3];
         assert_eq!(fetcher.blob(entry).await.unwrap(), http.blob(3_000));
     }
