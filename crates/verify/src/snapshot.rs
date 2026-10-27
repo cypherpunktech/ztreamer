@@ -14,13 +14,13 @@
 //! reader never sees a new pointer with an old signature:
 //!
 //! ```json
-//! {"latest":{"manifest":"manifests/2026-10-26T143005Z.json","sealed_through":1785999,
-//!   "published_at":"2026-10-26T14:30:05Z","public_key":"<hex>"},"signature":"<hex>"}
+//! {"latest":{"manifest":"manifests/2026-10-26T143005Z.json","sealed_through":1785999},
+//!   "signature":"<hex>"}
 //! ```
 //!
 //! The signature covers the exact bytes of the `latest` object. A reader verifies it with a key
-//! that it trusts, never with `public_key`: a source that can change the file can also change
-//! that key.
+//! that it trusts. The file does not hold the key: a source that can change the file can also
+//! change a key in it.
 
 use std::{
     fs::{self, File},
@@ -28,7 +28,7 @@ use std::{
     path::PathBuf,
 };
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -52,18 +52,12 @@ pub const SNAPSHOT_PUBKEY: [u8; 32] = [
 ];
 
 /// The pointer to the current manifest of a snapshot, in `latest.json`.
-#[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Latest {
     /// The path of the manifest, relative to the snapshot directory.
     pub manifest: String,
     /// The last height of the last range in the manifest.
     pub sealed_through: u32,
-    /// The export time, RFC 3339 in UTC.
-    pub published_at: String,
-    /// The key that signed the manifest and this pointer. A reader must not trust it.
-    #[serde_as(as = "Hex")]
-    pub public_key: [u8; 32],
 }
 
 /// The JSON of `latest.json`: the pointer and the signature of its exact bytes.
@@ -261,9 +255,9 @@ impl SnapshotWriter {
         Self { root: root.into(), key }
     }
 
-    /// Writes the range files of `manifest` from `index`. Then it writes `manifest` with the
-    /// name of `now`, as [`Self::publish`] does. Thus `latest.json` points only at files that
-    /// are present.
+    /// Writes the range files of `manifest` from `index`. Then it writes `manifest` and its
+    /// [`SignatureFile`] at `manifests/<now>.json`, and a `latest.json` that points at the
+    /// manifest. Thus `latest.json` points only at files that are present.
     ///
     /// It checks the manifest name before it writes a range file. If a file has this name, it
     /// stops with [`SnapshotWriteError::ManifestExists`].
@@ -285,21 +279,8 @@ impl SnapshotWriter {
             self.put_range(entry, &blob)?;
             Ok::<_, SnapshotWriteError>(written + 1)
         })?;
-        self.put_manifest_and_latest(&path, manifest, now)?;
+        self.put_manifest_and_latest(&path, manifest)?;
         Ok(Exported { manifest: path, written })
-    }
-
-    /// Writes `manifest` and its [`SignatureFile`] at `manifests/<now>.json`. Then it writes a
-    /// `latest.json` that points at the manifest. The range files of `manifest` must be present.
-    /// Returns the path of the manifest, relative to the snapshot directory.
-    pub fn publish(
-        &self,
-        manifest: &Manifest,
-        now: DateTime<Utc>,
-    ) -> Result<String, SnapshotWriteError> {
-        let path = self.new_manifest_path(now)?;
-        self.put_manifest_and_latest(&path, manifest, now)?;
-        Ok(path)
     }
 
     /// Checks `blob` against the length and the digest in `entry`. Then it writes `blob` to the
@@ -312,7 +293,10 @@ impl SnapshotWriter {
     }
 
     /// The path of the manifest for `now`. It refuses the path if a file has it.
-    fn new_manifest_path(&self, now: DateTime<Utc>) -> Result<String, SnapshotWriteError> {
+    pub(crate) fn new_manifest_path(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<String, SnapshotWriteError> {
         let path = format!("manifests/{}.json", now.format("%Y-%m-%dT%H%M%SZ"));
         if self.root.join(&path).exists() {
             return Err(SnapshotWriteError::ManifestExists(path));
@@ -339,22 +323,17 @@ impl SnapshotWriter {
     /// Writes the manifest at `path`, then its signature, then `latest.json`. For a short time,
     /// the manifest is present without its signature. But `latest.json` points at the manifest
     /// only after the signature is present.
-    fn put_manifest_and_latest(
+    pub(crate) fn put_manifest_and_latest(
         &self,
         path: &str,
         manifest: &Manifest,
-        now: DateTime<Utc>,
     ) -> io::Result<()> {
         let bytes = serde_json::to_vec(manifest).expect("a Manifest always serializes");
         self.put(path, &bytes)?;
         let signature = SignatureFile::sign(&bytes, &self.key);
         self.put(&SignatureFile::path_of(path), signature.to_hex().as_bytes())?;
-        let latest = Latest {
-            manifest: path.to_owned(),
-            sealed_through: manifest.sealed_through(),
-            published_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
-            public_key: self.key.verifying_key().to_bytes(),
-        };
+        let latest =
+            Latest { manifest: path.to_owned(), sealed_through: manifest.sealed_through() };
         self.put(Latest::PATH, &latest.to_file(&self.key))
     }
 
@@ -391,12 +370,7 @@ mod tests {
     }
 
     fn latest() -> Latest {
-        Latest {
-            manifest: "manifests/2026-10-26T000000Z.json".to_owned(),
-            sealed_through: 2_999,
-            published_at: "2026-10-26T00:00:00Z".to_owned(),
-            public_key: [9; 32],
-        }
+        Latest { manifest: "manifests/2026-10-26T000000Z.json".to_owned(), sealed_through: 2_999 }
     }
 
     #[test]

@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use ztreamer_remote::{
-    Auth, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, ZakuraClient,
+    Auth, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, Secret, ZakuraClient,
     test_utils::{MockNode, Reply},
 };
 
@@ -82,7 +82,8 @@ async fn cookie_file_sets_basic_auth_header() {
 async fn basic_auth_sets_header() {
     let mock = MockNode::start(|_, _| Reply::Result(json!(1))).await;
     let client = RpcClient::new(
-        mock.config().with_auth(Auth::Basic { user: "ztreamer".into(), password: "pw".into() }),
+        mock.config()
+            .with_auth(Auth::Basic { user: "ztreamer".into(), password: Secret::new("pw") }),
     )
     .unwrap();
     let _: u32 = client.call("getblockcount", ()).await.unwrap();
@@ -100,13 +101,13 @@ async fn node_error_object_is_not_retried() {
 
     let error = client.call::<_, Value>("getblock", ("x",)).await.unwrap_err();
     match &error {
-        RpcError::Rpc { code, message, .. } => {
+        RpcError::Rpc { method, code, message } => {
+            assert_eq!(method, "getblock");
             assert_eq!(*code, RpcCode(-8));
             assert_eq!(message, "Invalid parameter");
         }
         other => panic!("unexpected {other:?}"),
     }
-    assert_eq!(error.method(), Some("getblock"));
     assert_eq!(mock.seen().len(), 1);
 }
 
@@ -128,12 +129,9 @@ async fn method_timeout_overrides_default() {
         Reply::Delay(Duration::from_millis(400), Box::new(Reply::Result(json!(1))))
     })
     .await;
-    let client = RpcClient::new(
-        mock.config()
-            .with_default_timeout(Duration::from_secs(5))
-            .with_method_timeout("getblock", Duration::from_millis(50)),
-    )
-    .unwrap();
+    let client =
+        RpcClient::new(mock.config().with_method_timeout("getblock", Duration::from_millis(50)))
+            .unwrap();
 
     let started = Instant::now();
     let error = client.call::<_, Value>("getblock", ("1",)).await.unwrap_err();
@@ -260,8 +258,7 @@ async fn decode_failure_names_the_method() {
     let mock = MockNode::start(|_, _| Reply::Result(json!("not a number"))).await;
     let client = RpcClient::new(mock.config()).unwrap();
     let error = client.call::<_, u32>("getblockcount", ()).await.unwrap_err();
-    assert!(matches!(error, RpcError::Decode { .. }));
-    assert_eq!(error.method(), Some("getblockcount"));
+    assert!(matches!(&error, RpcError::Decode { method, .. } if method == "getblockcount"));
 }
 
 #[tokio::test]

@@ -4,7 +4,6 @@ use std::{fmt, time::Duration};
 
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// An error code from the node: a JSON-RPC 2.0 code or a zcashd legacy code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -19,17 +18,13 @@ impl RpcCode {
     /// answers for a method that needs credentials.
     pub const METHOD_NOT_FOUND: Self = Self(-32601);
 
-    /// JSON-RPC 2.0 "invalid params".
-    ///
-    /// zakura does not send this code on the wire. Its `rpc_call_compatibility` middleware
-    /// changes it to [`Self::MISC`] and keeps the message.
-    pub const INVALID_PARAMS: Self = Self(-32602);
-
     /// zcashd legacy code: a miscellaneous error.
     ///
     /// This is the generic error code of zakura. zakura also sends it for each error that it
-    /// raises as [`Self::INVALID_PARAMS`]: params that do not decode, and `getblockhash` for a
-    /// height above the tip. Thus this code alone does not identify the error.
+    /// raises as JSON-RPC 2.0 "invalid params" (-32602): params that do not decode, and
+    /// `getblockhash` for a height above the tip. Its `rpc_call_compatibility` middleware
+    /// changes that code to this code and keeps the message. Thus this code alone does not
+    /// identify the error.
     pub const MISC: Self = Self(-1);
 
     /// zcashd legacy code: a parameter is not valid.
@@ -66,9 +61,6 @@ pub struct RpcErrorObject {
     pub code: RpcCode,
     /// Human readable message.
     pub message: String,
-    /// Extra data, rarely set by zakura.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
 }
 
 /// Why a remote call failed.
@@ -138,8 +130,6 @@ pub enum RpcError {
         code: RpcCode,
         /// Message from the node.
         message: String,
-        /// Extra data from the node.
-        data: Option<Value>,
     },
 
     /// The response was not a JSON-RPC envelope for this request.
@@ -165,21 +155,6 @@ pub enum RpcError {
 impl RpcError {
     /// The message of zakura for a `getblockhash` height above its tip.
     pub(crate) const ABOVE_TIP_MESSAGE: &str = "Provided index is greater than the current tip";
-
-    /// Method the failed call was for, when the error is tied to a call.
-    pub fn method(&self) -> Option<&str> {
-        match self {
-            Self::Config(_) => None,
-            Self::Transport { method, .. }
-            | Self::ConnectionClosed { method, .. }
-            | Self::Timeout { method, .. }
-            | Self::Unauthorized { method, .. }
-            | Self::Http { method, .. }
-            | Self::Rpc { method, .. }
-            | Self::Protocol { method, .. }
-            | Self::Decode { method, .. } => Some(method),
-        }
-    }
 
     /// Error code from the node, when the node answered with an error object.
     pub const fn rpc_code(&self) -> Option<RpcCode> {
@@ -213,7 +188,7 @@ impl RpcError {
 
     /// True when the node refused a height above its tip.
     ///
-    /// zakura raises this error with [`RpcCode::INVALID_PARAMS`], and its middleware sends it
+    /// zakura raises this error as JSON-RPC 2.0 "invalid params", and its middleware sends it
     /// with [`RpcCode::MISC`] on the wire. Only the message makes it different from the other
     /// [`RpcCode::MISC`] errors.
     fn is_height_above_tip(&self) -> bool {
@@ -259,12 +234,7 @@ impl RpcError {
     }
 
     pub(crate) fn from_object(method: &str, object: RpcErrorObject) -> Self {
-        Self::Rpc {
-            method: method.to_owned(),
-            code: object.code,
-            message: object.message,
-            data: object.data,
-        }
+        Self::Rpc { method: method.to_owned(), code: object.code, message: object.message }
     }
 }
 
@@ -281,7 +251,7 @@ mod tests {
     }
 
     fn rpc_with_message(code: RpcCode, message: &str) -> RpcError {
-        RpcError::from_object("m", RpcErrorObject { code, message: message.into(), data: None })
+        RpcError::from_object("m", RpcErrorObject { code, message: message.into() })
     }
 
     #[test]
@@ -299,8 +269,7 @@ mod tests {
         assert!(!rpc_with_message(RpcCode::MISC, "Invalid params").is_block_not_found());
         assert!(!rpc(RpcCode::MISC).is_block_not_found());
         assert!(
-            !rpc_with_message(RpcCode::INVALID_PARAMS, RpcError::ABOVE_TIP_MESSAGE)
-                .is_block_not_found()
+            !rpc_with_message(RpcCode(-32602), RpcError::ABOVE_TIP_MESSAGE).is_block_not_found()
         );
         assert!(!rpc(RpcCode::IN_WARMUP).is_block_not_found());
         assert!(!http(StatusCode::NOT_FOUND).is_block_not_found());

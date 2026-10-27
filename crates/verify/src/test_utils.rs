@@ -194,7 +194,9 @@ impl Snapshot {
         self.manifest = Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), entries).unwrap();
         self.published_at += TimeDelta::days(1);
         let writer = Self::writer(&self.dir);
-        self.manifest_path = writer.publish(&self.manifest, self.published_at).unwrap();
+        let path = writer.new_manifest_path(self.published_at).unwrap();
+        writer.put_manifest_and_latest(&path, &self.manifest).unwrap();
+        self.manifest_path = path;
     }
 
     fn writer(dir: &TempDir) -> SnapshotWriter {

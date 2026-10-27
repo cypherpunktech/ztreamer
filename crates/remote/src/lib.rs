@@ -8,8 +8,7 @@
 //!
 //! What it handles:
 //!
-//! - HTTP and HTTPS over hyper with a rustls connector (web PKI roots plus an optional extra CA
-//!   file for self-signed node certificates).
+//! - HTTP and HTTPS over hyper with a rustls connector and the web PKI roots.
 //! - zakura's cookie auth (the `.cookie` file the node writes) and plain basic auth.
 //! - The JSON-RPC 2.0 envelope, request ids, and the node's error object.
 //! - A per-method timeout with a client-wide default.
@@ -40,7 +39,7 @@ mod methods;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use auth::{Auth, Secret, read_cookie};
+pub use auth::{Auth, Secret};
 pub use client::{RetryPolicy, RpcClient, RpcConfig};
 pub use error::{RpcCode, RpcError, RpcErrorObject};
-pub use methods::{DEFAULT_METHOD_TIMEOUTS, FirstBlockWithBody, Method, ZakuraClient};
+pub use methods::{FirstBlockWithBody, Method, ZakuraClient};

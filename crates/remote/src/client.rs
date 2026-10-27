@@ -2,7 +2,6 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{
         Arc, RwLock,
         atomic::{AtomicU64, Ordering},
@@ -21,7 +20,6 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use rustls::pki_types::{CertificateDer, pem::PemObject as _};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -56,6 +54,7 @@ impl Default for RetryPolicy {
 
 impl RetryPolicy {
     /// No retries at all.
+    #[cfg(any(test, feature = "test-utils"))]
     pub const NONE: Self =
         Self { max_retries: 0, initial_backoff: Duration::ZERO, max_backoff: Duration::ZERO };
 
@@ -73,8 +72,6 @@ pub struct RpcConfig {
     url: Uri,
     /// Credentials.
     auth: Auth,
-    /// Extra PEM CA certificates to trust besides the web PKI roots.
-    tls_ca_file: Option<PathBuf>,
     /// Timeout for a method without an entry in `method_timeouts`.
     default_timeout: Duration,
     /// Per-method timeouts. Slow methods such as `z_gettreestate` go here.
@@ -89,7 +86,6 @@ impl RpcConfig {
         Self {
             url,
             auth: Auth::None,
-            tls_ca_file: None,
             default_timeout: Duration::from_secs(15),
             method_timeouts: HashMap::new(),
             retry: RetryPolicy::default(),
@@ -107,18 +103,6 @@ impl RpcConfig {
         self
     }
 
-    /// Trusts the CA certificates in a PEM file in addition to the web PKI roots.
-    pub fn with_tls_ca_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.tls_ca_file = Some(path.into());
-        self
-    }
-
-    /// Sets the timeout used by methods without their own entry.
-    pub const fn with_default_timeout(mut self, timeout: Duration) -> Self {
-        self.default_timeout = timeout;
-        self
-    }
-
     /// Sets the timeout for one method.
     pub fn with_method_timeout(mut self, method: impl Into<String>, timeout: Duration) -> Self {
         self.method_timeouts.insert(method.into(), timeout);
@@ -126,6 +110,7 @@ impl RpcConfig {
     }
 
     /// Sets the retry policy.
+    #[cfg(any(test, feature = "test-utils"))]
     pub const fn with_retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
         self
@@ -173,7 +158,7 @@ impl std::fmt::Debug for RpcClient {
 impl RpcClient {
     /// Builds the connection pool and reads the credentials once.
     ///
-    /// Fails on a bad URL, an unreadable cookie or CA file, or a TLS setup error. It does not
+    /// Fails on a bad URL, an unreadable cookie, or a TLS setup error. It does not
     /// contact the node.
     pub fn new(config: RpcConfig) -> Result<Self, RpcError> {
         let uri = config.url;
@@ -190,7 +175,7 @@ impl RpcClient {
         }
 
         let auth_header = config.auth.header()?;
-        let http = build_http_client(config.tls_ca_file.as_deref())?;
+        let http = build_http_client()?;
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -411,30 +396,9 @@ fn preview(body: &[u8]) -> String {
     text[..end].to_owned()
 }
 
-fn build_http_client(ca_file: Option<&std::path::Path>) -> Result<HttpClient, RpcError> {
+fn build_http_client() -> Result<HttpClient, RpcError> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    if let Some(path) = ca_file {
-        let certs = CertificateDer::pem_file_iter(path).map_err(|error| {
-            RpcError::Config(format!("cannot read CA file {}: {error}", path.display()))
-        })?;
-        let mut added = 0usize;
-        for cert in certs {
-            let cert = cert.map_err(|error| {
-                RpcError::Config(format!("bad certificate in {}: {error}", path.display()))
-            })?;
-            roots.add(cert).map_err(|error| {
-                RpcError::Config(format!("rejected certificate in {}: {error}", path.display()))
-            })?;
-            added += 1;
-        }
-        if added == 0 {
-            return Err(RpcError::Config(format!(
-                "CA file {} holds no certificates",
-                path.display()
-            )));
-        }
-    }
 
     let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -475,29 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn ca_file_must_hold_certificates() {
-        let dir = tempfile::tempdir().unwrap();
-        let empty = dir.path().join("empty.pem");
-        std::fs::write(&empty, "").unwrap();
-        assert!(matches!(
-            RpcClient::new(config("https://x").with_tls_ca_file(&empty)),
-            Err(RpcError::Config(_))
-        ));
-        assert!(matches!(
-            RpcClient::new(config("https://x").with_tls_ca_file(dir.path().join("none"))),
-            Err(RpcError::Config(_))
-        ));
-    }
-
-    #[test]
     fn per_method_timeouts() {
         let client = RpcClient::new(
             config("http://127.0.0.1:1")
-                .with_default_timeout(Duration::from_secs(3))
                 .with_method_timeout("z_gettreestate", Duration::from_secs(60)),
         )
         .unwrap();
-        assert_eq!(client.timeout_for("getblock"), Duration::from_secs(3));
+        assert_eq!(client.timeout_for("getblock"), Duration::from_secs(15));
         assert_eq!(client.timeout_for("z_gettreestate"), Duration::from_secs(60));
     }
 

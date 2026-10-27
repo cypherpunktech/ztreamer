@@ -63,14 +63,6 @@ async fn get_blockchain_info() {
 }
 
 #[tokio::test]
-async fn get_best_block_hash() {
-    let (mock, node) = node(json!(BLOCK_HASH)).await;
-    let hash = node.get_best_block_hash().await.unwrap();
-    assert_eq!(hash.hash().to_string(), BLOCK_HASH);
-    assert_eq!(sent(&mock), ("getbestblockhash".into(), json!([])));
-}
-
-#[tokio::test]
 async fn get_block_count() {
     let (mock, node) = node(json!(2932117)).await;
     assert_eq!(node.get_block_count().await.unwrap(), block::Height(2932117));

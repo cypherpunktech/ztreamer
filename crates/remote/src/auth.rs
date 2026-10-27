@@ -27,18 +27,6 @@ impl Secret {
     }
 }
 
-impl From<&str> for Secret {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for Secret {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
 impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Secret([redacted])")
@@ -90,7 +78,7 @@ impl Auth {
 ///
 /// The file holds one line, `__cookie__:<secret>`. The node compares only the part after the
 /// colon, so the whole line is what goes into the basic auth header.
-pub fn read_cookie(path: &Path) -> Result<Secret, RpcError> {
+fn read_cookie(path: &Path) -> Result<Secret, RpcError> {
     let contents = std::fs::read_to_string(path).map_err(|error| {
         RpcError::Config(format!("cannot read cookie file {}: {error}", path.display()))
     })?;
@@ -141,14 +129,14 @@ mod tests {
 
     #[test]
     fn basic_auth_rejects_colon_in_user() {
-        let auth = Auth::Basic { user: "a:b".into(), password: "p".into() };
+        let auth = Auth::Basic { user: "a:b".into(), password: Secret::new("p") };
         assert!(matches!(auth.header(), Err(RpcError::Config(_))));
         assert!(Auth::None.header().unwrap().is_none());
     }
 
     #[test]
     fn secrets_stay_out_of_debug_output() {
-        let auth = Auth::Basic { user: "ztreamer".into(), password: "hunter2".into() };
+        let auth = Auth::Basic { user: "ztreamer".into(), password: Secret::new("hunter2") };
         let debug = format!("{auth:?}");
         assert!(!debug.contains("hunter2"), "{debug}");
         assert!(debug.contains("[redacted]"), "{debug}");

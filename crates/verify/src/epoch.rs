@@ -30,7 +30,6 @@ use crate::range::{Check, RangeBlob, RangeLink, Reject};
 pub struct Epoch<'a> {
     entries: &'a [ManifestEntry],
     previous: Option<&'a ManifestEntry>,
-    commitments: u64,
 }
 
 impl<'a> Epoch<'a> {
@@ -48,11 +47,6 @@ impl<'a> Epoch<'a> {
     /// The last height of the epoch. The node attests the tree roots at this height.
     pub const fn end_height(&self) -> u32 {
         self.entries.last().expect("an epoch is never empty").end_height
-    }
-
-    /// The note commitments that the epoch adds, over all three pools.
-    pub const fn commitments(&self) -> u64 {
-        self.commitments
     }
 
     /// Checks each range of the epoch and rebuilds the note commitment trees from `start`.
@@ -159,7 +153,7 @@ impl<'a> Iterator for Epochs<'a> {
             .map_or(rest.len().min(MAX_RANGES), |at| at + 1);
         let entries = &rest[..len];
         self.start += len;
-        Some(Epoch { entries, previous, commitments: added(&entries[len - 1]) })
+        Some(Epoch { entries, previous })
     }
 }
 
@@ -383,6 +377,12 @@ mod tests {
         TreeSizes { sapling: count, ..TreeSizes::default() }
     }
 
+    /// The note commitments that `epoch` adds, over all three pools.
+    fn commitments(epoch: Epoch<'_>) -> u64 {
+        let total = |entry: &ManifestEntry| entry.end_tree_sizes.total();
+        total(epoch.entries().last().unwrap()) - epoch.previous().map_or(0, total)
+    }
+
     fn lengths(entries: &[ManifestEntry]) -> Vec<usize> {
         Epochs::new(entries).map(|epoch| epoch.entries().len()).collect()
     }
@@ -394,7 +394,7 @@ mod tests {
 
         assert_eq!(lengths(&entries), [10, 10, 5]);
         assert_eq!(epochs[0].end_height(), 9_999);
-        assert_eq!(epochs[0].commitments(), 10_000);
+        assert_eq!(commitments(epochs[0]), 10_000);
         assert_eq!(epochs[2].entries()[0].start_height, 20_000);
         assert_eq!(epochs[2].end_height(), 24_999);
     }
@@ -407,7 +407,7 @@ mod tests {
         // The cap is reached exactly at the second range.
         let entries = synthetic_entries(&[sapling(999_999), sapling(1), sapling(5)]);
         assert_eq!(lengths(&entries), [2, 1]);
-        assert_eq!(Epochs::new(&entries).next().unwrap().commitments(), MAX_COMMITMENTS);
+        assert_eq!(commitments(Epochs::new(&entries).next().unwrap()), MAX_COMMITMENTS);
 
         // A heavy range closes the epoch that it joins.
         let entries = synthetic_entries(&[sapling(10), sapling(1_060_000), sapling(10)]);
@@ -420,7 +420,7 @@ mod tests {
         let entries = synthetic_entries(&[add; 4]);
 
         assert_eq!(lengths(&entries), [2, 2]);
-        assert_eq!(Epochs::new(&entries).nth(1).unwrap().commitments(), 1_000_000);
+        assert_eq!(commitments(Epochs::new(&entries).nth(1).unwrap()), 1_000_000);
     }
 
     #[test]

@@ -23,14 +23,12 @@ use crate::{RpcClient, RpcConfig, RpcError, client::Retries};
 
 /// A zakura JSON-RPC method that [`ZakuraClient`] calls.
 ///
-/// [`Self::name`] is the name on the wire. [`ZakuraClient`], [`DEFAULT_METHOD_TIMEOUTS`] and the
-/// mock chain in `test_utils` use this type, thus each name has one spelling.
+/// [`Self::name`] is the name on the wire. [`ZakuraClient`], its default timeouts and the mock
+/// chain in `test_utils` use this type, thus each name has one spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Method {
     /// `getblockchaininfo`.
     GetBlockchainInfo,
-    /// `getbestblockhash`.
-    GetBestBlockHash,
     /// `getblockcount`.
     GetBlockCount,
     /// `getblockhash`.
@@ -56,28 +54,10 @@ pub enum Method {
 }
 
 impl Method {
-    /// All the methods.
-    pub const ALL: [Self; 13] = [
-        Self::GetBlockchainInfo,
-        Self::GetBestBlockHash,
-        Self::GetBlockCount,
-        Self::GetBlockHash,
-        Self::GetBlock,
-        Self::ZGetTreestate,
-        Self::ZGetSubtreesByIndex,
-        Self::GetRawMempool,
-        Self::GetRawTransaction,
-        Self::SendRawTransaction,
-        Self::GetAddressTxIds,
-        Self::GetAddressBalance,
-        Self::GetAddressUtxos,
-    ];
-
     /// The name of the method on the wire.
     pub const fn name(self) -> &'static str {
         match self {
             Self::GetBlockchainInfo => "getblockchaininfo",
-            Self::GetBestBlockHash => "getbestblockhash",
             Self::GetBlockCount => "getblockcount",
             Self::GetBlockHash => "getblockhash",
             Self::GetBlock => "getblock",
@@ -91,11 +71,6 @@ impl Method {
             Self::GetAddressUtxos => "getaddressutxos",
         }
     }
-
-    /// The method with the wire name `name`, or `None` for a name that is not in [`Self::ALL`].
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|method| method.name() == name)
-    }
 }
 
 impl fmt::Display for Method {
@@ -108,7 +83,7 @@ impl fmt::Display for Method {
 ///
 /// [`ZakuraClient::config`] applies them. The other methods use the default timeout of
 /// [`RpcConfig`].
-pub const DEFAULT_METHOD_TIMEOUTS: [(Method, Duration); 7] = [
+const DEFAULT_METHOD_TIMEOUTS: [(Method, Duration); 7] = [
     (Method::GetBlock, Duration::from_secs(30)),
     (Method::GetRawTransaction, Duration::from_secs(30)),
     (Method::ZGetTreestate, Duration::from_secs(30)),
@@ -154,7 +129,8 @@ pub struct ZakuraClient {
 }
 
 impl ZakuraClient {
-    /// A configuration for `url` with [`DEFAULT_METHOD_TIMEOUTS`]. A later
+    /// A configuration for `url` with a longer timeout for each slow method: 60 s for the
+    /// address lists, 30 s for blocks, transactions, tree states, subtrees and balances. A later
     /// [`RpcConfig::with_method_timeout`] call for the same method replaces the default.
     pub fn config(url: Uri) -> RpcConfig {
         DEFAULT_METHOD_TIMEOUTS
@@ -185,11 +161,6 @@ impl ZakuraClient {
     /// `getblockchaininfo`: the chain, the tip and the value pools.
     pub async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse, RpcError> {
         self.call(Method::GetBlockchainInfo, ()).await
-    }
-
-    /// `getbestblockhash`: the hash of the tip.
-    pub async fn get_best_block_hash(&self) -> Result<GetBlockHashResponse, RpcError> {
-        self.call(Method::GetBestBlockHash, ()).await
     }
 
     /// `getblockcount`: the height of the tip. This is the cheapest call that gives the tip.

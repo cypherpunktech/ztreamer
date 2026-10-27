@@ -296,15 +296,7 @@ mod tests {
             serde_json::from_slice(&fs::read(out.path().join("latest.json")).unwrap()).unwrap();
         assert!(json.get("signature").is_some());
         let latest: Latest = serde_json::from_value(json["latest"].clone()).unwrap();
-        assert_eq!(
-            latest,
-            Latest {
-                manifest: manifest_path.to_owned(),
-                sealed_through: 2_999,
-                published_at: "2026-10-26T00:00:00Z".to_owned(),
-                public_key: signer().0.verifying_key().to_bytes(),
-            }
-        );
+        assert_eq!(latest, Latest { manifest: manifest_path.to_owned(), sealed_through: 2_999 });
         assert!(!out.path().join("latest.json.sig").exists());
         assert!(out.path().join(format!("{manifest_path}.sig")).exists());
     }
@@ -355,7 +347,6 @@ mod tests {
 
         let latest = fs::read(out.path().join(Latest::PATH)).unwrap();
         let latest = Latest::from_file(&latest, &key).unwrap();
-        assert_eq!(latest.public_key, key.to_bytes());
         assert_eq!(latest.manifest, "manifests/2026-10-26T000000Z.json");
         // `latest.json` holds its own signature.
         assert!(!out.path().join(SignatureFile::path_of(Latest::PATH)).exists());

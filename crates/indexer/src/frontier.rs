@@ -22,9 +22,6 @@ use zcash_primitives::merkle_tree::{HashSer, read_commitment_tree};
 /// An error from [`FromRpc`].
 #[derive(Debug, thiserror::Error)]
 pub enum RpcDecodeError {
-    /// The value is not valid hex.
-    #[error("RPC value is not valid hex")]
-    Hex(#[from] hex::FromHexError),
     /// The root does not have 32 bytes.
     #[error("tree root has {0} bytes, not 32")]
     RootLength(usize),
@@ -43,8 +40,7 @@ pub enum RpcDecodeError {
 ///
 /// # Implementation
 ///
-/// Implement [`FromRpc::from_rpc_bytes`] for the bytes that the RPC prints as hex. Keep the
-/// default [`FromRpc::from_rpc_hex`]: it decodes the hex and calls [`FromRpc::from_rpc_bytes`].
+/// Implement [`FromRpc::from_rpc_bytes`] for the bytes that the RPC prints as hex.
 ///
 /// # Example
 ///
@@ -54,19 +50,13 @@ pub enum RpcDecodeError {
 ///
 /// // The Sapling `finalRoot` at height 3,524,999, as the node prints it.
 /// let printed = "63a3da9f0249167a8c04e45c43dcb62145d78dd0917c2d2f2f49414696e00c0b";
-/// let root = sapling::tree::Root::from_rpc_hex(printed).unwrap();
+/// let root = sapling::tree::Root::from_rpc_bytes(&hex::decode(printed).unwrap()).unwrap();
 ///
 /// assert_eq!(hex::encode(root.bytes_in_display_order()), printed);
 /// ```
 pub trait FromRpc: Sized {
     /// Reads the value from the RPC bytes.
     fn from_rpc_bytes(bytes: &[u8]) -> Result<Self, RpcDecodeError>;
-
-    /// Reads the value from the RPC hex, for example `finalRoot` or `finalState` from
-    /// `z_gettreestate`.
-    fn from_rpc_hex(hex: &str) -> Result<Self, RpcDecodeError> {
-        Self::from_rpc_bytes(&hex::decode(hex)?)
-    }
 }
 
 impl FromRpc for sapling::tree::Root {
@@ -131,6 +121,11 @@ mod tests {
     /// The rebuilt roots at each sealed range end, in the stored byte order.
     const ROOTS_CSV: &str =
         include_str!("../../../benchmarks/2026-10-22-replication/out/roots.csv");
+
+    /// Reads a value from its RPC hex, as the node prints it.
+    fn from_hex<T: FromRpc>(hex: &str) -> Result<T, RpcDecodeError> {
+        T::from_rpc_bytes(&hex::decode(hex).unwrap())
+    }
 
     /// The `finalRoot` values at height 3,524,999, as the node prints them. From
     /// `benchmarks/2026-10-22-replication/out/z_gettreestate-3524999-sample.txt`.
@@ -204,7 +199,7 @@ mod tests {
         for len in LENGTHS {
             let tree = orchard_tree(len);
             let parsed =
-                orchard::tree::NoteCommitmentTree::from_rpc_hex(&hex::encode(tree.to_rpc_bytes()))
+                from_hex::<orchard::tree::NoteCommitmentTree>(&hex::encode(tree.to_rpc_bytes()))
                     .unwrap();
 
             assert_eq!(parsed, tree);
@@ -259,23 +254,23 @@ mod tests {
 
             // The node prints Sapling reversed (`match-reversed`) and Orchard as stored (`match`).
             assert_eq!(
-                sapling::tree::Root::from_rpc_hex(&sapling_printed).unwrap(),
+                from_hex::<sapling::tree::Root>(&sapling_printed).unwrap(),
                 sapling,
                 "{end_height:?}"
             );
             assert_eq!(
-                orchard::tree::Root::from_rpc_hex(&orchard_stored).unwrap(),
+                from_hex::<orchard::tree::Root>(&orchard_stored).unwrap(),
                 orchard,
                 "{end_height:?}"
             );
 
             // The other byte order does not give the same root.
             assert!(
-                sapling::tree::Root::from_rpc_hex(&sapling_stored).ok() != Some(sapling),
+                from_hex::<sapling::tree::Root>(&sapling_stored).ok() != Some(sapling),
                 "{end_height:?}"
             );
             assert!(
-                orchard::tree::Root::from_rpc_hex(&orchard_reversed).ok() != Some(orchard),
+                from_hex::<orchard::tree::Root>(&orchard_reversed).ok() != Some(orchard),
                 "{end_height:?}"
             );
         }
@@ -288,17 +283,17 @@ mod tests {
             .find(|roots| roots.end_height == block::Height(3_524_999))
             .unwrap();
 
-        assert_eq!(sapling::tree::Root::from_rpc_hex(NODE_SAPLING_ROOT).unwrap(), rebuilt.sapling);
-        assert_eq!(orchard::tree::Root::from_rpc_hex(NODE_ORCHARD_ROOT).unwrap(), rebuilt.orchard);
+        assert_eq!(from_hex::<sapling::tree::Root>(NODE_SAPLING_ROOT).unwrap(), rebuilt.sapling);
+        assert_eq!(from_hex::<orchard::tree::Root>(NODE_ORCHARD_ROOT).unwrap(), rebuilt.orchard);
     }
 
     #[test]
     fn ironwood_root_parses_with_the_orchard_code_path() {
         // `ironwood::tree` is `orchard::tree`, so this is the Orchard implementation.
         let ironwood: orchard::tree::Root =
-            ironwood::tree::Root::from_rpc_hex(NODE_IRONWOOD_ROOT).unwrap();
+            from_hex::<ironwood::tree::Root>(NODE_IRONWOOD_ROOT).unwrap();
 
         assert_eq!(hex::encode(ironwood.bytes_in_display_order()), NODE_IRONWOOD_ROOT);
-        assert_ne!(ironwood, orchard::tree::Root::from_rpc_hex(NODE_ORCHARD_ROOT).unwrap());
+        assert_ne!(ironwood, from_hex::<orchard::tree::Root>(NODE_ORCHARD_ROOT).unwrap());
     }
 }

@@ -199,8 +199,8 @@ fn json_response(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
 
 /// A best chain that a [`MockNode`] serves, with the answers and the wire error codes of zakura.
 ///
-/// [`Self::reply`] answers [`Method::GetBlockchainInfo`], [`Method::GetBestBlockHash`],
-/// [`Method::GetBlockHash`] and [`Method::GetBlock`] with verbosity 0. Params that do not decode
+/// [`Self::reply`] answers [`Method::GetBlockchainInfo`], [`Method::GetBlockHash`] and
+/// [`Method::GetBlock`] with verbosity 0. Params that do not decode
 /// get "invalid params". Other requests get "method not found". Clones share the chain, thus a
 /// test can change the chain while the node runs.
 ///
@@ -261,9 +261,6 @@ impl MockChain {
         };
         match method {
             Method::GetBlockchainInfo => state.blockchain_info(),
-            Method::GetBestBlockHash => {
-                state.blocks.last().map_or(NO_TIP, |(hash, _)| hash_reply(*hash))
-            }
             Method::GetBlockHash => match serde_json::from_value::<(u32,)>(params) {
                 Ok((height,)) => state.at(height).map_or(ABOVE_TIP, |(hash, _)| hash_reply(*hash)),
                 Err(_) => INVALID_PARAMS,
@@ -280,15 +277,38 @@ impl MockChain {
     }
 }
 
+impl Method {
+    /// All the methods.
+    pub(crate) const ALL: [Self; 12] = [
+        Self::GetBlockchainInfo,
+        Self::GetBlockCount,
+        Self::GetBlockHash,
+        Self::GetBlock,
+        Self::ZGetTreestate,
+        Self::ZGetSubtreesByIndex,
+        Self::GetRawMempool,
+        Self::GetRawTransaction,
+        Self::SendRawTransaction,
+        Self::GetAddressTxIds,
+        Self::GetAddressBalance,
+        Self::GetAddressUtxos,
+    ];
+
+    /// The method with the wire name `name`, or `None` for a name that is not in [`Self::ALL`].
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|method| method.name() == name)
+    }
+}
+
 const METHOD_NOT_FOUND: Reply =
     Reply::Error { code: RpcCode::METHOD_NOT_FOUND, message: "Method not found" };
-/// zakura raises [`RpcCode::INVALID_PARAMS`] for params that do not decode, and its
+/// zakura raises JSON-RPC 2.0 "invalid params" for params that do not decode, and its
 /// `rpc_call_compatibility` middleware sends [`RpcCode::MISC`] on the wire.
 const INVALID_PARAMS: Reply = Reply::Error { code: RpcCode::MISC, message: "Invalid params" };
 
 const NO_TIP: Reply =
     Reply::Error { code: RpcCode::IN_WARMUP, message: "no chain tip available yet" };
-/// As [`INVALID_PARAMS`], zakura raises [`RpcCode::INVALID_PARAMS`] and sends [`RpcCode::MISC`].
+/// As [`INVALID_PARAMS`], zakura raises "invalid params" and sends [`RpcCode::MISC`].
 const ABOVE_TIP: Reply = Reply::Error { code: RpcCode::MISC, message: RpcError::ABOVE_TIP_MESSAGE };
 const BLOCK_NOT_FOUND: Reply =
     Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "Block not found" };
