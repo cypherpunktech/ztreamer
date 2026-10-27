@@ -1,4 +1,5 @@
-//! `ztreamerd` process lifecycle: embedded Zakura, historical indexing, head following, and servers.
+//! `ztreamerd` process lifecycle: embedded or remote Zakura, replica import, historical indexing,
+//! head following, and servers. The `export-snapshot` subcommand is in [`export`].
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
@@ -49,7 +50,7 @@ const DEFAULT_MAP_SIZE: usize = 64 * 1024 * 1024 * 1024;
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "CompactTxStreamer daemon backed by embedded Zakura",
+    about = "CompactTxStreamer daemon backed by an embedded or remote Zakura node",
     args_conflicts_with_subcommands = true
 )]
 struct Cli {

@@ -1,4 +1,9 @@
-//! Shared CompactTxStreamer behavior with gRPC and Zakura p2p transport adapters.
+//! Shared CompactTxStreamer behavior with gRPC and Zakura p2p transport adapters. The service
+//! reads the chain state through a [`StateBackend`]: [`InProcessBackend`] for the embedded node,
+//! or [`RemoteBackend`] for a remote node over JSON-RPC.
+//!
+//! The crate also has the Replicator gRPC service ([`ReplicatorService`]), which serves sealed
+//! ranges to replicas, and the [`RangeMetaFiller`], which writes the `range_meta` rows.
 
 // Public items are not fully documented yet. Remove this once every `pub` item has a doc comment.
 #![allow(missing_docs)]

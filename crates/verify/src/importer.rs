@@ -94,7 +94,8 @@ pub struct ImportConfig {
     /// The heights of each range that [`Epoch::sample`](crate::epoch::Epoch::sample) compares,
     /// and the secret seed.
     pub verify_sample: SamplePlan,
-    /// The epochs that fetch at the same time, and the epochs that verify at the same time.
+    /// The epochs that verify at the same time. Two epochs for each worker are in work at the
+    /// same time: they fetch, verify, attest and sample.
     pub import_workers: NonZeroUsize,
 }
 

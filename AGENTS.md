@@ -1,7 +1,8 @@
 # ztreamer
 
-Zcash indexer and light-wallet server with an embedded Zakura node. Cargo
-workspace: `bin/ztreamerd` plus `crates/{indexer,node,protocol,service}`.
+Zcash indexer and light-wallet server with an embedded or remote Zakura node.
+Cargo workspace: `bin/ztreamerd` plus
+`crates/{indexer,node,protocol,remote,service,verify}`.
 Building needs `protoc` on the path.
 
 ## Commands
@@ -70,5 +71,7 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 
 - Tests panic. Never return `Result` from a test. `unwrap()` directly.
 - Unit tests in `mod tests` at the bottom of the file. Integration tests in
-  `tests/`. Benchmarks in `benches/`. Shared fixtures in `ztreamer_indexer::test_utils`,
-  behind the `test-utils` feature.
+  `tests/`. Benchmarks in `benches/`. Shared fixtures in the `test_utils` modules of
+  `ztreamer_indexer`, `ztreamer_remote` and `ztreamer_service`, behind the
+  `test-utils` feature of each crate. `ztreamer_verify::test_utils` is for the
+  tests of that crate only.

@@ -113,8 +113,7 @@ impl EpochImport {
         self.attest_and_sample(at, blobs, proof).await
     }
 
-    /// The blobs of the epoch at `at`: from the index for an installed epoch, else from the
-    /// sources.
+    /// The blobs of the epoch at `at`, from the sources.
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
         let started = Instant::now();
         let entries = self.manifest_epoch(at).entries();
