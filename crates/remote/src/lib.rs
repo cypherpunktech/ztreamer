@@ -30,6 +30,8 @@
 //! # }
 //! ```
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 mod auth;
 mod client;
 mod envelope;
