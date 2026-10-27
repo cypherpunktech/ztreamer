@@ -4,6 +4,8 @@
 //! rules between the tables. [`IndexWriter`](super::writer::IndexWriter) does that. The docs of
 //! the `index` module give the full table layout, the rules, and an example.
 
+use std::convert::Infallible;
+
 use heed::{
     Database, Env, RoIter, RoTxn, RwTxn,
     byteorder::BigEndian,
@@ -12,7 +14,8 @@ use heed::{
 use zakura_chain::block;
 
 use super::{
-    BlockId, IndexError, IndexState, RANGE_SIZE, metadata::Metadata, range_meta::RangeMetaTable,
+    BlockId, IndexError, IndexState, RANGE_SIZE, RangeCheckError, metadata::Metadata,
+    range_meta::RangeMetaTable,
 };
 use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes};
 
@@ -144,6 +147,13 @@ impl<'txn> SealedRange<'txn> {
         Ok(Self { start, decoder: RangeDecoder::new(bytes)? })
     }
 
+    /// Parses the envelope of the packed range `bytes`. The first height of the envelope is the
+    /// start of the range.
+    pub(crate) fn from_envelope(bytes: &'txn [u8]) -> Result<Self, CodecError> {
+        let decoder = RangeDecoder::new(bytes)?;
+        Ok(Self { start: decoder.start(), decoder })
+    }
+
     pub(crate) const fn start(&self) -> u32 {
         self.start
     }
@@ -159,7 +169,17 @@ impl<'txn> SealedRange<'txn> {
     }
 
     /// Checks the chain of the range on top of the block below it, which has the hash `parent`
-    /// and the tree sizes `tree_sizes`. The decoder checks the links at the two ends of the range
+    /// and the tree sizes `tree_sizes`. [`SealedRange::check_chain_with`] gives the checks.
+    pub(crate) fn check_chain(
+        &self,
+        parent: block::Hash,
+        tree_sizes: TreeSizes,
+    ) -> Result<RangeChain, IndexError> {
+        self.check_chain_with(Some((parent, tree_sizes)), |_| Ok::<_, Infallible>(()))
+            .map_err(|error| error.into_index_error(self.start))
+    }
+
+    /// Checks the chain of the range. The decoder checks the links at the two ends of the range
     /// only. Thus this method decodes each record, in height order. Each record must:
     ///
     /// - obey the rules of [`CompactBlockRecord::encode`],
@@ -167,39 +187,72 @@ impl<'txn> SealedRange<'txn> {
     /// - link to the block below it,
     /// - have tree sizes that are not smaller than the tree sizes of the block below it.
     ///
-    /// It keeps only the block ids and the last record. Thus a large range does not stay in
-    /// memory two times. It returns [`IndexError::RangeBlob`] at the first record that fails.
-    pub(crate) fn check_chain(
+    /// `parent` is the hash and the tree sizes of the block below the range. If it is `None`,
+    /// the method does not check the first record against the block below it. The first record
+    /// of the result then gives the link that the caller must check.
+    ///
+    /// It calls `visit` for each record after its decode and the rules of
+    /// [`CompactBlockRecord::encode`], and before the other checks. It keeps only the block ids,
+    /// the first link and the last record. Thus a large range does not stay in memory two times.
+    /// It returns the error of the first record that fails.
+    pub(crate) fn check_chain_with<E>(
         &self,
-        parent: block::Hash,
-        tree_sizes: TreeSizes,
-    ) -> Result<RangeChain, IndexError> {
+        parent: Option<(block::Hash, TreeSizes)>,
+        mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), E>,
+    ) -> Result<RangeChain, RangeCheckError<E>> {
         let mut ids = Vec::with_capacity(RANGE_SIZE as usize);
-        let (mut previous_hash, mut previous_sizes) = (parent, tree_sizes);
-        let mut last = None;
+        let (mut below, mut first, mut last) = (parent, None, None);
         for height in self.start()..=self.end() {
-            let record: CompactBlockRecord = self.read(height)?;
-            record.check()?;
+            let record: CompactBlockRecord = self
+                .read(height)
+                .and_then(|record: CompactBlockRecord| record.check().map(|()| record))
+                .map_err(|source| RangeCheckError::Record { height, source })?;
+            visit(&record).map_err(RangeCheckError::Visit)?;
             if record.height != height
-                || record.previous_hash != previous_hash
-                || !record.end_tree_sizes.follows(previous_sizes)
+                || below.is_some_and(|(previous_hash, previous_sizes)| {
+                    record.previous_hash != previous_hash
+                        || !record.end_tree_sizes.follows(previous_sizes)
+                })
             {
-                return Err(IndexError::RangeBlob { height });
+                return Err(RangeCheckError::Chain { height });
             }
             ids.push(BlockId::new(height, record.hash));
-            (previous_hash, previous_sizes) = (record.hash, record.end_tree_sizes);
+            below = Some((record.hash, record.end_tree_sizes));
+            first.get_or_insert(FirstLink {
+                previous_hash: record.previous_hash,
+                tree_sizes: record.end_tree_sizes,
+            });
             last = Some(record);
         }
-        let last = last.expect("a range holds RANGE_SIZE records");
-        Ok(RangeChain { ids, last })
+        let (first, last) = first.zip(last).expect("a range holds RANGE_SIZE records");
+        Ok(RangeChain { ids, first, last })
     }
 }
 
-/// The result of [`SealedRange::check_chain`]: the id of each block in height order, and the
-/// last record.
+/// The link of the first record of a range to the block below it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FirstLink {
+    /// The previous hash of the first record.
+    pub(crate) previous_hash: block::Hash,
+    /// The tree sizes after the first record.
+    pub(crate) tree_sizes: TreeSizes,
+}
+
+/// The result of [`SealedRange::check_chain_with`]: the id of each block in height order, the
+/// link of the first record, and the last record.
 pub(crate) struct RangeChain {
     pub(crate) ids: Vec<BlockId>,
+    pub(crate) first: FirstLink,
     pub(crate) last: CompactBlockRecord,
+}
+
+impl RangeChain {
+    /// Returns `true` if the first record links to the block with the hash `parent` and the
+    /// tree sizes `tree_sizes`: the checks of [`SealedRange::check_chain`] on the first record
+    /// that need the block below the range.
+    pub(crate) fn links_to(&self, parent: block::Hash, tree_sizes: TreeSizes) -> bool {
+        self.first.previous_hash == parent && self.first.tree_sizes.follows(tree_sizes)
+    }
 }
 
 /// One encoded block for each height above the sealed ranges.

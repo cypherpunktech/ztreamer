@@ -7,7 +7,8 @@
 //! 1. The BLAKE3 digest and the length of the blob equal `blob_digest` and `blob_len`. If not,
 //!    the blob was damaged in transfer: [`Reject::Refetch`].
 //! 2. The format version of the blob equals `range_version`.
-//! 3. The blob decodes to exactly [`RANGE_SIZE`] records from `start_height`.
+//! 3. The blob decodes to exactly [`RANGE_SIZE`] records from `start_height`. Each record obeys
+//!    the rules of [`CompactBlockRecord::encode`]: each transaction holds shielded data.
 //! 4. Each record points to the hash of the record before it. The first record points to the
 //!    end hash of the previous range.
 //! 5. Each record adds to the tree sizes exactly the commitments that it holds.
@@ -15,14 +16,24 @@
 //!
 //! A failure after step 1 means that the manifest entry and the blob agree, and that the range
 //! is wrong: [`Reject::Rejected`].
+//!
+//! Steps 1 and 3 and the links inside the range are the checks of [`CheckedRange::check`]. The
+//! check decodes the blob one time, through [`CheckedRange::check_with`], and does the other
+//! steps for each record. The importer installs the [`CheckedRange`] that the check gives with
+//! [`Index::install_checked_range`]. Thus the serial install does not calculate the digest or
+//! decode the blob again.
+//!
+//! [`RANGE_SIZE`]: ztreamer_indexer::index::RANGE_SIZE
+//! [`Index::install_checked_range`]: ztreamer_indexer::index::Index::install_checked_range
 
 use std::fmt;
 
+use bytes::Bytes;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, RangeDecoder, TreeSizes},
+    codec::{CompactBlockRecord, TreeSizes},
     index::{
-        RANGE_SIZE,
+        CheckedRange, RangeCheckError,
         range_meta::{BlobMismatch, ManifestEntry},
     },
 };
@@ -138,13 +149,13 @@ pub enum Reject {
 /// A range blob with the manifest entry that describes it.
 #[derive(Clone, Copy)]
 pub struct RangeBlob<'a> {
-    bytes: &'a [u8],
+    bytes: &'a Bytes,
     entry: &'a ManifestEntry,
 }
 
 impl<'a> RangeBlob<'a> {
     /// Pairs the bytes of a range blob with its manifest entry.
-    pub const fn new(bytes: &'a [u8], entry: &'a ManifestEntry) -> Self {
+    pub const fn new(bytes: &'a Bytes, entry: &'a ManifestEntry) -> Self {
         Self { bytes, entry }
     }
 
@@ -153,42 +164,43 @@ impl<'a> RangeBlob<'a> {
     /// `previous` is the end of the range before: [`RangeLink::GENESIS`] for the range at
     /// genesis. Returns the end of this range, for the check of the next range.
     pub fn check(&self, previous: &RangeLink) -> Result<RangeLink, Reject> {
-        self.check_with(previous, |_| Ok(()))
+        self.check_with(previous, |_| Ok(())).map(|(link, _)| link)
     }
 
     /// [`RangeBlob::check`], and `visit` each record after its link and size checks pass.
+    ///
+    /// The decode is [`CheckedRange::check_with`]. Thus the blob is decoded one time, and the
+    /// [`CheckedRange`] that it gives lets the importer install the range without a second
+    /// digest and decode. The checks of the module docs run in `visit` of the decode.
     pub(crate) fn check_with(
         &self,
         previous: &RangeLink,
         mut visit: impl FnMut(&CompactBlockRecord) -> Result<(), Reject>,
-    ) -> Result<RangeLink, Reject> {
+    ) -> Result<(RangeLink, CheckedRange), Reject> {
         let entry = self.entry;
-        // Do step 1 of the module docs: check the length and the digest.
-        entry
-            .check_blob(self.bytes)
-            .map_err(|mismatch| Reject::Refetch { start_height: entry.start_height, mismatch })?;
         let start = entry.start_height;
-        if self.bytes.first() != Some(&entry.range_version) {
-            return Err(Check::RangeVersion.at(start));
-        }
-        let decoder = RangeDecoder::new(self.bytes).map_err(|_| Check::Decode.at(start))?;
-
-        let mut link = *previous;
-        for index in 0..RANGE_SIZE {
-            let height = start.saturating_add(index);
-            let record = decoder.record(index as usize).map_err(|_| Check::Decode.at(height))?;
+        let (mut link, mut height) = (*previous, start);
+        let checked = CheckedRange::check_with(self.bytes.clone(), entry, |record| {
             if record.height != height {
                 return Err(Check::StartHeight.at(record.height));
             }
             if record.previous_hash != link.end_hash {
-                let check = if index == 0 { Check::StartLink } else { Check::HashChain };
+                let check = if height == start { Check::StartLink } else { Check::HashChain };
                 return Err(check.at(height));
             }
             if link.end_tree_sizes.checked_add(record.additions()) != Some(record.end_tree_sizes) {
                 return Err(Check::TreeSizes.at(height));
             }
-            visit(&record)?;
-            link = RangeLink::from(&record);
+            visit(record)?;
+            link = RangeLink::from(record);
+            height = height.saturating_add(1);
+            Ok(())
+        });
+        let checked = checked.map_err(|error| self.reject(error))?;
+        // The version check of step 2 needs no decode. `reject` gives it before the errors of
+        // the decode. Here it refuses a blob that decodes with another version than the entry.
+        if self.bytes.first() != Some(&entry.range_version) {
+            return Err(Check::RangeVersion.at(start));
         }
 
         if link.end_hash != entry.end_hash {
@@ -197,7 +209,25 @@ impl<'a> RangeBlob<'a> {
         if link.end_tree_sizes != entry.end_tree_sizes {
             return Err(Check::EndTreeSizes.at(entry.end_height));
         }
-        Ok(link)
+        Ok((link, checked))
+    }
+
+    /// The rejection for a failed [`CheckedRange::check_with`], in the order of the module docs:
+    /// step 1 (the digest), then step 2 (the version), then the error of the decode or of the
+    /// checks in `visit`.
+    fn reject(&self, error: RangeCheckError<Reject>) -> Reject {
+        let start = self.entry.start_height;
+        match error {
+            RangeCheckError::Blob(mismatch) => Reject::Refetch { start_height: start, mismatch },
+            _ if self.bytes.first() != Some(&self.entry.range_version) => {
+                Check::RangeVersion.at(start)
+            }
+            RangeCheckError::Envelope(_) => Check::Decode.at(start),
+            RangeCheckError::Record { height, .. } => Check::Decode.at(height),
+            // `visit` refuses each record that does not link before the decode checks the link.
+            RangeCheckError::Chain { height } => Check::HashChain.at(height),
+            RangeCheckError::Visit(reject) => reject,
+        }
     }
 }
 
@@ -213,15 +243,16 @@ impl fmt::Debug for RangeBlob<'_> {
 #[cfg(test)]
 mod tests {
     use ztreamer_indexer::{
-        codec::{RANGE_ENVELOPE_BYTES, encode_range},
-        test_utils::{hash, mixed_records},
+        codec::{RANGE_ENVELOPE_BYTES, encode_range, encode_range_from_bytes},
+        index::RANGE_SIZE,
+        test_utils::{encode_with_unshielded_transaction, hash, mixed_records},
     };
 
     use super::*;
 
     /// A range blob of `records` in the given order, with the envelope of `original`. Unlike
     /// `encode_range`, it does not check the order or the hash chain.
-    fn assemble(original: &[u8], records: &[CompactBlockRecord]) -> Vec<u8> {
+    fn assemble(original: &[u8], records: &[CompactBlockRecord]) -> Bytes {
         let (mut offsets, mut body) = (Vec::new(), Vec::new());
         for record in records {
             offsets.extend_from_slice(&(body.len() as u32).to_be_bytes());
@@ -230,14 +261,14 @@ mod tests {
             body.extend_from_slice(&bytes);
         }
         offsets.extend_from_slice(&(body.len() as u32).to_be_bytes());
-        [&original[..RANGE_ENVELOPE_BYTES], &offsets, &body].concat()
+        [&original[..RANGE_ENVELOPE_BYTES], &offsets, &body].concat().into()
     }
 
     /// The records of the ranges at 0 and at 1,000, and the blob of the range at 1,000.
-    fn second_range() -> (Vec<CompactBlockRecord>, Vec<CompactBlockRecord>, Vec<u8>) {
+    fn second_range() -> (Vec<CompactBlockRecord>, Vec<CompactBlockRecord>, Bytes) {
         let mut records = mixed_records(2 * RANGE_SIZE);
         let second = records.split_off(RANGE_SIZE as usize);
-        let blob = encode_range(&second).unwrap();
+        let blob = encode_range(&second).unwrap().into();
         (records, second, blob)
     }
 
@@ -248,7 +279,7 @@ mod tests {
     #[test]
     fn consecutive_ranges_pass() {
         let (first, second, blob) = second_range();
-        let first_blob = encode_range(&first).unwrap();
+        let first_blob = encode_range(&first).unwrap().into();
 
         let link =
             RangeBlob::new(&first_blob, &ManifestEntry::from_records_and_blob(&first, &first_blob))
@@ -276,12 +307,13 @@ mod tests {
         );
         let refetch = |mismatch| Err(Reject::Refetch { start_height: 1_000, mismatch });
 
-        let mut flipped = blob.clone();
+        let mut flipped = blob.to_vec();
         flipped[blob.len() / 2] ^= 1;
+        let flipped = Bytes::from(flipped);
         assert_eq!(RangeBlob::new(&flipped, &entry).check(&link), refetch(BlobMismatch::Digest));
         let (expected, actual) = (blob.len() as u64, blob.len() as u64 - 1);
         assert_eq!(
-            RangeBlob::new(&blob[..blob.len() - 1], &entry).check(&link),
+            RangeBlob::new(&blob.slice(..blob.len() - 1), &entry).check(&link),
             refetch(BlobMismatch::Len { expected, actual })
         );
     }
@@ -296,6 +328,23 @@ mod tests {
         let result =
             RangeBlob::new(&reordered, &ManifestEntry::from_records_and_blob(&second, &reordered))
                 .check(&link);
+
+        assert_rejected(result, Check::Decode, 1_500);
+    }
+
+    /// The install refuses a record that the encoder refuses. Thus the check refuses it too,
+    /// before the install.
+    #[test]
+    fn a_transaction_without_shielded_data_is_rejected() {
+        let (first, second, _) = second_range();
+        let link = RangeLink::from(first.last().unwrap());
+        let mut parts: Vec<_> = second.iter().map(|record| record.encode().unwrap()).collect();
+        parts[500] = encode_with_unshielded_transaction(&second[500]);
+        let parts: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let blob = Bytes::from(encode_range_from_bytes(&parts).unwrap());
+
+        let result = RangeBlob::new(&blob, &ManifestEntry::from_records_and_blob(&second, &blob))
+            .check(&link);
 
         assert_rejected(result, Check::Decode, 1_500);
     }
@@ -380,7 +429,7 @@ mod tests {
         for record in &mut second[500..] {
             record.end_tree_sizes.sapling += 1;
         }
-        let blob = encode_range(&second).unwrap();
+        let blob = Bytes::from(encode_range(&second).unwrap());
         let entry = ManifestEntry::from_records_and_blob(&second, &blob);
         assert_rejected(RangeBlob::new(&blob, &entry).check(&link), Check::TreeSizes, 1_500);
     }

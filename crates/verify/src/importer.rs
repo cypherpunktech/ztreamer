@@ -15,8 +15,11 @@
 //!    time. Thus the node calls of an epoch overlap the verification of the next epoch.
 //!
 //! The importer takes the verified epochs in height order, and installs each one before it
-//! takes the next. It installs each range with [`Index::install_sealed_range`] and a
-//! [`VerifyState::Verified`] row.
+//! takes the next. It installs each range with [`Index::install_checked_range`] and a
+//! [`VerifyState::Verified`] row. [`Epoch::verify`] made the
+//! [`CheckedRange`](ztreamer_indexer::index::CheckedRange) of each blob with its one decode.
+//! Thus the install, on one writer thread, does only the checks that need the index: it does
+//! not calculate the digest or decode the blob again.
 //!
 //! The start frontiers of the first epoch come from the `range_meta` row of the last sealed
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the

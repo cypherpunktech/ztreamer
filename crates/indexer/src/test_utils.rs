@@ -4,7 +4,7 @@
 //! feature in their `[dev-dependencies]`.
 
 use crate::{
-    codec::{CompactBlockRecord, TreeSizes},
+    codec::{BLOCK_FORMAT_VERSION, CompactBlockRecord, TreeSizes},
     index::{Index, IndexState},
     ingest::OrderedBuilder,
     parser::parse_block,
@@ -97,6 +97,25 @@ pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
             record
         })
         .collect()
+}
+
+/// The encoding of `record` with one more transaction that holds no shielded data. The
+/// envelope is correct, and [`CompactBlockRecord::decode`] accepts the bytes. The encoder
+/// refuses such a record, and so must each check of a stored record.
+pub fn encode_with_unshielded_transaction(record: &CompactBlockRecord) -> Vec<u8> {
+    use prost::Message as _;
+
+    let mut block = record.to_proto();
+    block.vtx.push(ztreamer_protocol::proto::CompactTx { txid: vec![7; 32], ..Default::default() });
+    let payload = block.encode_to_vec();
+    let mut bytes = vec![BLOCK_FORMAT_VERSION];
+    bytes.extend_from_slice(&record.height.to_be_bytes());
+    bytes.extend_from_slice(&record.hash.0);
+    bytes.extend_from_slice(&record.previous_hash.0);
+    bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(&payload);
+    CompactBlockRecord::decode(&bytes).expect("the record decodes");
+    bytes
 }
 
 /// Opens an index at `path` for mainnet with the genesis hash `[1; 32]` and a 64 MiB map.

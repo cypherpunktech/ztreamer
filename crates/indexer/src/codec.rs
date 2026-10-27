@@ -8,7 +8,7 @@ use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 
 use crate::{index::RANGE_SIZE, types::CompactTransaction};
 
-const BLOCK_FORMAT_VERSION: u8 = 1;
+pub(crate) const BLOCK_FORMAT_VERSION: u8 = 1;
 /// The format version of the packed range blobs that the index writes.
 pub const RANGE_FORMAT_VERSION: u8 = 1;
 pub(crate) const MAX_RECORD_BYTES: usize = 2_000_000;
@@ -475,6 +475,11 @@ impl<'a> RangeDecoder<'a> {
             return Err(CodecError::Length);
         }
         Ok(decoder)
+    }
+
+    /// The first height of the range.
+    pub const fn start(&self) -> u32 {
+        self.start
     }
 
     /// Decodes record `index` of the range. Checks that its height is the range start plus

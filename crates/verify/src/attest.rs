@@ -166,7 +166,7 @@ impl Epoch<'_> {
     ///
     /// # async fn run(
     /// #     epoch: Epoch<'_>,
-    /// #     blobs: Vec<Vec<u8>>,
+    /// #     blobs: Vec<bytes::Bytes>,
     /// #     start: Frontiers,
     /// #     node: &dyn Attestor,
     /// # ) -> Result<Vec<Attested>, EpochError> {
@@ -407,6 +407,7 @@ fn final_root<R: FromRpc>(pool: Pool, commitments: &Commitments) -> Result<Optio
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use pasta_curves::pallas;
     use serde_json::{Value, json};
     use zakura_chain::{ironwood, orchard, sapling};
@@ -720,7 +721,7 @@ mod tests {
 
     /// The first mainnet epoch, 0 to 9,999, as the filler writes it. It has no commitments. Each
     /// pool has the serialized empty frontier `000000`, also a pool that is not active.
-    fn first_epoch() -> (Vec<ManifestEntry>, Vec<Vec<u8>>) {
+    fn first_epoch() -> (Vec<ManifestEntry>, Vec<Bytes>) {
         let empty = vec![0; 3];
         let blocks: Vec<_> =
             (0..10 * RANGE_SIZE).map(|height| record(height, Vec::new())).collect();
@@ -734,7 +735,7 @@ mod tests {
                     orchard: empty.clone(),
                     ironwood: empty.clone(),
                 };
-                (entry, blob)
+                (entry, Bytes::from(blob))
             })
             .unzip()
     }

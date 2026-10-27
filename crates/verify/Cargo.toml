@@ -69,3 +69,7 @@ ztreamer-service = { path = "../service" }
 [[bench]]
 name = "epoch"
 harness = false
+
+[[bench]]
+name = "install"
+harness = false

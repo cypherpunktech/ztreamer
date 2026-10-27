@@ -12,13 +12,18 @@
 
 use std::iter::FusedIterator;
 
+use bytes::Bytes;
 use pasta_curves::{group::ff::PrimeField, pallas};
 use zakura_chain::{ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     frontier::{FromRpc, RpcDecodeError},
-    index::range_meta::{
-        Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry, PoolRoots, SubtreeNode, SubtreeRoot,
+    index::{
+        CheckedRange,
+        range_meta::{
+            Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry, PoolRoots, SubtreeNode,
+            SubtreeRoot,
+        },
     },
     types::CompactShieldedAction,
 };
@@ -62,11 +67,20 @@ impl<'a> Epoch<'a> {
     /// empty. An active pool that becomes inactive is [`Check::Frontier`]. The proof has a root
     /// for each pool, also for an empty tree. [`EpochProof::matches_roots`] compares these roots
     /// with the node roots.
-    pub fn verify(
+    pub fn verify(&self, blobs: &[Bytes], start: &Frontiers) -> Result<EpochProof, Reject> {
+        self.verify_ranges(blobs, start).map(|(proof, _)| proof)
+    }
+
+    /// [`Epoch::verify`], and the [`CheckedRange`] of each blob, in order. The importer installs
+    /// them with [`Index::install_checked_range`]. Thus the install does not check the blobs
+    /// again.
+    ///
+    /// [`Index::install_checked_range`]: ztreamer_indexer::index::Index::install_checked_range
+    pub(crate) fn verify_ranges(
         &self,
-        blobs: &[impl AsRef<[u8]>],
+        blobs: &[Bytes],
         start: &Frontiers,
-    ) -> Result<EpochProof, Reject> {
+    ) -> Result<(EpochProof, Vec<CheckedRange>), Reject> {
         if blobs.len() != self.entries.len() {
             return Err(Reject::BlobCount { entries: self.entries.len(), blobs: blobs.len() });
         }
@@ -78,11 +92,13 @@ impl<'a> Epoch<'a> {
             .ok_or(Check::StartFrontier.at(start_height))?;
 
         let (mut end_frontiers, mut completed) = (start, Vec::new());
+        let mut ranges = Vec::with_capacity(blobs.len());
         for (entry, blob) in self.entries.iter().zip(blobs) {
             let first_completed = completed.len();
-            link = RangeBlob::new(blob.as_ref(), entry).check_with(&link, |record| {
+            let (end, range) = RangeBlob::new(blob, entry).check_with(&link, |record| {
                 trees.append(record, &mut completed).map_err(|check| check.at(record.height))
             })?;
+            link = end;
             if !entry.frontiers.follows(end_frontiers) || !trees.matches(&entry.frontiers) {
                 return Err(Check::Frontier.at(entry.end_height));
             }
@@ -93,13 +109,15 @@ impl<'a> Epoch<'a> {
                 return Err(Check::SubtreeRoots.at(entry.end_height));
             }
             end_frontiers = &entry.frontiers;
+            ranges.push(range);
         }
-        Ok(EpochProof {
+        let proof = EpochProof {
             end_frontiers: end_frontiers.clone(),
             end_tree_sizes: link.end_tree_sizes,
             roots: trees.roots(),
             completed,
-        })
+        };
+        Ok((proof, ranges))
     }
 }
 
@@ -550,7 +568,7 @@ mod tests {
     struct Fixture {
         /// The entry before the epoch, then one entry per range of the epoch.
         entries: Vec<ManifestEntry>,
-        blobs: Vec<Vec<u8>>,
+        blobs: Vec<Bytes>,
         start: Frontiers,
         end: Trees,
         completed: Vec<SubtreeRoot>,
@@ -580,7 +598,7 @@ mod tests {
             entry.frontiers = trees.frontiers();
             entry.subtree_roots = completed[first_completed..].to_vec();
             entries.push(entry);
-            blobs.push(blob);
+            blobs.push(blob.into());
         }
         Fixture { entries, blobs, start, end: trees, completed }
     }

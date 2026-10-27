@@ -42,7 +42,9 @@
 //!
 //! A replica gets its sealed ranges from a snapshot, not from a node.
 //! [`Index::install_sealed_range`] writes one packed range and its `range_meta` row. It accepts
-//! ranges only in height order, with no gaps. During an import, the index has no mutable rows.
+//! ranges only in height order, with no gaps. [`Index::install_checked_range`] does the same
+//! install for a [`CheckedRange`]: the checks of the blob that do not need the index ran before,
+//! on another thread. During an import, the index has no mutable rows.
 //! Thus the durable tip is `sealed_through`. [`Index::read_sealed_range_bytes`] reads the packed
 //! range that a snapshot gives.
 //!
@@ -96,7 +98,8 @@
 //!
 //! It does not decode the blocks inside a range. Thus it does not examine their chain links or
 //! their hash entries. The range encoder checks the chain links when it writes the range. An
-//! install decodes each block of the range. It checks the chain links and writes each hash entry.
+//! install, or the [`CheckedRange::check`] before it, decodes each block of the range and checks
+//! the chain links. The install writes each hash entry.
 //!
 //! # Value formats
 //!
@@ -120,14 +123,16 @@ use crate::codec::{
 };
 use crate::ingest::{EncodedBatch, WriteBatch};
 
+mod checked_range;
 mod metadata;
 pub mod range_meta;
 mod tables;
 mod telemetry;
 mod writer;
+pub use checked_range::{CheckedRange, RangeCheckError};
 use metadata::Metadata;
 use range_meta::{BlobMismatch, RangeMeta, VerifyState};
-use tables::{SealedRange, Tables, range_start};
+use tables::{RangeChain, SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
 
@@ -221,6 +226,13 @@ impl IndexState {
     pub(crate) fn next_verify_start(&self) -> Result<u32, IndexError> {
         self.verified_through
             .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
+    }
+
+    /// The hash that the first block of an installed range links to: the hash of the tip, or the
+    /// genesis previous hash on an empty index. An install requires no mutable rows. Thus the
+    /// tip is the last block of the sealed ranges.
+    pub(crate) fn install_parent_hash(&self) -> block::Hash {
+        self.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash)
     }
 
     /// Returns `true` if the index has mutable rows. The mutable rows cover the heights above
@@ -430,6 +442,37 @@ impl Index {
         self.tables.range_meta.rows_from(&txn, start)
     }
 
+    /// Sets the tip of an empty index to `tip`, with `tree_sizes`, as if sealed ranges cover
+    /// `0..=tip.height`. The index holds no range. Thus it does not obey the coverage rule, and
+    /// [`Index::open`] refuses it. For benches only: an install of the range after `tip` needs
+    /// no ranges below it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index has a state row or a block row, or if `tip.height` is not the last
+    /// height of a range.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_sealed_tip_of_empty_index(
+        &self,
+        tip: BlockId,
+        tree_sizes: TreeSizes,
+    ) -> Result<IndexState, IndexError> {
+        let mut txn = self.env.write_txn()?;
+        assert_eq!(self.tables.metadata.get_state(&txn)?, IndexState::default());
+        assert!(!self.tables.has_blocks(&txn)?, "the index holds blocks");
+        assert_eq!(range_start(tip.height + 1), tip.height + 1, "the tip is not a range end");
+        let state = IndexState {
+            durable_tip: Some(tip),
+            sealed_through: Some(tip.height),
+            verified_through: None,
+            generation: 1,
+            tree_sizes,
+        };
+        self.tables.metadata.put_state(&mut txn, state)?;
+        txn.commit()?;
+        Ok(state)
+    }
+
     /// Installs one packed range from a snapshot, and its metadata, in one write.
     ///
     /// Conditions for an install:
@@ -462,7 +505,50 @@ impl Index {
         meta: &RangeMeta,
     ) -> Result<IndexState, IndexError> {
         let blob_check = meta.entry.check_blob(blob);
-        let mut writer = IndexWriter::start_latest(&self.env, self.tables)?;
+        let writer = self.start_install(start)?;
+        blob_check.map_err(|mismatch| IndexError::Blob { start, mismatch })?;
+        let state = writer.state();
+        let chain = SealedRange::new(start, blob)?
+            .check_chain(state.install_parent_hash(), state.tree_sizes)?;
+        Self::finish_install(writer, start, blob, &chain, meta)
+    }
+
+    /// Installs a range that [`CheckedRange::check`] checked, and its metadata, in one write.
+    ///
+    /// The conditions are the conditions of [`Index::install_sealed_range`]. The
+    /// [`CheckedRange`] proves the conditions that do not need the index. Thus this method does
+    /// only the checks that need the index, and calculates no digest and decodes no record:
+    ///
+    /// - The index has no mutable rows, and the range starts at `sealed_through + 1`, or at 0 on
+    ///   an empty index.
+    /// - `meta.entry.blob_len` and `meta.entry.blob_digest` are the length and the digest that
+    ///   the check of the range compared.
+    /// - The first record links to the tip, or to the genesis previous hash for range 0, and
+    ///   its tree sizes are not smaller than the tree sizes of the tip.
+    /// - `meta` describes the range, and no block hash of the range is in the index already.
+    ///
+    /// The write is the write of [`Index::install_sealed_range`].
+    pub fn install_checked_range(
+        &self,
+        range: &CheckedRange,
+        meta: &RangeMeta,
+    ) -> Result<IndexState, IndexError> {
+        let start = range.start();
+        let writer = self.start_install(start)?;
+        range
+            .check_entry_blob(&meta.entry)
+            .map_err(|mismatch| IndexError::Blob { start, mismatch })?;
+        let (state, chain) = (writer.state(), range.chain());
+        if !chain.links_to(state.install_parent_hash(), state.tree_sizes) {
+            return Err(IndexError::RangeBlob { height: start });
+        }
+        Self::finish_install(writer, start, range.blob(), chain, meta)
+    }
+
+    /// Starts the write of an install at `start`. Refuses an install that is not at the next
+    /// range start, and an index with mutable rows.
+    fn start_install(&self, start: u32) -> Result<IndexWriter<'_>, IndexError> {
+        let writer = IndexWriter::start_latest(&self.env, self.tables)?;
         let state = writer.state();
         let next = state.next_range_start()?;
         if start != next {
@@ -471,10 +557,18 @@ impl Index {
         if state.has_mutable_rows() {
             return Err(IndexError::MutableRows);
         }
-        blob_check.map_err(|mismatch| IndexError::Blob { start, mismatch })?;
-        // The index has no mutable rows. Thus the tip is the last block of the sealed ranges.
-        let parent = state.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
-        let chain = SealedRange::new(start, blob)?.check_chain(parent, state.tree_sizes)?;
+        Ok(writer)
+    }
+
+    /// Checks that `meta` describes the range `chain` at `start`, then writes the range, its
+    /// hash entries and `meta`, and moves the tip to the range end.
+    fn finish_install(
+        mut writer: IndexWriter<'_>,
+        start: u32,
+        blob: &[u8],
+        chain: &RangeChain,
+        meta: &RangeMeta,
+    ) -> Result<IndexState, IndexError> {
         let last = &chain.last;
         let entry = &meta.entry;
         if entry.range_version != RANGE_FORMAT_VERSION
@@ -1274,6 +1368,122 @@ mod tests {
         let index = open_index(dir.path());
         index.write(batch(&index, 0..=10, 20)).unwrap();
         assert!(matches!(install(&index, 0, VerifyState::Verified), Err(IndexError::MutableRows)));
+    }
+
+    /// The checked range at `start`, as a snapshot gives it, and its metadata with `state`.
+    fn checked_range(start: u32, state: VerifyState) -> (CheckedRange, RangeMeta) {
+        let (blob, meta) = snapshot_range(start, state);
+        (CheckedRange::check(blob.into(), &meta.entry).unwrap(), meta)
+    }
+
+    #[test]
+    fn installs_checked_ranges_as_install_sealed_range_does() {
+        let (sealed_dir, checked_dir) =
+            (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (sealed, checked) = (open_index(sealed_dir.path()), open_index(checked_dir.path()));
+        for (start, state) in [
+            (0, VerifyState::Verified),
+            (1_000, VerifyState::Unverified),
+            (2_000, VerifyState::Verified),
+        ] {
+            let expected = install(&sealed, start, state).unwrap();
+            let (range, meta) = checked_range(start, state);
+
+            assert_eq!(checked.install_checked_range(&range, &meta).unwrap(), expected);
+            assert_eq!(
+                checked.read_sealed_range_bytes(start).unwrap(),
+                sealed.read_sealed_range_bytes(start).unwrap()
+            );
+            assert_eq!(checked.range_meta(start).unwrap(), Some(meta));
+        }
+        let state = checked.state().unwrap();
+        assert_eq!((state.sealed_through(), state.verified_through()), (Some(2_999), Some(999)));
+        for height in [0, 1_537, 2_999] {
+            let block = checked.read_block_by_hash(state.generation(), hash(height)).unwrap();
+            assert_eq!(block.unwrap().height, height);
+        }
+        checked.verify_continuity().unwrap();
+    }
+
+    /// A [`CheckedRange`] proves only the checks that do not need the index. Thus the install
+    /// must refuse what [`Index::install_sealed_range`] refuses for the index.
+    #[test]
+    fn install_checked_range_refuses_what_install_sealed_range_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = open_index(dir.path());
+        let (range, meta) = checked_range(1_000, VerifyState::Verified);
+        assert!(matches!(
+            index.install_checked_range(&range, &meta),
+            Err(IndexError::RangeOrder { start: 1_000, next: 0 })
+        ));
+        let state = install(&index, 0, VerifyState::Verified).unwrap();
+        let checked_with = |change: fn(&mut [CompactBlockRecord])| {
+            let mut records = range_records(1_000);
+            change(&mut records);
+            let blob = encode_range(&records).unwrap();
+            let meta = snapshot_meta(1_000, VerifyState::Verified, &blob);
+            (CheckedRange::check(blob.into(), &meta.entry).unwrap(), meta)
+        };
+
+        // The check of the range does not know the tip. The install checks the first record
+        // against the tip.
+        let unlinked: fn(&mut [CompactBlockRecord]) =
+            |records| records[0].previous_hash = block::Hash([9; 32]);
+        let smaller_than_tip: fn(&mut [CompactBlockRecord]) =
+            |records| records[0].end_tree_sizes = TreeSizes::default();
+        for change in [unlinked, smaller_than_tip] {
+            let (range, meta) = checked_with(change);
+            assert!(matches!(
+                index.install_checked_range(&range, &meta),
+                Err(IndexError::RangeBlob { height: 1_000 })
+            ));
+        }
+
+        // The meta must give the length and the digest that the check compared.
+        let mut long = meta.clone();
+        long.entry.blob_len += 1;
+        assert!(matches!(
+            index.install_checked_range(&range, &long),
+            Err(IndexError::Blob { start: 1_000, mismatch: BlobMismatch::Len { .. } })
+        ));
+        let mut other = meta.clone();
+        other.entry.blob_digest = BlobDigest::hash(b"another blob");
+        assert!(matches!(
+            index.install_checked_range(&range, &other),
+            Err(IndexError::Blob { start: 1_000, mismatch: BlobMismatch::Digest })
+        ));
+        // The meta must describe the range.
+        let mut rejected = meta.clone();
+        rejected.state = VerifyState::Rejected;
+        let mut end_hash = meta.clone();
+        end_hash.entry.end_hash = hash(1_000);
+        for meta in [rejected, end_hash] {
+            assert!(matches!(
+                index.install_checked_range(&range, &meta),
+                Err(IndexError::RangeMeta { start: 1_000 })
+            ));
+        }
+        // The hash of block 5 is in range 0.
+        let (duplicate, duplicate_meta) = checked_with(|records| {
+            records[500].hash = hash(5);
+            records[501].previous_hash = hash(5);
+        });
+        assert!(matches!(
+            index.install_checked_range(&duplicate, &duplicate_meta),
+            Err(IndexError::DuplicateHash { height: 1_500 })
+        ));
+
+        assert_eq!(index.state().unwrap(), state);
+        assert_eq!(index.read_sealed_range_bytes(1_000).unwrap(), None);
+        index.verify_continuity().unwrap();
+        index.install_checked_range(&range, &meta).unwrap();
+
+        // An index with mutable rows.
+        let dir = tempfile::tempdir().unwrap();
+        let index = open_index(dir.path());
+        index.write(batch(&index, 0..=10, 20)).unwrap();
+        let (range, meta) = checked_range(0, VerifyState::Verified);
+        assert!(matches!(index.install_checked_range(&range, &meta), Err(IndexError::MutableRows)));
     }
 
     #[test]

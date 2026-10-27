@@ -6,6 +6,7 @@
 
 use std::hint::black_box;
 
+use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use zakura_chain::sapling;
 use ztreamer_indexer::{
@@ -72,7 +73,7 @@ fn bench_peak_range(c: &mut Criterion) {
     let (entry, blob) = peak_range();
     let entries = [entry];
     let epoch = Epochs::new(&entries).next().unwrap();
-    let blobs = [blob];
+    let blobs = [Bytes::from(blob)];
     let start = Frontiers::default();
     assert_eq!(epoch.verify(&blobs, &start).unwrap().completed.len(), 16);
 
