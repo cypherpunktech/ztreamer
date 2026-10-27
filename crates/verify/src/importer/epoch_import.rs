@@ -4,7 +4,7 @@ use std::{
     ops::Range,
     panic,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
@@ -16,10 +16,7 @@ use ztreamer_indexer::index::{
     range_meta::{Frontiers, RangeMeta, VerifyState},
 };
 
-use super::{
-    ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL,
-    telemetry::{EpochStage, ImportMetrics},
-};
+use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
 use crate::{
     epoch::{Epoch, EpochProof, Epochs},
     manifest::Manifest,
@@ -41,7 +38,6 @@ pub(crate) struct EpochImport {
     first_start_frontiers: Frontiers,
     /// One permit for each run of [`Epoch::verify`]: `import_workers` permits.
     verify_permits: Semaphore,
-    metrics: ImportMetrics,
 }
 
 impl EpochImport {
@@ -60,7 +56,6 @@ impl EpochImport {
             })
             .collect();
         let verify_permits = Semaphore::new(importer.config.import_workers.get());
-        let metrics = ImportMetrics::new();
         Self {
             importer,
             manifest,
@@ -68,7 +63,6 @@ impl EpochImport {
             first_epoch,
             first_start_frontiers,
             verify_permits,
-            metrics,
         }
     }
 
@@ -115,14 +109,9 @@ impl EpochImport {
 
     /// The blobs of the epoch at `at`, from the source.
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
-        let started = Instant::now();
         let entries = self.manifest_epoch(at).entries();
-        let blobs = stream::iter(entries)
-            .then(|entry| self.importer.fetcher.blob(entry))
-            .try_collect()
-            .await?;
-        self.metrics.record_stage_seconds(EpochStage::Fetch, started);
-        Ok(blobs)
+        let blobs = stream::iter(entries).then(|entry| self.importer.fetcher.blob(entry));
+        Ok(blobs.try_collect().await?)
     }
 
     /// Runs [`Epoch::verify`] for the epoch at `at` on the blocking thread pool, with one of
@@ -132,22 +121,12 @@ impl EpochImport {
         at: usize,
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<Bytes>, EpochProof), ImportError> {
-        let _permit = {
-            let _epochs_pending = self.metrics.count_pending_epoch();
-            self.verify_permits.acquire().await.expect("the verify permits are never closed")
-        };
-        let _workers_busy = self.metrics.count_busy_worker();
+        let _permit =
+            self.verify_permits.acquire().await.expect("the verify permits are never closed");
         let (run, span) = (Arc::clone(self), Span::current());
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                let started = Instant::now();
-                let verified = run.verify_blobs(at, blobs);
-                run.metrics.record_stage_seconds(EpochStage::Verify, started);
-                verified
-            })
-        })
-        .await
-        .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
+        tokio::task::spawn_blocking(move || span.in_scope(|| run.verify_blobs(at, blobs)))
+            .await
+            .unwrap_or_else(|error| panic::resume_unwind(error.into_panic()))
     }
 
     /// Runs [`Epoch::verify`] for the epoch at `at`. Call it on the blocking thread pool.
@@ -178,19 +157,8 @@ impl EpochImport {
     ) -> Result<VerifiedRows, ImportError> {
         let epoch = self.manifest_epoch(at);
         let node = &self.importer.node;
-        let attest = async {
-            let started = Instant::now();
-            let attested = epoch.attest(&proof, &*node.attestor).await;
-            self.metrics.record_stage_seconds(EpochStage::Attest, started);
-            attested
-        };
-        let sample = async {
-            let started = Instant::now();
-            let plan = self.importer.config.verify_sample;
-            let sampled = epoch.sample(&blobs, &*node.sampler, plan).await;
-            self.metrics.record_stage_seconds(EpochStage::Sample, started);
-            sampled
-        };
+        let attest = epoch.attest(&proof, &*node.attestor);
+        let sample = epoch.sample(&blobs, &*node.sampler, self.importer.config.verify_sample);
         let (attested, sampled) = tokio::join!(attest, sample);
         let in_epoch = |error| ImportError::in_epoch(epoch.end_height(), error);
         let (attested, sampled) = (attested.map_err(in_epoch)?, sampled.map_err(in_epoch)?);

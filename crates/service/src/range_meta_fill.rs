@@ -20,10 +20,9 @@
 use std::{
     ops::RangeInclusive,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use metrics::{Counter, Gauge, Histogram};
 use tokio::sync::watch;
 use tracing::{info, warn};
 use zakura_chain::{
@@ -82,7 +81,6 @@ pub struct RangeMetaFiller {
     index: Arc<Index>,
     backend: Arc<dyn StateBackend>,
     verified_by: NodeId,
-    metrics: FillMetrics,
 }
 
 impl std::fmt::Debug for RangeMetaFiller {
@@ -101,7 +99,7 @@ impl RangeMetaFiller {
             url: "embedded".into(),
             version: zakurad::application::build_version().to_string(),
         };
-        Self { index, backend, verified_by, metrics: FillMetrics::new() }
+        Self { index, backend, verified_by }
     }
 
     /// Fills the missing rows once. Then fills them again each time a new snapshot shows that
@@ -134,7 +132,6 @@ impl RangeMetaFiller {
         }
         let slots = self.blocking(move |index| Slot::scan(index, sealed_through)).await?;
         let mut pending = slots.iter().filter(|slot| slot.row.is_none()).count() as u64;
-        self.metrics.pending.set(pending as f64);
         if covered.is_none() {
             info!(pending, ?sealed_through, "range metadata filler started");
         }
@@ -146,13 +143,9 @@ impl RangeMetaFiller {
                 epoch.advance(epoch_end, end_tree_sizes);
                 continue;
             }
-            let started = Instant::now();
             let meta = self.fill(slot.start, epoch).await?;
             epoch.advance(meta.entry.epoch_end, meta.entry.end_tree_sizes);
-            self.metrics.seconds.record(started.elapsed().as_secs_f64());
-            self.metrics.filled.increment(1);
             pending -= 1;
-            self.metrics.pending.set(pending as f64);
             filled += 1;
             if filled % LOG_EVERY == 0 {
                 info!(filled, pending, end_height = meta.entry.end_height, "filled range metadata");
@@ -385,22 +378,6 @@ impl Epoch {
         } else {
             Self { ranges: self.ranges + 1, ..*self }
         };
-    }
-}
-
-struct FillMetrics {
-    filled: Counter,
-    pending: Gauge,
-    seconds: Histogram,
-}
-
-impl FillMetrics {
-    fn new() -> Self {
-        Self {
-            filled: metrics::counter!("ztreamer.range_meta.filled_total"),
-            pending: metrics::gauge!("ztreamer.range_meta.pending"),
-            seconds: metrics::histogram!("ztreamer.range_meta.fill_seconds"),
-        }
     }
 }
 
