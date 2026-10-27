@@ -93,7 +93,9 @@ impl SourceIndex {
         let (sender, snapshots) = watch::channel(ServingSnapshot::from(source.state));
         drop(sender);
         let backend = Arc::new(InProcessBackend::new(read));
-        RangeMetaFiller::embedded(Arc::clone(&source.index), backend).run(snapshots).await;
+        RangeMetaFiller::embedded(Arc::clone(&source.index), backend)
+            .run(snapshots, std::future::pending())
+            .await;
         source
     }
 

@@ -335,7 +335,6 @@ where
         info!(import_state = "following");
     }
     let filler = RangeMetaFiller::new(filler_index, compact.backend(), verified_by);
-    let filler = filler.run(compact.subscribe());
     let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact.clone()))
@@ -416,18 +415,21 @@ async fn reconcile_head(
 
 /// Runs the head follower and the gRPC server until shutdown or until either task stops. The
 /// server serves CompactTxStreamer and Replicator on one listener. Runs `filler` beside them and
-/// stops it with them.
+/// stops it with them. Returns when the filler holds the index no more, so the caller can close
+/// the index.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     grpc: Router,
     cli: &DaemonArgs,
-    filler: impl Future<Output = ()> + Send + 'static,
+    filler: RangeMetaFiller,
     shutdown: &CancellationToken,
 ) -> Result<()> {
-    let filler = tokio::spawn(filler);
     let (server_shutdown, _) = watch::channel(false);
+    let filler = tokio::spawn(
+        filler.run(compact.subscribe(), shutdown_requested(server_shutdown.subscribe())),
+    );
     let mut follower = tokio::spawn({
         let compact = compact.clone();
         let receiver = server_shutdown.subscribe();
@@ -459,13 +461,15 @@ async fn serve(
     }
     let task_exited = grpc_result.is_some() || follower_result.is_some();
     let _ = server_shutdown.send(true);
-    filler.abort();
 
-    // Drain both tasks before inspecting either result, including on failure.
+    // Drain all three tasks before inspecting a result, including on failure. The filler
+    // returns after its last index read on a blocking thread.
     let (grpc_result, follower_result) =
         lifecycle::drain_both((grpc, grpc_result), (follower, follower_result)).await;
+    let filler_result = filler.await;
     task_result(grpc_result, "gRPC")?;
     task_result(follower_result, "head follower")?;
+    filler_result.wrap_err("range_meta filler task panicked")?;
     if task_exited {
         return Err(eyre!("daemon task stopped unexpectedly"));
     }

@@ -25,6 +25,7 @@ use std::{
 };
 
 use tokio::sync::watch;
+use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 use zakura_chain::{
     block,
@@ -76,12 +77,14 @@ pub(crate) enum FillError {
 ///
 /// ```ignore
 /// let filler = RangeMetaFiller::embedded(index, compact.backend());
-/// tokio::spawn(filler.run(compact.subscribe()));
+/// tokio::spawn(filler.run(compact.subscribe(), shutdown));
 /// ```
 pub struct RangeMetaFiller {
     index: Arc<Index>,
     backend: Arc<dyn StateBackend>,
     verified_by: NodeId,
+    /// The index reads on blocking threads. Each holds a clone of `index`.
+    reads: TaskTracker,
 }
 
 impl std::fmt::Debug for RangeMetaFiller {
@@ -96,7 +99,7 @@ impl RangeMetaFiller {
     /// A filler that asks the node behind `backend`. Each row names `verified_by` as the node
     /// that gave its answers.
     pub fn new(index: Arc<Index>, backend: Arc<dyn StateBackend>, verified_by: NodeId) -> Self {
-        Self { index, backend, verified_by }
+        Self { index, backend, verified_by, reads: TaskTracker::new() }
     }
 
     /// A filler that asks the embedded Zakura node through `backend`. The rows name
@@ -115,11 +118,31 @@ impl RangeMetaFiller {
     }
 
     /// Fills the missing rows once. Then fills them again each time a new snapshot shows that
-    /// `sealed_through` changed. Stops when the caller drops the snapshot sender.
+    /// `sealed_through` changed. Stops when the caller drops the snapshot sender, or when `stop`
+    /// completes.
+    ///
+    /// A stop cancels the pass, but not an index read that runs on a blocking thread. `run`
+    /// waits for that read. Thus when `run` returns, no task of the filler holds the index, and
+    /// the caller can close it.
     ///
     /// A failed pass logs a warning. The next snapshot starts the pass again. The future is
     /// `Send + 'static`. The caller spawns it.
-    pub async fn run(self, mut snapshots: watch::Receiver<ServingSnapshot>) {
+    pub async fn run(
+        self,
+        snapshots: watch::Receiver<ServingSnapshot>,
+        stop: impl Future<Output = ()>,
+    ) {
+        tokio::select! {
+            biased;
+            () = stop => {}
+            () = self.fill_on_each_snapshot(snapshots) => {}
+        }
+        self.reads.close();
+        self.reads.wait().await;
+    }
+
+    /// The loop of [`Self::run`]. Returns when the caller drops the snapshot sender.
+    async fn fill_on_each_snapshot(&self, mut snapshots: watch::Receiver<ServingSnapshot>) {
         // `None` until a pass completes. Then the `sealed_through` that the pass covered.
         let mut covered = None;
         loop {
@@ -233,13 +256,14 @@ impl RangeMetaFiller {
         Ok(roots)
     }
 
-    /// Runs an index read on a blocking thread.
+    /// Runs an index read on a blocking thread. A cancel of the await does not stop the read.
+    /// Thus [`Self::run`] waits for it before it returns.
     async fn blocking<T: Send + 'static>(
         &self,
         read: impl FnOnce(&Index) -> Result<T, FillError> + Send + 'static,
     ) -> Result<T, FillError> {
         let index = Arc::clone(&self.index);
-        tokio::task::spawn_blocking(move || read(&index)).await?
+        self.reads.spawn_blocking(move || read(&index)).await?
     }
 }
 
@@ -429,7 +453,7 @@ mod tests {
         let state = fixtures::populate(&index, &records, Some(2_999));
         let (sender, snapshots) = watch::channel(ServingSnapshot::from(state));
         drop(sender);
-        filler(&index).await.run(snapshots).await;
+        filler(&index).await.run(snapshots, std::future::pending()).await;
 
         for start in [0, 1_000, 2_000] {
             let meta = index.range_meta(start).unwrap().unwrap();
@@ -446,6 +470,25 @@ mod tests {
             assert_eq!(meta.attested.unwrap().end_hash, last.hash);
         }
         assert_eq!(index.range_meta(3_000).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn run_returns_after_the_index_read_that_a_stop_cancels() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = open(&dir);
+        let filler = filler(&index).await;
+        // A stop cancels the await of this read. The read goes on, on its blocking thread.
+        let read = filler.blocking(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok(())
+        });
+        let cancelled = tokio::time::timeout(std::time::Duration::from_millis(50), read).await;
+        assert!(cancelled.is_err());
+        let (_sender, snapshots) = watch::channel(ServingSnapshot::from(index.state().unwrap()));
+
+        filler.run(snapshots, std::future::ready(())).await;
+
+        assert_eq!(Arc::strong_count(&index), 1);
     }
 
     #[tokio::test]
