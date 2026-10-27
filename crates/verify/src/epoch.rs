@@ -54,6 +54,18 @@ impl<'a> Epoch<'a> {
         self.entries.last().expect("an epoch is never empty").end_height
     }
 
+    /// Returns `true` if the epoch rule closes the epoch at its last range: the epoch has
+    /// [`MAX_RANGES`] ranges, or it adds [`MAX_COMMITMENTS`] note commitments.
+    ///
+    /// Returns `false` for a shorter last epoch of a manifest. Only the end of the manifest
+    /// closes that epoch, and a longer manifest continues it.
+    pub fn closed_by_rule(&self) -> bool {
+        let base = self.previous.map_or(0, |previous| previous.end_tree_sizes.total());
+        let last = self.entries.last().expect("an epoch is never empty");
+        self.entries.len() >= MAX_RANGES
+            || last.end_tree_sizes.total().saturating_sub(base) >= MAX_COMMITMENTS
+    }
+
     /// Checks each range of the epoch and rebuilds the note commitment trees from `start`.
     ///
     /// `blobs` holds one blob per entry, in order; another count is [`Reject::BlobCount`].
@@ -430,6 +442,21 @@ mod tests {
         // A heavy range closes the epoch that it joins.
         let entries = synthetic_entries(&[sapling(10), sapling(1_060_000), sapling(10)]);
         assert_eq!(lengths(&entries), [2, 1]);
+    }
+
+    #[test]
+    fn only_a_short_last_epoch_is_not_closed_by_the_rule() {
+        let closed = |entries: &[ManifestEntry]| -> Vec<bool> {
+            Epochs::new(entries).map(|epoch| epoch.closed_by_rule()).collect()
+        };
+
+        // Ten ranges close by count. The last 5 ranges close only at the end of the entries.
+        assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 25])), [true, true, false]);
+        assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 20])), [true, true]);
+        // 1,200,000 commitments close by the cap. The last range adds 400,000 only.
+        assert_eq!(closed(&synthetic_entries(&[sapling(400_000); 7])), [true, true, false]);
+        // A last epoch that reaches the cap closes by the rule.
+        assert_eq!(closed(&synthetic_entries(&[sapling(10), sapling(1_060_000)])), [true]);
     }
 
     #[test]

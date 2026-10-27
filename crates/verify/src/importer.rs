@@ -21,6 +21,10 @@
 //! Thus the install, on one writer thread, does only the checks that need the index: it does
 //! not calculate the digest or decode the blob again.
 //!
+//! The row holds the manifest entry with the `epoch_end` flag of the epoch rule: a manifest
+//! closes its last epoch at its last entry also where the rule does not
+//! ([`Epoch::closed_by_rule`]).
+//!
 //! The start frontiers of the first epoch come from the `range_meta` row of the last sealed
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
 //! node does not attest. The start frontiers of each other epoch are the frontiers of the
@@ -33,6 +37,7 @@
 //!
 //! [`Epoch::verify`]: crate::epoch::Epoch::verify
 //! [`Fetcher::blob`]: crate::fetch::Fetcher::blob
+//! [`Epoch::closed_by_rule`]: crate::epoch::Epoch::closed_by_rule
 //! [`Epoch::attest`]: crate::epoch::Epoch::attest
 //! [`Epoch::sample`]: crate::epoch::Epoch::sample
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
@@ -572,6 +577,24 @@ mod tests {
         assert_eq!(meta.verified_by.unwrap().url, "http://node.test");
         assert_eq!(meta.sampled_heights.len(), 2);
         assert!(meta.sampled_heights.iter().all(|height| (12_000..13_000).contains(height)));
+    }
+
+    /// The manifest closes its last epoch at 24,999, but the epoch rule does not: that epoch has
+    /// 5 ranges. Each row keeps the entry of the source row, with the flag of the rule.
+    #[tokio::test]
+    async fn imported_rows_keep_the_epoch_end_of_the_rule() {
+        let import = Import::new(RANGES).await;
+
+        import.run().await.unwrap();
+
+        assert!(import.snapshot.manifest.entries()[24].epoch_end);
+        for start in (0..RANGES).map(|range| range * RANGE_SIZE) {
+            let imported = import.target.range_meta(start).unwrap().unwrap().entry;
+            let source = import.source.index.range_meta(start).unwrap().unwrap().entry;
+            assert_eq!(imported, source, "range {start}");
+        }
+        assert!(import.target.range_meta(19_000).unwrap().unwrap().entry.epoch_end);
+        assert!(!import.target.range_meta(24_000).unwrap().unwrap().entry.epoch_end);
     }
 
     #[tokio::test]

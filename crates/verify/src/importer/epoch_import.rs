@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_indexer::index::{
     CheckedRange, IndexState,
-    range_meta::{Frontiers, RangeMeta, VerifyState},
+    range_meta::{Frontiers, ManifestEntry, RangeMeta, VerifyState},
 };
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
@@ -165,11 +165,18 @@ impl EpochImport {
         let (attested, sampled) = (attested.map_err(in_epoch)?, sampled.map_err(in_epoch)?);
 
         let verified_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        // The manifest closes its last epoch at its last entry, also where the epoch rule does
+        // not. The row keeps the flag of the rule, as the row of the source does. Then the ranges
+        // that the index seals later continue the epoch of the rule.
+        let closed_by_rule = epoch.closed_by_rule();
         let rows =
             epoch.entries().iter().zip(ranges).zip(attested).map(|((entry, range), attested)| {
                 let heights = entry.start_height..=entry.end_height;
                 let meta = RangeMeta {
-                    entry: entry.clone(),
+                    entry: ManifestEntry {
+                        epoch_end: entry.epoch_end && closed_by_rule,
+                        ..entry.clone()
+                    },
                     state: VerifyState::Verified,
                     verified_by: Some(node.id.clone()),
                     verified_at: Some(verified_at.as_secs()),
