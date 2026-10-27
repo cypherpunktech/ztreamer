@@ -36,23 +36,25 @@ use ztreamer_verify::{
 pub(crate) struct ReplicateArgs {
     /// Import the sealed ranges from this source before the tail: an http:// or https:// base
     /// URL of a snapshot, or the host:port of a peer that serves the Replicator gRPC service
-    /// without TLS. Give it again for more sources: the first is the reference. Needs
-    /// --remote-rpc: the node that attests the import, and that ztreamerd follows after it.
+    /// without TLS. Needs --remote-rpc: the node that attests the import, and that ztreamerd
+    /// follows after it.
     #[arg(long, value_name = "URL|HOST:PORT", requires = "remote_rpc")]
-    replicate_from: Vec<ReplicaSource>,
+    replicate_from: Option<ReplicaSource>,
 }
 
 impl ReplicateArgs {
-    /// The import of `--replicate-from`. In the remote mode, the flag has at least one source.
+    /// The import of `--replicate-from`. Call it only in the remote mode: there, clap makes the
+    /// flag required.
     pub(crate) fn replica(&self) -> Replica {
         let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
-        Replica { sources: self.replicate_from.clone(), key }
+        let source = self.replicate_from.clone().expect("--remote-rpc requires --replicate-from");
+        Replica { source, key }
     }
 
     /// Logs the new import state of a replica at info level: `tail` or `following`. Does
     /// nothing in the embedded mode.
     pub(crate) fn log_import_state(&self, state: &'static str) {
-        if !self.replicate_from.is_empty() {
+        if self.replicate_from.is_some() {
             info!(import_state = state);
         }
     }
@@ -112,18 +114,18 @@ impl ReplicaSource {
 /// The import that `--replicate-from` asks for.
 #[derive(Clone, Debug)]
 pub(crate) struct Replica {
-    sources: Vec<ReplicaSource>,
+    source: ReplicaSource,
     /// The key that signs the snapshots: [`SNAPSHOT_PUBKEY`].
     key: VerifyingKey,
 }
 
 impl Replica {
-    /// Imports the epochs of the reference manifest above the sealed tip of `index`, checked
+    /// Imports the epochs of the manifest above the sealed tip of `index`, checked
     /// against the node of `client`. `info` is the `getblockchaininfo` answer of the node, and
     /// `network` the network of its chain. Breaks on shutdown.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
-    /// reference manifest needs no import. Neither does an index whose sealed tip is not the end
+    /// manifest needs no import. Neither does an index whose sealed tip is not the end
     /// of an epoch of the manifest, or whose last sealed range has no `range_meta` row: the tail
     /// continues from the tip. On shutdown, the import completes the epoch that it installs, and
     /// stops.
@@ -160,10 +162,7 @@ impl Replica {
             first.0 - 1
         );
 
-        let mut sources = Vec::with_capacity(self.sources.len());
-        for source in &self.sources {
-            sources.push(source.connect(self.key).await?);
-        }
+        let source = self.source.connect(self.key).await?;
         let node = TrustedNode {
             attestor: Arc::new(JsonRpcAttestor::new(client.clone())),
             sampler: Arc::new(
@@ -179,11 +178,11 @@ impl Replica {
             verify_sample: SamplePlan { per_range: SamplePlan::PER_RANGE, seed },
             import_workers: ImportConfig::default_import_workers(),
         };
-        info!(sources = self.sources.len(), from = ?sealed, import_state = "fetching");
+        info!(source = %self.source, from = ?sealed, import_state = "fetching");
 
         let (stop, stopped) = watch::channel(false);
         let mut import =
-            tokio::spawn(Importer::new(sources, node, Arc::clone(index), config).run(stopped));
+            tokio::spawn(Importer::new(source, node, Arc::clone(index), config).run(stopped));
         let result = tokio::select! {
             result = &mut import => result,
             _ = shutdown.cancelled() => {

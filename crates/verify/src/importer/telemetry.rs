@@ -1,5 +1,5 @@
 //! The metrics of an import, below `ztreamer.replicate`: one histogram per stage of an epoch,
-//! and the gauges of the verify workers. `Sources` counts the fetched bytes of each source.
+//! and the gauges of the verify workers.
 
 use std::time::Instant;
 

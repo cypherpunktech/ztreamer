@@ -241,7 +241,7 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
 }
 
 #[test]
-fn replicate_from_takes_snapshots_and_peers() {
+fn replicate_from_takes_one_snapshot_or_one_peer() {
     let parse = |flags: &[&str]| {
         let remote = ["ztreamerd", "--remote-rpc", "http://127.0.0.1:8232"];
         Cli::try_parse_from(remote.iter().chain(flags)).map(|cli| cli.daemon)
@@ -250,8 +250,10 @@ fn replicate_from_takes_snapshots_and_peers() {
     assert!(parse(&["--replicate-from", "peer:9068/path"]).is_err());
     let two =
         ["--replicate-from", "https://snapshots.example/mainnet", "--replicate-from", "peer:9068"];
-    let replica = parse(&two).unwrap().replicate.replica();
-    let sources: Vec<_> = replica.sources.iter().map(ToString::to_string).collect();
-    assert_eq!(sources, ["https://snapshots.example/mainnet", "peer:9068"]);
-    assert_eq!(replica.sources[1], ReplicaSource::Peer("http://peer:9068".parse().unwrap()));
+    assert!(parse(&two).is_err());
+    let snapshot = parse(&two[..2]).unwrap().replicate.replica();
+    assert_eq!(snapshot.source.to_string(), "https://snapshots.example/mainnet");
+    let peer = parse(&two[2..]).unwrap().replicate.replica();
+    assert_eq!(peer.source.to_string(), "peer:9068");
+    assert_eq!(peer.source, ReplicaSource::Peer("http://peer:9068".parse().unwrap()));
 }

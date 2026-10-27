@@ -113,12 +113,12 @@ impl EpochImport {
         self.attest_and_sample(at, blobs, proof).await
     }
 
-    /// The blobs of the epoch at `at`, from the sources.
+    /// The blobs of the epoch at `at`, from the source.
     async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
         let started = Instant::now();
         let entries = self.manifest_epoch(at).entries();
         let blobs = stream::iter(entries)
-            .then(|entry| self.importer.sources.fetch_blob(entry))
+            .then(|entry| self.importer.fetcher.blob(entry))
             .try_collect()
             .await?;
         self.metrics.record_stage_seconds(EpochStage::Fetch, started);

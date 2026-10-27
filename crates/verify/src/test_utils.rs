@@ -173,12 +173,6 @@ impl Snapshot {
         Self { manifest, manifest_path: exported.manifest, published_at, dir }
     }
 
-    /// Writes a new manifest with only the first `ranges` entries, as a source with a shorter
-    /// export does. The last entry that stays must close an epoch.
-    pub fn keep_first_ranges(&mut self, ranges: usize) {
-        self.publish(self.manifest.entries()[..ranges].to_vec());
-    }
-
     /// Writes `blob` as the blob of the range at `start`. Then it writes a new manifest with the
     /// entry of `blob`, as a source that sends a wrong range does.
     pub fn replace_blob(&mut self, start: u32, blob: &[u8]) {
