@@ -197,7 +197,10 @@ fn identity(network: &str, genesis_hash: block::Hash) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{index::Index, test_utils::hash};
+    use crate::{
+        index::Index,
+        test_utils::{hash, open_index},
+    };
 
     fn state(sealed_through: Option<u32>) -> IndexState {
         IndexState {
@@ -216,8 +219,7 @@ mod tests {
     #[test]
     fn state_round_trips_and_defaults_when_absent() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let metadata = index.tables.metadata;
         let mut txn = index.env.write_txn().unwrap();
         assert_eq!(metadata.get_state(&txn).unwrap(), IndexState::default());
@@ -282,8 +284,7 @@ mod tests {
     #[test]
     fn state_rejects_a_seal_that_does_not_end_a_range() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let metadata = index.tables.metadata;
         let mut txn = index.env.write_txn().unwrap();
 
@@ -294,8 +295,7 @@ mod tests {
     #[test]
     fn identity_accepts_a_repeat_and_rejects_another_chain() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let metadata = index.tables.metadata;
         let mut txn = index.env.write_txn().unwrap();
 
@@ -330,8 +330,7 @@ mod tests {
     #[test]
     fn an_identity_of_another_policy_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let metadata = index.tables.metadata;
         let mut txn = index.env.write_txn().unwrap();
         let mut stored = identity("Mainnet", block::Hash([1; 32]));

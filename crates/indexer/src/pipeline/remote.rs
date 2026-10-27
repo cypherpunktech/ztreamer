@@ -270,9 +270,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        index::{BlockId, Index},
+        index::BlockId,
         pipeline::{HistoricalPipeline, PipelineConfig},
-        test_utils::grow_chain,
+        test_utils::{grow_chain, open_index},
     };
 
     fn runtime() -> Runtime {
@@ -299,10 +299,6 @@ mod tests {
     fn serve(chain: &MockChain) -> impl Fn(usize, &Seen) -> Reply + Send + Sync + 'static {
         let chain = chain.clone();
         move |_, request| chain.reply(request)
-    }
-
-    fn index(dir: &tempfile::TempDir) -> Index {
-        Index::open(dir.path(), 64 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap()
     }
 
     fn config() -> PipelineConfig {
@@ -366,7 +362,7 @@ mod tests {
         let blocks = chain(1_999);
         let (_mock, source) = node(&runtime, serve(&MockChain::new(&blocks)));
         let dir = tempfile::tempdir().unwrap();
-        let index = index(&dir);
+        let index = open_index(dir.path());
 
         let state = HistoricalPipeline::new(&index, &source, config())
             .unwrap()
@@ -394,7 +390,7 @@ mod tests {
             serve(n, request)
         });
         let dir = tempfile::tempdir().unwrap();
-        let index = index(&dir);
+        let index = open_index(dir.path());
 
         let result = HistoricalPipeline::new(&index, &source, config()).unwrap().sync();
 
@@ -420,7 +416,7 @@ mod tests {
             serve(n, request)
         });
         let dir = tempfile::tempdir().unwrap();
-        let index = index(&dir);
+        let index = open_index(dir.path());
 
         let result = HistoricalPipeline::new(&index, &source, config()).unwrap().sync();
 
@@ -436,7 +432,7 @@ mod tests {
         assert!(blocks[1..].iter().all(|block| size(block) + 32 <= limit));
         let (_mock, source) = node(&runtime, serve(&MockChain::new(&blocks)));
         let dir = tempfile::tempdir().unwrap();
-        let index = index(&dir);
+        let index = open_index(dir.path());
 
         let result = HistoricalPipeline::new(
             &index,

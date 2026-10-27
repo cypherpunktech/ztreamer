@@ -335,7 +335,10 @@ impl HashIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{codec::encode_range, index::Index, test_utils::record};
+    use crate::{
+        codec::encode_range,
+        test_utils::{open_index, record},
+    };
 
     #[test]
     fn range_start_rounds_down_to_the_range() {
@@ -349,8 +352,7 @@ mod tests {
     #[test]
     fn sealed_range_reads_records_by_absolute_height() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let records: Vec<_> = (1_000..2_000).map(|height| record(height, Vec::new())).collect();
         let mut txn = index.env.write_txn().unwrap();
         let sealed_ranges = index.tables.sealed_ranges;

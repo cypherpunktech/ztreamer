@@ -317,12 +317,12 @@ mod tests {
     use super::*;
     use zakura_chain::transaction;
 
-    use crate::test_utils::prepared;
+    use crate::test_utils::{parsed, record};
     use crate::types::{CompactSaplingOutput, CompactTransaction};
 
     #[test]
     fn reassembles_out_of_order_blocks_and_assigns_tree_sizes() {
-        let mut first = prepared(0);
+        let mut first = parsed(record(0, Vec::new()));
         first.transactions.push(CompactTransaction {
             index: 1,
             txid: transaction::Hash([7; 32]),
@@ -338,7 +338,7 @@ mod tests {
         first.sapling_additions = 1;
         let mut builder = OrderedBuilder::new(IndexState::default(), 1_000_000).unwrap();
 
-        builder.push(prepared(1)).unwrap();
+        builder.push(parsed(record(1, Vec::new()))).unwrap();
         assert!(builder.build_batch(Some(1), None, 1_000_000).unwrap().is_none());
         builder.push(first).unwrap();
         let batch = builder.build_batch(Some(1), None, 1_000_000).unwrap().unwrap();
@@ -353,11 +353,11 @@ mod tests {
         let bytes = CompactBlockRecord::encoded_size_bound(&[]).unwrap();
         let mut builder = OrderedBuilder::new(IndexState::default(), 1_000_000).unwrap();
 
-        builder.push(prepared(1)).unwrap();
-        builder.push(prepared(2)).unwrap();
+        builder.push(parsed(record(1, Vec::new()))).unwrap();
+        builder.push(parsed(record(2, Vec::new()))).unwrap();
         assert_eq!(builder.ready_bytes(), 0);
 
-        builder.push(prepared(0)).unwrap();
+        builder.push(parsed(record(0, Vec::new()))).unwrap();
         assert_eq!(builder.ready_bytes(), 3 * bytes);
         let batch = builder.build_batch(Some(2), None, 2 * bytes).unwrap().unwrap();
         assert_eq!(batch.records.len(), 2);
@@ -369,7 +369,7 @@ mod tests {
         let bytes = CompactBlockRecord::encoded_size_bound(&[]).unwrap();
         let mut builder = OrderedBuilder::new(IndexState::default(), 10_000_000).unwrap();
         for height in 0..RANGE_SIZE / 2 {
-            builder.push(prepared(height)).unwrap();
+            builder.push(parsed(record(height, Vec::new()))).unwrap();
         }
         assert!(
             builder
@@ -378,7 +378,7 @@ mod tests {
                 .is_none()
         );
         for height in RANGE_SIZE / 2..RANGE_SIZE {
-            builder.push(prepared(height)).unwrap();
+            builder.push(parsed(record(height, Vec::new()))).unwrap();
         }
 
         let batch = builder
@@ -392,7 +392,7 @@ mod tests {
     fn parallel_encode_is_equal_to_record_encode() {
         let mut builder = OrderedBuilder::new(IndexState::default(), 10_000_000).unwrap();
         for height in 0..100 {
-            let mut block = prepared(height);
+            let mut block = parsed(record(height, Vec::new()));
             block.transactions.push(CompactTransaction {
                 index: 1,
                 txid: transaction::Hash([height as u8; 32]),

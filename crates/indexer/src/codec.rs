@@ -599,17 +599,28 @@ mod tests {
     use crate::test_utils::hash;
     use crate::types::{CompactSaplingOutput, CompactShieldedAction};
 
+    /// Each row: the operation, its two operands and the expected result.
     #[test]
-    fn tree_sizes_subtract_pool_by_pool() {
-        let sizes = TreeSizes { sapling: 5, orchard: 3, ironwood: 1 };
-        let additions = TreeSizes { sapling: 2, orchard: 3, ironwood: 0 };
-
-        assert_eq!(
-            sizes.checked_sub(additions),
-            Some(TreeSizes { sapling: 3, orchard: 0, ironwood: 1 })
-        );
-        assert_eq!(sizes.checked_sub(additions).unwrap().checked_add(additions), Some(sizes));
-        assert_eq!(additions.checked_sub(sizes), None);
+    fn tree_sizes_add_and_subtract_pool_by_pool() {
+        type Operation = fn(TreeSizes, TreeSizes) -> Option<TreeSizes>;
+        let sizes = |sapling, orchard, ironwood| TreeSizes { sapling, orchard, ironwood };
+        let (add, sub): (Operation, Operation) = (TreeSizes::checked_add, TreeSizes::checked_sub);
+        let rows = [
+            ("subtract", sub, sizes(5, 3, 1), sizes(2, 3, 0), Some(sizes(3, 0, 1))),
+            (
+                "add back the subtracted sizes",
+                add,
+                sizes(3, 0, 1),
+                sizes(2, 3, 0),
+                Some(sizes(5, 3, 1)),
+            ),
+            ("subtract a larger pool", sub, sizes(2, 3, 0), sizes(5, 3, 1), None),
+            ("add", add, sizes(5, 6, u32::MAX - 1), sizes(1, 2, 1), Some(sizes(6, 8, u32::MAX))),
+            ("add with overflow", add, sizes(5, 6, u32::MAX - 1), sizes(1, 2, 2), None),
+        ];
+        for (name, operation, left, right, expected) in rows {
+            assert_eq!(operation(left, right), expected, "{name}");
+        }
     }
 
     #[test]
@@ -780,18 +791,6 @@ mod tests {
 
         assert_eq!(sizes.total(), 2 * u64::from(u32::MAX) + 1);
         assert!(sizes.follows(TreeSizes { ironwood: 1, ..TreeSizes::default() }));
-    }
-
-    #[test]
-    fn tree_sizes_add_pool_by_pool_and_refuse_overflow() {
-        let sizes = TreeSizes { sapling: 5, orchard: 6, ironwood: u32::MAX - 1 };
-        let add = TreeSizes { sapling: 1, orchard: 2, ironwood: 1 };
-
-        assert_eq!(
-            sizes.checked_add(add),
-            Some(TreeSizes { sapling: 6, orchard: 8, ironwood: u32::MAX })
-        );
-        assert_eq!(sizes.checked_add(TreeSizes { ironwood: 2, ..add }), None);
     }
 
     fn action(byte: u8) -> CompactShieldedAction {

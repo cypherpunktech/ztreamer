@@ -595,45 +595,4 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::mpsc::{TrySendError, sync_channel};
-
-    use super::*;
-    use crate::{codec::CompactBlockRecord, test_utils::prepared};
-
-    #[test]
-    fn builder_stays_one_batch_ahead_of_a_blocked_writer() {
-        let mut builder = OrderedBuilder::new(IndexState::default(), MIB).unwrap();
-        for height in 0..3 {
-            builder.push(prepared(height)).unwrap();
-        }
-        let batch_bytes = CompactBlockRecord::encoded_size_bound(&[]).unwrap();
-        let first = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
-        let (batch_tx, batch_rx) = sync_channel::<WriteBatch>(1);
-        let (started_tx, started_rx) = sync_channel(0);
-        let (release_tx, release_rx) = sync_channel(0);
-
-        thread::scope(|scope| {
-            let writer = scope.spawn(move || {
-                let batch = batch_rx.recv().unwrap();
-                assert_eq!(batch.records[0].height, 0);
-                started_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-            });
-
-            batch_tx.send(first).unwrap();
-            started_rx.recv().unwrap();
-            let second = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
-            assert_eq!(second.records[0].height, 1);
-            batch_tx.send(second).unwrap();
-            let third = builder.build_batch(Some(20), Some(20), batch_bytes).unwrap().unwrap();
-            assert!(matches!(batch_tx.try_send(third), Err(TrySendError::Full(_))));
-
-            release_tx.send(()).unwrap();
-            writer.join().unwrap();
-        });
-    }
-}
-
-#[cfg(test)]
 mod coordinator_tests;

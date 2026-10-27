@@ -834,7 +834,7 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{hash, prepared, record};
+    use crate::test_utils::{hash, open_index, parsed, record};
     use crate::{
         codec::{ProtobufBlockRecord, decode_range_record, encode_range},
         index::range_meta::{BlobDigest, full_meta},
@@ -887,15 +887,22 @@ mod tests {
         assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
     }
 
+    /// An index at `path` with the blocks 0..=2,100, the ranges at 0 and 1,000 sealed, and a
+    /// metadata row for each of the two ranges. Returns the state after the block write.
+    fn index_with_two_range_metas(path: &Path) -> (Index, IndexState) {
+        let index = open_index(path);
+        let state = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
+        index.put_range_meta(0, &full_meta(0)).unwrap();
+        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
+        (index, state)
+    }
+
     /// The pinned reads refuse another generation. The row list starts at the given height.
     #[test]
     fn pinned_range_reads_check_the_generation() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
-        let generation = index.write(batch(&index, 0..=2_100, 2_200)).unwrap().generation();
-        index.put_range_meta(0, &full_meta(0)).unwrap();
-        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
+        let (index, state) = index_with_two_range_metas(dir.path());
+        let generation = state.generation();
 
         assert_eq!(
             index.range_metas_from(generation, 0).unwrap(),
@@ -922,12 +929,8 @@ mod tests {
     fn range_meta_round_trips_for_a_sealed_range_and_refuses_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
-        let state = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
+        let (index, state) = index_with_two_range_metas(&path);
         assert_eq!(state.sealed_through(), Some(1_999));
-
-        index.put_range_meta(0, &full_meta(0)).unwrap();
-        index.put_range_meta(1_000, &full_meta(1_000)).unwrap();
         assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
         assert_eq!(index.range_meta(1_000).unwrap(), Some(full_meta(1_000)));
         assert_eq!(index.range_meta(2_000).unwrap(), None);
@@ -945,8 +948,7 @@ mod tests {
         assert_eq!(index.range_meta(0).unwrap(), Some(full_meta(0)));
 
         drop(index);
-        let reopened =
-            Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let reopened = open_index(&path);
         assert_eq!(reopened.range_meta(1_000).unwrap(), Some(full_meta(1_000)));
         assert_eq!(reopened.state().unwrap(), state);
     }
@@ -954,8 +956,7 @@ mod tests {
     #[test]
     fn continuity_rejects_metadata_for_a_range_that_is_not_sealed() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
 
         let mut txn = index.env.write_txn().unwrap();
@@ -972,8 +973,7 @@ mod tests {
     #[test]
     fn deep_reorg_drops_the_metadata_of_rebuilt_ranges_and_they_rejoin_the_verified_prefix() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let old = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
         assert_eq!(old.sealed_through(), Some(1_999));
         index.put_range_meta(0, &full_meta(0)).unwrap();
@@ -1051,7 +1051,7 @@ mod tests {
     fn installs_sealed_ranges_in_order_and_reads_them_back() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(&path);
         for start in [0, 1_000, 2_000] {
             install(&index, start, VerifyState::Verified).unwrap();
         }
@@ -1079,8 +1079,7 @@ mod tests {
         }
 
         drop(index);
-        let reopened =
-            Index::open(&path, 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let reopened = open_index(&path);
         assert_eq!(reopened.state().unwrap(), state);
         assert_eq!(
             reopened.range_meta(2_000).unwrap(),
@@ -1091,8 +1090,7 @@ mod tests {
     #[test]
     fn install_refuses_a_range_out_of_order() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         assert!(matches!(
             install(&index, 1_000, VerifyState::Verified),
             Err(IndexError::RangeOrder { start: 1_000, next: 0 })
@@ -1119,8 +1117,7 @@ mod tests {
     #[test]
     fn install_refuses_a_blob_that_does_not_continue_the_chain() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let changed = |start, change: fn(&mut [CompactBlockRecord])| {
             let mut records = range_records(start);
             change(&mut records);
@@ -1168,8 +1165,7 @@ mod tests {
     #[test]
     fn install_refuses_a_block_hash_that_is_in_the_index_already() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = install(&index, 0, VerifyState::Verified).unwrap();
         // The block at 1,500 gets the hash `duplicate`. The block at 1,501 links to it.
         let install_with_duplicate_hash = |duplicate| {
@@ -1202,8 +1198,7 @@ mod tests {
     #[test]
     fn install_refuses_a_meta_that_does_not_describe_the_blob() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let (blob, meta) = snapshot_range(0, VerifyState::Verified);
         let changes: [fn(&mut RangeMeta); 6] = [
             |meta| meta.entry.range_version = 2,
@@ -1229,8 +1224,7 @@ mod tests {
     #[test]
     fn install_refuses_a_blob_with_a_wrong_length_or_digest() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = install(&index, 0, VerifyState::Verified).unwrap();
         let (blob, meta) = snapshot_range(1_000, VerifyState::Verified);
         let len = meta.entry.blob_len;
@@ -1266,8 +1260,7 @@ mod tests {
     #[test]
     fn install_refuses_an_index_with_mutable_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
         assert_eq!(state.sealed_through(), Some(999));
         assert!(matches!(
@@ -1278,8 +1271,7 @@ mod tests {
 
         // An index with mutable rows and no sealed range.
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         index.write(batch(&index, 0..=10, 20)).unwrap();
         assert!(matches!(install(&index, 0, VerifyState::Verified), Err(IndexError::MutableRows)));
     }
@@ -1287,8 +1279,7 @@ mod tests {
     #[test]
     fn only_a_verified_range_after_the_verified_prefix_advances_verified_through() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let verified = |state: IndexState| state.verified_through();
         assert_eq!(verified(install(&index, 0, VerifyState::Verified).unwrap()), Some(999));
         assert_eq!(verified(install(&index, 1_000, VerifyState::Unverified).unwrap()), Some(999));
@@ -1297,8 +1288,7 @@ mod tests {
         assert_eq!((state.sealed_through(), verified(state)), (Some(2_999), Some(999)));
 
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         assert_eq!(verified(install(&index, 0, VerifyState::Unverified).unwrap()), None);
         index.verify_continuity().unwrap();
     }
@@ -1306,8 +1296,7 @@ mod tests {
     #[test]
     fn a_range_sealed_after_the_verified_prefix_advances_verified_through() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         install(&index, 0, VerifyState::Verified).unwrap();
         let state = index.write(batch(&index, 1_000..=2_100, 2_200)).unwrap();
         assert_eq!((state.sealed_through(), state.verified_through()), (Some(1_999), Some(1_999)));
@@ -1317,8 +1306,7 @@ mod tests {
         // The range at 1,000 is not verified. Thus a range sealed at 2,000 is not directly after
         // the verified prefix.
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         install(&index, 0, VerifyState::Verified).unwrap();
         install(&index, 1_000, VerifyState::Unverified).unwrap();
         let state = index.write(batch(&index, 2_000..=3_100, 3_200)).unwrap();
@@ -1328,14 +1316,12 @@ mod tests {
     #[test]
     fn a_range_sealed_with_no_verified_prefix_keeps_verified_through_unset() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
         assert_eq!((state.sealed_through(), state.verified_through()), (Some(999), None));
 
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         install(&index, 0, VerifyState::Unverified).unwrap();
         let state = index.write(batch(&index, 1_000..=2_100, 2_200)).unwrap();
         assert_eq!((state.sealed_through(), state.verified_through()), (Some(1_999), None));
@@ -1356,7 +1342,7 @@ mod tests {
     fn atomically_writes_restarts_and_packs_sealed_ranges() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(&path);
         let stale = batch(&index, 0..=0, 1_100);
         let state = index.write(batch(&index, 0..=1_000, 1_100)).unwrap();
 
@@ -1375,16 +1361,14 @@ mod tests {
         assert_eq!(index.state().unwrap(), state);
 
         drop(index);
-        let reopened =
-            Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let reopened = open_index(&path);
         assert_eq!(reopened.state().unwrap(), state);
     }
 
     #[test]
     fn seals_a_range_that_is_complete_in_mutable_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         // The tip is 1,060: blocks to 1,050 are durable, but only blocks to 960 can be sealed.
         // Range 0..=999 stays complete in `mutable_blocks`.
         let state = index.write(batch(&index, 0..=1_050, 1_060)).unwrap();
@@ -1429,8 +1413,7 @@ mod tests {
     #[test]
     fn write_timings_record_only_stages_that_ran() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         // This write seals no range.
         let stages = write_stages(&index, batch(&index, 0..=10, 20));
         assert!(stages.iter().all(|stage| !stage.starts_with("seal_")));
@@ -1439,8 +1422,7 @@ mod tests {
 
         // This write seals a range from its batch only. It reads and writes no mutable rows.
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let stages = write_stages(&index, batch(&index, 0..=999, 1_100));
         assert!(stages.contains(&"seal_encode".to_owned()));
         assert!(stages.contains(&"seal_put".to_owned()));
@@ -1450,8 +1432,7 @@ mod tests {
         // This write seals a range from mutable rows and batch rows, then writes the rest of the
         // batch as mutable rows.
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         index.write(batch(&index, 0..=500, 600)).unwrap();
         let stages = write_stages(&index, batch(&index, 501..=1_050, 1_110));
         for stage in ["seal_read", "seal_encode", "seal_put", "mutable_put"] {
@@ -1462,8 +1443,7 @@ mod tests {
     #[test]
     fn seal_fails_for_a_damaged_mutable_row() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         index.write(batch(&index, 0..=10, 20)).unwrap();
 
         // Change the hash in the payload. The hash in the envelope stays correct.
@@ -1486,8 +1466,7 @@ mod tests {
         use prost::Message;
 
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         index.write(batch(&index, 0..=10, 20)).unwrap();
 
         // Add a transaction without shielded data to a row. The row still decodes, but
@@ -1518,7 +1497,7 @@ mod tests {
     fn restart_rejects_a_gap_in_mutable_coverage() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index");
-        let index = Index::open(&path, 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(&path);
         index.write(batch(&index, 0..=10, 20)).unwrap();
         let mut txn = index.env.write_txn().unwrap();
         index.tables.mutable_blocks.delete(&mut txn, 5).unwrap();
@@ -1534,10 +1513,9 @@ mod tests {
     #[test]
     fn persistence_and_sealing_use_exact_depth_boundaries() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let mut builder = OrderedBuilder::new(IndexState::default(), 10 * 1024 * 1024).unwrap();
-        builder.push(prepared(0)).unwrap();
+        builder.push(parsed(record(0, Vec::new()))).unwrap();
 
         assert!(builder.build_batch(None, None, 10 * 1024 * 1024).unwrap().is_none());
         let txn = index.env.read_txn().unwrap();
@@ -1553,7 +1531,7 @@ mod tests {
 
         let mut builder = OrderedBuilder::new(state, 10 * 1024 * 1024).unwrap();
         for height in 1..=90 {
-            builder.push(prepared(height)).unwrap();
+            builder.push(parsed(record(height, Vec::new()))).unwrap();
         }
         let state = index
             .write(builder.build_batch(Some(90), Some(0), 10 * 1024 * 1024).unwrap().unwrap())
@@ -1565,7 +1543,7 @@ mod tests {
 
         let mut builder = OrderedBuilder::new(state, 10 * 1024 * 1024).unwrap();
         for height in 91..RANGE_SIZE {
-            builder.push(prepared(height)).unwrap();
+            builder.push(parsed(record(height, Vec::new()))).unwrap();
         }
         let state = index
             .write(builder.build_batch(Some(1_089), Some(999), 10 * 1024 * 1024).unwrap().unwrap())
@@ -1579,8 +1557,7 @@ mod tests {
     #[test]
     fn aborted_range_pack_keeps_every_mutable_row() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = index.write(batch(&index, 0..=999, 1_009)).unwrap();
         assert_eq!(state.durable_tip().unwrap().height, 999);
 
@@ -1612,8 +1589,7 @@ mod tests {
     #[test]
     fn reads_sealed_and_mutable_ranges_in_both_directions() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let state = index.write(batch(&index, 0..=1_005, 1_100)).unwrap();
 
         assert_eq!(index.read_block(state.generation(), 537).unwrap().height, 537);
@@ -1657,8 +1633,7 @@ mod tests {
     #[test]
     fn atomically_replaces_a_mutable_suffix() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let old = index.write(batch(&index, 0..=50, 60)).unwrap();
         let ancestor = BlockId::new(30, hash(30));
         let replacement = branch(ancestor, 31..=55);
@@ -1698,8 +1673,7 @@ mod tests {
     #[test]
     fn mutable_reorg_seals_a_range_that_it_completes() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let old = index.write(batch(&index, 0..=1_050, 1_060)).unwrap();
         assert_eq!(old.sealed_through(), None);
 
@@ -1721,8 +1695,7 @@ mod tests {
     #[test]
     fn deep_reorg_rebuilds_the_affected_sealed_range() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let old = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
         assert_eq!(old.sealed_through(), Some(999));
 
@@ -1741,8 +1714,7 @@ mod tests {
     #[test]
     fn deep_reorg_at_a_range_boundary_keeps_the_shared_hashes() {
         let dir = tempfile::tempdir().unwrap();
-        let index =
-            Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap();
+        let index = open_index(dir.path());
         let old = index.write(batch(&index, 0..=1_100, 1_200)).unwrap();
         assert_eq!(old.sealed_through(), Some(999));
 
@@ -1766,7 +1738,7 @@ mod tests {
     fn batch(index: &Index, heights: std::ops::RangeInclusive<u32>, source_tip: u32) -> WriteBatch {
         let mut builder = OrderedBuilder::new(index.state().unwrap(), 10 * 1024 * 1024).unwrap();
         for height in heights {
-            builder.push(prepared(height)).unwrap();
+            builder.push(parsed(record(height, Vec::new()))).unwrap();
         }
         builder
             .build_batch(

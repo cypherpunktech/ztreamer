@@ -433,7 +433,7 @@ fn current_record(
 #[cfg(test)]
 mod tests {
     use crate::index::BlockId;
-    use crate::test_utils::{hash, raw_block};
+    use crate::test_utils::{hash, open_index, raw_block};
 
     use super::*;
     use zakura_chain::transaction;
@@ -539,8 +539,7 @@ mod tests {
     fn persists_depth_ten_and_returns_the_volatile_head() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=12).map(raw_block).collect());
             let (state, volatile) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -557,8 +556,7 @@ mod tests {
     fn unchanged_tip_skips_suffix_reads() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=20).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -578,8 +576,7 @@ mod tests {
     fn a_tip_change_reads_the_new_blocks_only() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=150).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -605,8 +602,7 @@ mod tests {
     fn a_reorg_in_the_window_reads_the_changed_blocks_and_replaces_the_suffix() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=150).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -621,9 +617,7 @@ mod tests {
             assert_eq!(source.bodies, (145..=153).collect::<Vec<_>>());
             // An index that reads the branch from genesis has the same records.
             let fresh_dir = tempfile::tempdir().unwrap();
-            let fresh =
-                Index::open(fresh_dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32]))
-                    .unwrap();
+            let fresh = open_index(fresh_dir.path());
             let (fresh_state, fresh_head) =
                 sync_head_once(&fresh, &mut branch(), &[], PipelineConfig::default())
                     .await
@@ -645,8 +639,7 @@ mod tests {
     fn a_retained_block_that_leaves_the_chain_fails_the_parent_check() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=150).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -673,8 +666,7 @@ mod tests {
     fn replaces_only_the_volatile_head_without_rewriting_the_index() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=20).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -696,8 +688,7 @@ mod tests {
     fn rolls_the_durable_tip_back_to_a_shorter_chain() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=20).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -719,8 +710,7 @@ mod tests {
     fn atomically_replaces_a_durable_reorg() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 10 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=120).map(raw_block).collect());
             let (state, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -744,8 +734,7 @@ mod tests {
     fn deep_reorg_is_reported_then_recovered() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=120).map(raw_block).collect());
             let (_, head) =
                 sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
@@ -772,8 +761,7 @@ mod tests {
     fn restart_recovers_a_persisted_noncanonical_suffix() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             let dir = tempfile::tempdir().unwrap();
-            let index =
-                Index::open(dir.path(), 20 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap();
+            let index = open_index(dir.path());
             let mut source = Source((0..=120).map(raw_block).collect());
             sync_head_once(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
 

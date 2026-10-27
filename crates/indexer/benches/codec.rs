@@ -1,13 +1,13 @@
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
 
-use ztreamer_indexer::test_utils::{self as fixtures, hash};
+use ztreamer_indexer::test_utils::{self as fixtures, record};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zakura_chain::{block::Block, serialization::ZcashDeserialize as _};
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, TreeSizes, decode_range_record, encode_range},
+    codec::{CompactBlockRecord, decode_range_record, encode_range},
     index::RANGE_SIZE,
     parser::parse_block,
     types::{CompactTransaction, RawIndexBlock},
@@ -24,17 +24,6 @@ fn shielded_transactions() -> Vec<CompactTransaction> {
     })
     .unwrap()
     .transactions
-}
-
-fn record(height: u32, transactions: Vec<CompactTransaction>) -> CompactBlockRecord {
-    CompactBlockRecord {
-        height,
-        hash: hash(height),
-        previous_hash: hash(height.wrapping_sub(1)),
-        time: height,
-        transactions,
-        end_tree_sizes: TreeSizes::default(),
-    }
 }
 
 fn block_codec(c: &mut Criterion) {

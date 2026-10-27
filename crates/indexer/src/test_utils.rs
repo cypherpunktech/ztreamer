@@ -10,7 +10,7 @@ use crate::{
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use zakura_chain::{
     block::{self, Block},
@@ -108,6 +108,13 @@ pub fn mixed_records(count: u32) -> Vec<CompactBlockRecord> {
         .collect()
 }
 
+/// Opens an index at `path` for mainnet with the genesis hash `[1; 32]` and a 64 MiB map.
+///
+/// For a test that needs another chain identity or map size, call [`Index::open`].
+pub fn open_index(path: impl AsRef<Path>) -> Index {
+    Index::open(path, 64 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap()
+}
+
 /// Writes `records` into `index` in batches and returns the resulting state.
 pub fn populate(
     index: &Index,
@@ -126,20 +133,6 @@ pub fn populate(
     }
     assert_eq!(state.durable_tip().unwrap().height, tip);
     state
-}
-
-/// An empty block at `height` that chains onto [`hash`] of the previous height.
-pub fn prepared(height: u32) -> ParsedCompactBlock {
-    ParsedCompactBlock {
-        height,
-        hash: hash(height),
-        previous_hash: height.checked_sub(1).map(hash).unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH),
-        time: height,
-        transactions: Vec::new(),
-        sapling_additions: 0,
-        orchard_additions: 0,
-        ironwood_additions: 0,
-    }
 }
 
 /// A minimal raw block at `height`: a 140-byte header prefix that chains onto [`hash`] of the
