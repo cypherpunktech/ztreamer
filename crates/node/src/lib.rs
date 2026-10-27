@@ -12,7 +12,6 @@ use zakura_chain::{
 };
 use zakura_node_services::BoxError;
 use zakura_state::{ChainTipChange, HashOrHeight as BlockId};
-pub use zakurad::node::CustomService;
 
 /// An error returned by a [`NodeClient`] request.
 #[derive(Debug, thiserror::Error)]
