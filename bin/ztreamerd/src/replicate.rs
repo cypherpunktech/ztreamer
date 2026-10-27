@@ -46,14 +46,6 @@ impl ReplicateArgs {
         let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
         Replica { sources: self.replicate_from.clone(), key }
     }
-
-    /// Logs the new import state of a replica at info level: `tail` or `following`. Does
-    /// nothing in the embedded mode.
-    pub(crate) fn log_import_state(&self, state: &'static str) {
-        if !self.replicate_from.is_empty() {
-            info!(import_state = state);
-        }
-    }
 }
 
 /// A `--replicate-from` value.

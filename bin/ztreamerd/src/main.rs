@@ -290,7 +290,8 @@ struct Embedded {
 
 /// Indexes, then serves until shutdown. The node of `sources` must be ready for the historical
 /// index pass. `embedded` is set when a node runs in this process. Then the p2p service gets the
-/// compact service, and the `range_meta` filler runs.
+/// compact service, and the `range_meta` filler runs. Else the remote mode logs the import state
+/// `following` after the head reconcile.
 async fn run_application<T, H, B>(
     cli: DaemonArgs,
     mut grpc_server: Server,
@@ -308,7 +309,6 @@ where
     let NodeSources { tail, head, backend } = sources;
 
     let pipeline = PipelineConfig::from(&cli);
-    cli.replicate.log_import_state("tail");
     let ControlFlow::Continue(state) =
         sync_historical(tail, &index, pipeline, cli.index_only, &shutdown).await?
     else {
@@ -325,6 +325,9 @@ where
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
+    if embedded.is_none() {
+        info!(import_state = "following");
+    }
     let filler = embedded
         .map(|Embedded { p2p }| -> Result<_> {
             p2p.install(compact.clone()).map_err(|error| eyre!(error))?;
@@ -332,7 +335,6 @@ where
             Ok(filler.run(compact.subscribe()))
         })
         .transpose()?;
-    cli.replicate.log_import_state("following");
     let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact.clone()))
