@@ -21,7 +21,6 @@ pub use remote::{DEFAULT_REQUESTS_IN_FLIGHT, RemoteTailSource};
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
-use zakura_state::ZakuraDb;
 use ztreamer_remote::RpcError;
 
 use crate::{
@@ -201,8 +200,8 @@ pub trait HistoricalSource: Sync {
 /// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
-/// [`crate::source::ZakuraSource`] builds one over the embedded database. A source in another
-/// crate builds one the same way:
+/// `ztreamerd` builds one over the embedded `ZakuraDb` or over [`RemoteTailSource`]. A source in
+/// another crate builds one the same way:
 ///
 /// ```no_run
 /// # use std::sync::atomic::AtomicBool;
@@ -215,7 +214,7 @@ pub trait HistoricalSource: Sync {
 /// # Ok(())
 /// # }
 /// ```
-pub struct HistoricalPipeline<'a, S = ZakuraDb> {
+pub struct HistoricalPipeline<'a, S> {
     index: &'a Index,
     db: &'a S,
     config: PipelineConfig,
