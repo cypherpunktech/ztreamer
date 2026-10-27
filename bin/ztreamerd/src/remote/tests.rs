@@ -168,7 +168,7 @@ async fn refuses_a_node_with_another_genesis_block() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn refuses_a_node_that_prunes() {
+async fn refuses_a_node_that_pruned_the_next_block() {
     let dir = tempfile::tempdir().unwrap();
     let chain = MockChain::new(&chain(10));
     let mock = MockNode::start(move |_, request| match chain.reply(request) {
@@ -183,11 +183,11 @@ async fn refuses_a_node_that_prunes() {
 
     let error = run(cli(&dir, &mock.url().to_string(), &[])).await.unwrap_err();
 
-    let expected =
-        "remote zakura prunes the block bodies below height 5: use a node that does not prune";
+    let expected = "the import needs block 0, but the remote zakura node keeps block bodies only \
+                    from height 5: use a node that does not prune, or an index that is sealed \
+                    through height 4 or above";
     assert!(error.chain().any(|cause| cause.to_string() == expected), "{error:?}");
     assert!(read_no_block(&mock));
-    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "no index is made");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

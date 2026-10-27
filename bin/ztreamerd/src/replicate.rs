@@ -5,6 +5,7 @@
 //! Before it fetches a range, the import refuses:
 //!
 //! - a node that runs another genesis block than the network of its chain;
+//! - a node that prunes the next block that the import needs;
 //! - in [`Importer::run`], a manifest whose signature does not verify with [`SNAPSHOT_PUBKEY`],
 //!   and a manifest for another network or genesis block than the index.
 
@@ -12,12 +13,13 @@ use std::{fmt, ops::ControlFlow, str::FromStr, sync::Arc};
 
 use clap::Args;
 use ed25519_dalek::VerifyingKey;
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr, ensure, eyre};
 use http::Uri;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use zakura_chain::parameters::Network;
+use zakura_chain::{block::Height, parameters::Network};
+use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
 use ztreamer_remote::ZakuraClient;
 use ztreamer_service::RemoteBackend;
@@ -111,8 +113,9 @@ pub(crate) struct Replica {
 
 impl Replica {
     /// Imports the epochs of the manifest above the sealed tip of `index`, checked against the
-    /// node of `client`. Each installed row names the node as `id`. `network` is the network of
-    /// its chain. Breaks on shutdown.
+    /// node of `client`. Each installed row names the node as `id`. `info` is the
+    /// `getblockchaininfo` answer of the node, and `network` the network of its chain. Breaks on
+    /// shutdown.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
     /// manifest needs no import. Neither does an index whose sealed tip is not the end
@@ -123,6 +126,7 @@ impl Replica {
         &self,
         client: &ZakuraClient,
         id: NodeId,
+        info: &GetBlockchainInfoResponse,
         network: &Network,
         index: &Arc<Index>,
         shutdown: &CancellationToken,
@@ -138,6 +142,18 @@ impl Replica {
                 .wrap_err("index state task panicked")??
                 .sealed_through()
         };
+        // The samples and the tail read the block bodies from the next block on.
+        let next = Height(sealed.map_or(0, |sealed| sealed + 1));
+        let first = info.prune_height().unwrap_or(Height::MIN);
+        ensure!(
+            next >= first,
+            "the import needs block {}, but the remote zakura node keeps block bodies only from \
+             height {}: use a node that does not prune, or an index that is sealed through \
+             height {} or above",
+            next.0,
+            first.0,
+            first.0 - 1
+        );
 
         let source = self.source.connect(self.key).await?;
         let node = TrustedNode {

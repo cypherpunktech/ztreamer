@@ -98,8 +98,8 @@ impl HistoricalSource for RemoteTailSource {
         }
     }
 
-    /// Zero: the remote node is an archive node. `RemoteNode` in ztreamerd refuses a node that
-    /// prunes.
+    /// Zero. Before the tail, the import of ztreamerd refuses a node that pruned the next block
+    /// that the index needs.
     fn prune_height(&self) -> Result<u32, PipelineError> {
         Ok(0)
     }

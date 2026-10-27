@@ -232,8 +232,8 @@ impl RemoteNode {
     /// mode does. Runs the import of `--replicate-from`. Then makes the sources when the node is
     /// ready, and runs the daemon on them until shutdown.
     ///
-    /// It waits while the node is out of reach or in warm-up. It refuses a node that prunes.
-    /// [`Index::open`] refuses an index of another network.
+    /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
+    /// of another network.
     async fn application(
         self,
         cli: DaemonArgs,
@@ -245,9 +245,9 @@ impl RemoteNode {
         };
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
-        Self::ensure_archive(&info)?;
         let index = cli.open_index(&network).await?;
-        let import = self.replica.import(&self.client, self.id(), &network, &index, &shutdown);
+        let import =
+            self.replica.import(&self.client, self.id(), &info, &network, &index, &shutdown);
         if import.await?.is_break() {
             return Ok(());
         }
@@ -260,23 +260,11 @@ impl RemoteNode {
         run_application(cli, grpc_server, index, &network, None, sources, shutdown).await
     }
 
-    /// Refuses a node that prunes. The import, the tail and the head read the block bodies above
-    /// the index tip, thus the node must keep all block bodies.
-    fn ensure_archive(info: &GetBlockchainInfoResponse) -> Result<()> {
-        info.prune_height().map_or(Ok(()), |height| {
-            Err(eyre!(
-                "remote zakura prunes the block bodies below height {}: use a node that does not \
-                 prune",
-                height.0
-            ))
-        })
-    }
-
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.
     ///
     /// `info` is the latest `getblockchaininfo` answer. It refuses a node whose genesis block is
-    /// not the one of `network`. Then it waits until the best block of the node is at or above the durable tip of the
-    /// index.
+    /// not the one of `network`. Then it waits until the best block of the node is at or above
+    /// the durable tip of the index.
     async fn sources(
         &self,
         mut info: GetBlockchainInfoResponse,
