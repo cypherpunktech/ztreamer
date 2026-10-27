@@ -25,10 +25,6 @@ pub mod compact_bytes {
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
 pub mod proto {
     tonic::include_proto!("cash.z.wallet.sdk.rpc");
-
-    /// Serialized file descriptor set for gRPC reflection.
-    pub const FILE_DESCRIPTOR_SET: &[u8] =
-        tonic::include_file_descriptor_set!("lightwalletd_descriptor");
 }
 
 /// Generated Replicator service types: a ztreamer serves its sealed ranges to a replica.

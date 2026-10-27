@@ -1,14 +1,10 @@
-//! Compiles the Lightwallet and Replicator protobuf definitions and the file descriptor set.
+//! Compiles the Lightwallet and Replicator protobuf definitions.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_prost_build::configure()
-        .file_descriptor_set_path(
-            std::path::PathBuf::from(std::env::var("OUT_DIR")?).join("lightwalletd_descriptor.bin"),
-        )
-        .compile_protos(
-            &["proto/lightwalletd/compact_formats.proto", "proto/lightwalletd/service.proto"],
-            &["proto/lightwalletd"],
-        )?;
+    tonic_prost_build::configure().compile_protos(
+        &["proto/lightwalletd/compact_formats.proto", "proto/lightwalletd/service.proto"],
+        &["proto/lightwalletd"],
+    )?;
     let wire_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?).join("wire");
     std::fs::create_dir_all(&wire_dir)?;
     // Reuse the ordinary request/response messages, substituting only the compact
