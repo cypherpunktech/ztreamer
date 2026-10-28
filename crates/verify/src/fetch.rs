@@ -45,8 +45,15 @@ use crate::{
     snapshot::{Latest, LatestError, RangePath, SignatureFile},
 };
 
-/// The times that [`Fetcher::blob`] continues one blob after a transfer error.
-pub const MAX_RESUMES: u32 = 3;
+/// The resumes of one blob in a row after failed transfers with no progress. The next such
+/// failure stops [`Fetcher::blob`] with its error. A failed transfer that receives
+/// [`RESUME_PROGRESS_BYTES`] or more sets the count to zero.
+pub const MAX_RESUMES_WITHOUT_PROGRESS: u32 = 5;
+
+/// The bytes that a failed transfer must receive to count as progress. Thus a source that cuts
+/// each transfer after a few bytes gets the waits and the limit of a failure with no progress,
+/// and a blob of `n` bytes needs at most `n / RESUME_PROGRESS_BYTES` resumes with progress.
+pub const RESUME_PROGRESS_BYTES: usize = 1 << 20;
 
 /// The `GetRange` streams that one [`PeerSource`] opens at a time. It is the stream limit of the
 /// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
@@ -170,8 +177,24 @@ pub enum FetchError {
 
 impl FetchError {
     /// Returns `true` for an error of the transfer, which a new request can avoid.
-    const fn is_transfer(&self) -> bool {
-        matches!(self, Self::Http { .. } | Self::Body(_) | Self::Grpc(_))
+    ///
+    /// A gRPC status that tells that the peer does not have the range or refuses the request is
+    /// not one: a new request gets the same answer.
+    fn is_transfer(&self) -> bool {
+        match self {
+            Self::Http { .. } | Self::Body(_) => true,
+            Self::Grpc(status) => !matches!(
+                status.code(),
+                Code::NotFound
+                    | Code::OutOfRange
+                    | Code::InvalidArgument
+                    | Code::FailedPrecondition
+                    | Code::PermissionDenied
+                    | Code::Unauthenticated
+                    | Code::Unimplemented
+            ),
+            _ => false,
+        }
     }
 }
 
@@ -215,12 +238,13 @@ pub trait RangeSource: fmt::Debug + Send + Sync {
 #[derive(Debug)]
 pub struct Fetcher {
     source: Box<dyn RangeSource>,
+    resume_rule: ResumeRule,
 }
 
 impl Fetcher {
     /// A fetcher of the blobs of `source`.
     pub fn new(source: Box<dyn RangeSource>) -> Self {
-        Self { source }
+        Self { source, resume_rule: ResumeRule::default() }
     }
 
     /// The manifest of the source.
@@ -230,20 +254,37 @@ impl Fetcher {
 
     /// The blob of `entry`, with the length and the digest of the entry.
     ///
-    /// A request or a transfer that fails continues from the last byte received, at most
-    /// [`MAX_RESUMES`] times. A blob with a wrong length or digest is [`FetchError::Digest`].
-    /// The stream of a failed transfer is dropped before the next request, thus the source can
-    /// release its place before the resume.
+    /// A request or a transfer that fails continues from the last byte received. A transfer
+    /// that received [`RESUME_PROGRESS_BYTES`] or more resumes at once. Another failed transfer
+    /// resumes after a wait of 1 s, then double the wait before, at most
+    /// [`MAX_RESUMES_WITHOUT_PROGRESS`] times in a row. A transfer that fails after the last
+    /// byte of the entry does not resume: the digest check decides. A blob with a wrong length
+    /// or digest is [`FetchError::Digest`]. The stream of a failed transfer is dropped before
+    /// the next request, thus the source can release its place before the resume.
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
-        let mut resumes = 0;
-        while let Err(error) = self.transfer(entry, &mut blob).await {
-            if !error.is_transfer() || resumes == MAX_RESUMES {
-                return Err(error);
+        let mut stalled = StalledResumes::from(self.resume_rule);
+        loop {
+            let offset = blob.len();
+            let Err(error) = self.transfer(entry, &mut blob).await else {
+                break;
+            };
+            if blob.len() as u64 >= entry.blob_len {
+                break;
             }
-            resumes += 1;
-            let (start_height, offset) = (entry.start_height, blob.len());
-            warn!(%error, start_height, offset, "range transfer stopped; resuming");
+            let received = blob.len() - offset;
+            let resume = if error.is_transfer() { stalled.after(received) } else { Resume::Stop };
+            let wait = match resume {
+                Resume::Stop => return Err(error),
+                Resume::Now => None,
+                Resume::After(wait) => Some(wait),
+            };
+            let (start_height, offset, error) =
+                (entry.start_height, blob.len(), ErrorChain(&error));
+            warn!(%error, start_height, offset, received, ?wait, "range transfer stopped; resuming");
+            if let Some(wait) = wait {
+                tokio::time::sleep(wait).await;
+            }
         }
         entry
             .check_blob(&blob)
@@ -260,6 +301,82 @@ impl Fetcher {
                 break;
             };
             blob.extend_from_slice(&chunk?);
+        }
+        Ok(())
+    }
+}
+
+/// The values of the resume rule of a [`Fetcher`]. The default is [`RESUME_PROGRESS_BYTES`] and
+/// a first wait of 1 s.
+#[derive(Clone, Copy, Debug)]
+struct ResumeRule {
+    /// The bytes that a failed transfer must receive to count as progress.
+    progress_bytes: usize,
+    /// The wait after the first failed transfer with no progress.
+    first_wait: Duration,
+}
+
+impl Default for ResumeRule {
+    fn default() -> Self {
+        Self { progress_bytes: RESUME_PROGRESS_BYTES, first_wait: Duration::from_secs(1) }
+    }
+}
+
+/// What [`Fetcher::blob`] does after a failed transfer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Resume {
+    /// Resume with no wait.
+    Now,
+    /// Resume after the wait.
+    After(Duration),
+    /// Stop with the error of the transfer.
+    Stop,
+}
+
+/// The failed transfers of one blob in a row with no progress, with the rule that counts them.
+///
+/// A failed transfer that received [`ResumeRule::progress_bytes`] or more sets the count to
+/// zero and resumes now. The first failed transfer with no progress waits
+/// [`ResumeRule::first_wait`], and each next one waits double the wait before. After
+/// [`MAX_RESUMES_WITHOUT_PROGRESS`] such resumes, the next failure stops.
+#[derive(Clone, Copy, Debug)]
+struct StalledResumes {
+    rule: ResumeRule,
+    count: u32,
+}
+
+impl From<ResumeRule> for StalledResumes {
+    fn from(rule: ResumeRule) -> Self {
+        Self { rule, count: 0 }
+    }
+}
+
+impl StalledResumes {
+    /// What to do after a failed transfer that received `received` bytes.
+    fn after(&mut self, received: usize) -> Resume {
+        if received >= self.rule.progress_bytes {
+            self.count = 0;
+            return Resume::Now;
+        }
+        if self.count == MAX_RESUMES_WITHOUT_PROGRESS {
+            return Resume::Stop;
+        }
+        self.count += 1;
+        Resume::After(self.rule.first_wait * 2_u32.pow(self.count - 1))
+    }
+}
+
+/// The `Display` form of an error, then of each of its sources, joined with `: `. Thus a log
+/// shows why a transfer stopped: the I/O error below `HTTP body failed`, for example.
+struct ErrorChain<'a>(&'a (dyn std::error::Error + Send + Sync));
+
+impl fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut source = self.0.source();
+        while let Some(error) = source {
+            write!(f, ": {error}")?;
+            source = error.source();
         }
         Ok(())
     }
@@ -519,11 +636,13 @@ impl RangeSource for PeerSource {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use ed25519_dalek::SigningKey;
     use futures_util::future;
     use tokio::sync::watch;
     use tokio_stream::wrappers::TcpListenerStream;
-    use tonic::transport::Server;
+    use tonic::{Status, transport::Server};
     use zakura_chain::parameters::Network;
     use ztreamer_indexer::index::RANGE_SIZE;
     use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
@@ -534,6 +653,47 @@ mod tests {
 
     /// Twelve ranges: the filler closes an epoch at range 9 only.
     const RANGES: u32 = 12;
+
+    impl ResumeRule {
+        /// Each received byte is progress, and the waits are short. The test blobs are smaller
+        /// than [`RESUME_PROGRESS_BYTES`].
+        const TEST: Self = Self { progress_bytes: 1, first_wait: Duration::from_millis(1) };
+    }
+
+    impl Fetcher {
+        fn with_test_resume_rule(source: Box<dyn RangeSource>) -> Self {
+            Self { source, resume_rule: ResumeRule::TEST }
+        }
+    }
+
+    /// A source that sends the first `bytes` bytes of `blob` after the offset of each request,
+    /// then fails with `status`. It records the offset of each request.
+    #[derive(Debug)]
+    struct FailingSource {
+        blob: Bytes,
+        bytes: usize,
+        status: Status,
+        offsets: Arc<Mutex<Vec<u64>>>,
+    }
+
+    #[async_trait]
+    impl RangeSource for FailingSource {
+        async fn manifest(&self) -> Result<Manifest, FetchError> {
+            unimplemented!("the tests read blobs only")
+        }
+
+        async fn fetch_blob(
+            &self,
+            _entry: &ManifestEntry,
+            offset: u64,
+        ) -> Result<BlobStream, FetchError> {
+            self.offsets.lock().unwrap().push(offset);
+            let tail = self.blob.slice(offset as usize..);
+            let sent = tail.slice(..self.bytes.min(tail.len()));
+            let chunks = [Ok(sent), Err(FetchError::Grpc(self.status.clone()))];
+            Ok(Box::pin(tokio_stream::iter(chunks)))
+        }
+    }
 
     struct Http {
         source: SourceIndex,
@@ -555,7 +715,8 @@ mod tests {
 
         fn fetcher(&self, seed: [u8; 32]) -> Fetcher {
             let key = SigningKey::from_bytes(&seed).verifying_key();
-            Fetcher::new(Box::new(HttpSource::new(self.server.base.clone(), key).unwrap()))
+            let source = HttpSource::new(self.server.base.clone(), key).unwrap();
+            Fetcher::with_test_resume_rule(Box::new(source))
         }
 
         fn blob(&self, start: u32) -> Vec<u8> {
@@ -609,6 +770,106 @@ mod tests {
             requests,
             [(relative.to_owned(), None), (relative.to_owned(), Some(format!("bytes={half}-")))]
         );
+    }
+
+    #[tokio::test]
+    async fn a_transfer_that_progresses_resumes_more_than_the_limit_without_progress() {
+        let http = Http::new().await;
+        let entry = &http.snapshot.manifest.entries()[1];
+        let path = http.snapshot.range_path(entry);
+        let relative = path.strip_prefix(http.snapshot.dir.path()).unwrap().to_str().unwrap();
+        let cuts = MAX_RESUMES_WITHOUT_PROGRESS as usize + 2;
+        http.server.cut_next_answers(relative, cuts);
+
+        let blob = http.fetcher(SEED).blob(entry).await.unwrap();
+
+        assert_eq!(blob, http.blob(1_000));
+        // Each cut answer sends half of the bytes after its offset.
+        let mut offset = 0;
+        let mut expected = vec![(relative.to_owned(), None)];
+        for _ in 0..cuts {
+            offset += (blob.len() - offset) / 2;
+            expected.push((relative.to_owned(), Some(format!("bytes={offset}-"))));
+        }
+        let requests: Vec<_> =
+            http.server.requests().into_iter().filter(|(path, _)| path == relative).collect();
+        assert_eq!(requests, expected);
+    }
+
+    #[test]
+    fn stalled_resumes_double_the_wait_and_stop_at_the_limit() {
+        let mut stalled = StalledResumes::from(ResumeRule::default());
+        let resumes: Vec<_> = (0..6).map(|_| stalled.after(0)).collect();
+        let after = |secs| Resume::After(Duration::from_secs(secs));
+        assert_eq!(resumes, [after(1), after(2), after(4), after(8), after(16), Resume::Stop]);
+
+        // Fewer than `RESUME_PROGRESS_BYTES` is no progress. More starts the count again.
+        let mut stalled = StalledResumes::from(ResumeRule::default());
+        let received = [RESUME_PROGRESS_BYTES - 1, 0, RESUME_PROGRESS_BYTES, 0];
+        let resumes: Vec<_> = received.into_iter().map(|bytes| stalled.after(bytes)).collect();
+        assert_eq!(resumes, [after(1), after(2), Resume::Now, after(1)]);
+    }
+
+    #[test]
+    fn a_peer_refusal_that_a_new_request_does_not_change_is_no_transfer_error() {
+        let refusals = [Status::not_found(""), Status::out_of_range(""), Status::unimplemented("")];
+        assert!(refusals.into_iter().all(|status| !FetchError::Grpc(status).is_transfer()));
+        let cuts = [Status::aborted(""), Status::unavailable(""), Status::internal("")];
+        assert!(cuts.into_iter().all(|status| FetchError::Grpc(status).is_transfer()));
+    }
+
+    /// A fetcher of the blob of range 1000 from a [`FailingSource`], the entry, the blob, and the
+    /// offsets of the requests.
+    async fn failing_source(
+        bytes: usize,
+        status: Status,
+    ) -> (Fetcher, ManifestEntry, Bytes, Arc<Mutex<Vec<u64>>>) {
+        let http = Http::new().await;
+        let entry = http.snapshot.manifest.entries()[1].clone();
+        let blob = Bytes::from(http.blob(1_000));
+        let offsets = Arc::default();
+        let source =
+            FailingSource { blob: blob.clone(), bytes, status, offsets: Arc::clone(&offsets) };
+        (Fetcher::with_test_resume_rule(Box::new(source)), entry, blob, offsets)
+    }
+
+    #[tokio::test]
+    async fn a_transfer_that_fails_after_the_last_byte_gives_the_blob() {
+        let (fetcher, entry, blob, offsets) =
+            failing_source(usize::MAX, Status::aborted("cut after the last byte")).await;
+
+        assert_eq!(fetcher.blob(&entry).await.unwrap(), blob);
+        assert_eq!(*offsets.lock().unwrap(), [0]);
+    }
+
+    #[tokio::test]
+    async fn a_peer_refusal_stops_the_fetch_with_no_resume() {
+        let (fetcher, entry, _, offsets) = failing_source(0, Status::not_found("no range")).await;
+
+        let error = fetcher.blob(&entry).await.unwrap_err();
+
+        assert!(matches!(&error, FetchError::Grpc(status) if status.code() == Code::NotFound));
+        assert_eq!(*offsets.lock().unwrap(), [0]);
+    }
+
+    #[tokio::test]
+    async fn transfers_with_no_progress_stop_after_the_resume_limit() {
+        let (fetcher, entry, _, offsets) = failing_source(0, Status::unavailable("down")).await;
+
+        let error = fetcher.blob(&entry).await.unwrap_err();
+
+        assert!(matches!(&error, FetchError::Grpc(status) if status.code() == Code::Unavailable));
+        let requests = MAX_RESUMES_WITHOUT_PROGRESS as usize + 1;
+        assert_eq!(*offsets.lock().unwrap(), vec![0; requests]);
+    }
+
+    #[test]
+    fn an_error_chain_shows_each_source() {
+        let error = FetchError::Digest { start_height: 7, mismatch: BlobMismatch::Digest };
+
+        let chain = ErrorChain(&error).to_string();
+
+        assert_eq!(chain, format!("{error}: {}", BlobMismatch::Digest));
     }
 
     #[tokio::test]
@@ -684,7 +945,7 @@ mod tests {
             let source = SourceIndex::new(RANGES).await;
             let server = PeerServer::start(&source, stream_limit).await;
             let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
-            Self { source, server, fetcher: Fetcher::new(Box::new(peer)) }
+            Self { source, server, fetcher: Fetcher::with_test_resume_rule(Box::new(peer)) }
         }
 
         /// Fetches the blobs of the first ten ranges at the same time, and checks each one.

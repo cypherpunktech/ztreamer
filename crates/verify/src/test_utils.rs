@@ -221,8 +221,9 @@ pub struct FileServer {
 #[derive(Debug)]
 struct Served {
     root: PathBuf,
-    /// The next answer for this path sends half of its bytes, then stops with an error.
-    cut: Mutex<Option<String>>,
+    /// The next answers for this path, and their count: each sends half of its bytes, then
+    /// stops with an error.
+    cut: Mutex<Option<(String, usize)>>,
     requests: Mutex<Requests>,
     open_requests: Arc<OpenCounts>,
     /// The wait before each answer.
@@ -269,7 +270,12 @@ impl FileServer {
 
     /// Cuts the next answer for `path` after half of its bytes.
     pub fn cut_next(&self, path: &str) {
-        *self.state.cut.lock().unwrap() = Some(path.to_owned());
+        self.cut_next_answers(path, 1);
+    }
+
+    /// Cuts each of the next `answers` answers for `path` after half of its bytes.
+    pub fn cut_next_answers(&self, path: &str, answers: usize) {
+        *self.state.cut.lock().unwrap() = Some((path.to_owned(), answers));
     }
 
     /// The requests that the server got, in order.
@@ -299,7 +305,19 @@ impl Served {
         });
         let bytes = Bytes::from(bytes).slice(offset..);
         let status = if range.is_some() { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK };
-        let cut = self.cut.lock().unwrap().take_if(|cut| *cut == path).is_some();
+        let cut = {
+            let mut cut = self.cut.lock().unwrap();
+            match cut.as_mut() {
+                Some((cut_path, answers)) if *cut_path == path => {
+                    *answers -= 1;
+                    if *answers == 0 {
+                        *cut = None;
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
         let body = if cut {
             // Fail after the first half is on the wire, not before hyper flushes it.
             let (sender, frames) = mpsc::channel(2);
