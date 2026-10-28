@@ -170,7 +170,8 @@ impl RpcClient {
             return Err(RpcError::Config(format!("url {uri} has no host")));
         }
 
-        let auth_header = config.auth.header()?;
+        // `new` is sync, so this read blocks. It runs once, before the first call.
+        let auth_header = config.auth.header_blocking()?;
         let http = HttpClient::new(Some(CONNECT_TIMEOUT))
             .map_err(|error| RpcError::Config(format!("tls setup failed: {error}")))?;
 
@@ -272,7 +273,7 @@ impl RpcClient {
                 )
             {
                 reloaded_cookie = true;
-                if self.reload_cookie() {
+                if self.reload_cookie().await {
                     tracing::info!(method, "remote rpc: cookie changed on disk, retrying");
                     continue;
                 }
@@ -301,9 +302,10 @@ impl RpcClient {
         }
     }
 
-    /// Re-reads the cookie file. Returns true when the header changed.
-    fn reload_cookie(&self) -> bool {
-        let Ok(fresh) = self.inner.auth.header() else {
+    /// Re-reads the cookie file without blocking the Tokio worker. Returns true when the header
+    /// changed.
+    async fn reload_cookie(&self) -> bool {
+        let Ok(fresh) = self.inner.auth.header().await else {
             return false;
         };
         let mut current =
