@@ -233,10 +233,10 @@ impl Fetcher {
     ///
     /// A request or a transfer that fails continues from the last byte received. A transfer
     /// that received bytes resumes at once, with no limit: each resume asks for fewer bytes. A
-    /// transfer that received no byte resumes after a wait of [`StalledResumes`], at most
-    /// [`MAX_RESUMES_WITHOUT_PROGRESS`] times in a row. A blob with a wrong length or digest is
-    /// [`FetchError::Digest`]. The stream of a failed transfer is dropped before the next
-    /// request, thus the source can release its place before the resume.
+    /// transfer that received no byte resumes after a wait of 1 s, then double the wait before,
+    /// at most [`MAX_RESUMES_WITHOUT_PROGRESS`] times in a row. A blob with a wrong length or
+    /// digest is [`FetchError::Digest`]. The stream of a failed transfer is dropped before the
+    /// next request, thus the source can release its place before the resume.
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
         let mut stalled = StalledResumes::default();
