@@ -52,6 +52,11 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 - Builders for structs with more than four fields or several fields of the
   same type.
 - Small, focused functions and types. No `TODO`s for core logic.
+- A source file holds at most about 500 lines of non-test code. Split a larger file along
+  the seams of its types.
+- An inherent `impl Type` block is in the file that defines `Type`, also in tests. Never
+  split the methods of one type over several files: a type that needs this has too many
+  jobs, so split the type. A trait impl follows the orphan rule.
 - Doc every public item. Include a usage example where it helps.
   Traits get an implementation guide.
 
@@ -70,8 +75,12 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 ### Tests
 
 - Tests panic. Never return `Result` from a test. `unwrap()` directly.
-- Unit tests in `mod tests` at the bottom of the file. Integration tests in
+- Unit tests in `mod tests` at the bottom of the file. A test module over about 200 lines
+  goes to a sibling file: `foo.rs` ends with `#[cfg(test)] mod tests;`, and the tests are in
+  `foo/tests.rs`. Integration tests in
   `tests/`. Benchmarks in `benches/`. Shared fixtures in the `test_utils` modules of
   `ztreamer_indexer`, `ztreamer_remote` and `ztreamer_service`, behind the
   `test-utils` feature of each crate. `ztreamer_verify::test_utils` is for the
   tests of that crate only.
+- A module of shared test fixtures is named `test_utils`, also in a binary or inside a
+  module. Never `test_support`.
