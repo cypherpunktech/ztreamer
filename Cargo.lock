@@ -4775,6 +4775,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-jsonrpc"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "webpki-roots",
+]
+
+[[package]]
 name = "ztreamer-node"
 version = "0.1.0"
 dependencies = [
@@ -4807,22 +4828,19 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
- "hyper-rustls",
  "hyper-util",
  "incrementalmerkletree",
- "rustls",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
- "tracing",
- "webpki-roots",
  "zakura-chain",
  "zakura-primitives",
  "zakura-rpc",
  "zakura-state",
  "zakura-test",
+ "ztreamer-jsonrpc",
  "ztreamer-remote",
 ]
 
