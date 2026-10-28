@@ -164,9 +164,9 @@ impl JsonRpcSampler {
 
 #[async_trait]
 impl Sampler for JsonRpcSampler {
-    /// The block at `height`, from [`RawIndexBlock::fetch_at_height`].
+    /// The block at `height`, from [`ZakuraClient::block_at_height`].
     async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError> {
-        Ok(RawIndexBlock::fetch_at_height(&self.node, height).await?)
+        Ok(self.node.block_at_height(height).await?)
     }
 }
 

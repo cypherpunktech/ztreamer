@@ -7,12 +7,11 @@ use zakura_chain::{
     serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
-use zakura_state::HashOrHeight;
-use ztreamer_remote::{RpcError, ZakuraClient};
+use ztreamer_jsonrpc::RpcError;
 
 use crate::{
     Ciphertext, Digest, EphemeralKey,
-    blocking::{BlockingTask, BlockingTaskCancelled},
+    blocking::BlockingTaskCancelled,
     codec::{CompactBlockRecord, TreeSizes},
 };
 
@@ -40,7 +39,7 @@ pub enum RawBlockError {
 }
 
 /// Why [`RawIndexBlock::from_bytes_at_height`] gave no block, or why the node or the bytes of
-/// [`RawIndexBlock::fetch_at_height`] gave no block.
+/// `ztreamer_remote::ZakuraClient::block_at_height` gave no block.
 #[derive(Debug, thiserror::Error)]
 pub enum BlockAtHeightError {
     /// The `getblock` call failed. [`RpcError::is_block_not_found`] is `true` when the node has
@@ -55,7 +54,7 @@ pub enum BlockAtHeightError {
     Height { expected: u32, actual: u32 },
 }
 
-/// Why [`RawIndexBlock::fetch_at_height`] gave no block.
+/// Why `ztreamer_remote::ZakuraClient::block_at_height` gave no block.
 #[derive(Debug, thiserror::Error)]
 pub enum FetchAtHeightError {
     /// The `getblock` call failed, or the bytes do not give the block at the height.
@@ -67,20 +66,6 @@ pub enum FetchAtHeightError {
 }
 
 impl RawIndexBlock {
-    /// The best-chain block at `height` from one `getblock` call with verbosity 0. It decodes
-    /// the block on the blocking thread pool, with [`Self::from_bytes_at_height`].
-    pub async fn fetch_at_height(
-        node: &ZakuraClient,
-        height: u32,
-    ) -> Result<Self, FetchAtHeightError> {
-        let bytes = node
-            .get_block_raw(HashOrHeight::Height(block::Height(height)))
-            .await
-            .map_err(BlockAtHeightError::from)?
-            .0;
-        Ok(BlockingTask::spawn(move || Self::from_bytes_at_height(bytes, height)).join().await??)
-    }
-
     /// Decodes `bytes` with [`Self::from_bytes`], and refuses a block that is not at `height`.
     pub fn from_bytes_at_height(bytes: Vec<u8>, height: u32) -> Result<Self, BlockAtHeightError> {
         let block = Self::from_bytes(bytes)

@@ -2,8 +2,8 @@
 
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use zakura_state::MAX_BLOCK_REORG_HEIGHT;
+use ztreamer_jsonrpc::RpcError;
 use ztreamer_node::NodeClient;
-use ztreamer_remote::RpcError;
 
 use crate::{
     blocking::BlockingTaskCancelled,

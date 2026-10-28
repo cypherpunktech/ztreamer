@@ -55,7 +55,7 @@ impl CanonicalBlockSource for RemoteHeadSource {
     ///
     /// [`poll_canonical_head`]: ztreamer_indexer::head::poll_canonical_head
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
-        match RawIndexBlock::fetch_at_height(&self.node, height).await {
+        match self.node.block_at_height(height).await {
             Ok(block) => Ok(Some(block)),
             Err(FetchAtHeightError::Block(BlockAtHeightError::Rpc(error)))
                 if error.is_block_not_found() =>
