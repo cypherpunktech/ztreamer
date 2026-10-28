@@ -646,10 +646,13 @@ mod tests {
     use zakura_chain::parameters::Network;
     use ztreamer_indexer::index::RANGE_SIZE;
     use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
-    use ztreamer_service::{MAX_RANGE_STREAMS, ReplicatorService, ServingSnapshot};
+    use ztreamer_service::ServingSnapshot;
 
     use super::*;
-    use crate::test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex};
+    use crate::{
+        MAX_RANGE_STREAMS, ReplicatorService,
+        test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex},
+    };
 
     /// Twelve ranges: the filler closes an epoch at range 9 only.
     const RANGES: u32 = 12;

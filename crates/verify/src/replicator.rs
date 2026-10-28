@@ -26,10 +26,7 @@ use ztreamer_protocol::replicate::{
     replicator_server::Replicator,
 };
 
-use crate::{
-    ServingSnapshot,
-    service::{RpcStream, index_status},
-};
+use ztreamer_service::{RpcStream, ServingSnapshot, index_status};
 
 /// The largest `data` of one [`RangeChunk`].
 pub(crate) const CHUNK_BYTES: usize = 1 << 20;
@@ -160,10 +157,6 @@ impl Replicator for ReplicatorService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CompactService,
-        test_utils::{EmptyChain, fixtures},
-    };
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{
@@ -178,6 +171,10 @@ mod tests {
         proto::{BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
         replicate::{replicator_client::ReplicatorClient, replicator_server::ReplicatorServer},
         wire::compact_tx_streamer_server::CompactTxStreamerServer,
+    };
+    use ztreamer_service::{
+        CompactService,
+        test_utils::{EmptyChain, fixtures},
     };
 
     /// Five sealed ranges. Ranges 0, 1,000 and 2,000 have rows, range 3,000 has none, and the
