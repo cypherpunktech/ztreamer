@@ -22,7 +22,7 @@ use tonic::transport::Server;
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
-use zakurad::components::metrics::{self, MetricsEndpoint};
+use zakurad::components::metrics;
 use ztreamer_indexer::{
     index::{BlockId, Index, range_meta::NodeId},
     pipeline::RemoteTailSource,
@@ -197,7 +197,7 @@ impl RemoteNode {
     ) -> Result<()> {
         // No zakurad runs, thus the metrics endpoint is the only part of its configuration.
         let metrics = metrics::Config { endpoint_addr: Some(cli.metrics_listen) };
-        let _metrics = MetricsEndpoint::new(&metrics).wrap_err("start Prometheus endpoint")?;
+        metrics::start_endpoint(&metrics);
         self.run_until(cli, grpc_server, signal).await
     }
 

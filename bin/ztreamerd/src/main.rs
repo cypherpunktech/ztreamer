@@ -24,7 +24,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig, server::Router};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
-use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
+use zakurad::{components::metrics, config::ZakuradConfig};
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadSyncError},
     index::{Index, IndexState, range_meta::NodeId},
@@ -200,10 +200,11 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
         return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
     }
 
-    let mut config =
-        ZakuradConfig::load(cli.zakura_config.clone()).wrap_err("load Zakura configuration")?;
+    let mut config = ZakuradConfig::load(cli.zakura_config.clone())
+        .map_err(|error| eyre!(error))
+        .wrap_err("load Zakura configuration")?;
     config.metrics.endpoint_addr = Some(cli.metrics_listen);
-    let _metrics = MetricsEndpoint::new(&config.metrics).wrap_err("start Prometheus endpoint")?;
+    metrics::start_endpoint(&config.metrics);
     let network = config.network.network.clone();
     let index = cli.open_index(&network).await?;
 

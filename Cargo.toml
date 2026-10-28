@@ -23,17 +23,17 @@ all = { level = "warn", priority = -1 }
 [workspace.dependencies]
 blake3 = "1.8.7"
 ed25519-dalek = "2.2.0"
-zakura-chain = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
-zakura-network = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
-zakura-rpc = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
-zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
-zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
-zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1", default-features = false }
-zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.5.1" }
+zakura-chain = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
+zakura-network = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
+zakura-rpc = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
+zakura-state = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
+zakura-test = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
+zakurad = { package = "zakura", git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0", default-features = false }
+zakura-node-services = { git = "https://github.com/zakura-core/zakura.git", tag = "v1.7.0" }
 # zakura's own pin of this crate. Keep it equal to the `sapling-crypto` line in zakura's
 # Cargo.toml at the tag above: a second version makes `sapling_crypto::Node` in the state
 # responses a different type from ours, and the workspace stops compiling.
-sapling-crypto = { package = "zakura-sapling-crypto", version = "=2.1.0" }
+sapling-crypto = { package = "zakura-sapling-crypto", version = "=4.0.0" }
 # zakura's own pins of these crates. Keep them equal to the `incrementalmerkletree` and
 # `zcash_primitives` lines in zakura's Cargo.toml at the tag above: a second version makes the
 # tree node and frontier types different from the zakura-chain types, and the workspace stops
@@ -41,8 +41,8 @@ sapling-crypto = { package = "zakura-sapling-crypto", version = "=2.1.0" }
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 # zakura's own pin of this crate, through `zakura-halo2-proofs` at the tag above. A second version
 # makes `pallas::Base` a different type from the Orchard tree leaf, and the leaves stop compiling.
-pasta_curves = { package = "zakura-pasta-curves", version = "=2.1.0" }
-zcash_primitives = { package = "zakura-primitives", version = "=2.1.0" }
+pasta_curves = { package = "zakura-pasta-curves", version = "=4.0.0" }
+zcash_primitives = { package = "zakura-primitives", version = "=4.0.0" }
 
 [profile.ci-rust]
 inherits = "dev"
