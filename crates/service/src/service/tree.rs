@@ -11,10 +11,8 @@ use ztreamer_protocol::proto;
 use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready, index_status};
 
 impl CompactService {
-    pub(crate) async fn tree_state(
-        &self,
-        request: proto::BlockId,
-    ) -> Result<proto::TreeState, Status> {
+    /// Answers `GetTreeState`.
+    pub async fn tree_state(&self, request: proto::BlockId) -> Result<proto::TreeState, Status> {
         let record = self.record(request).await?;
         let hash = record.hash;
         let trees = self.backend.tree_state(hash).await?;
@@ -73,7 +71,8 @@ impl CompactService {
         Box::pin(ReceiverStream::new(receiver))
     }
 
-    pub(crate) async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {
+    /// Answers `GetLatestTreeState`.
+    pub async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {
         let snapshot = self.snapshot();
         ensure_tip_ready(&snapshot)?;
         let tip =
@@ -82,7 +81,8 @@ impl CompactService {
             .await
     }
 
-    pub(crate) async fn subtree_roots(
+    /// Answers `GetSubtreeRoots`.
+    pub async fn subtree_roots(
         &self,
         request: proto::GetSubtreeRootsArg,
     ) -> Result<RpcStream<proto::SubtreeRoot>, Status> {

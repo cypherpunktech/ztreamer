@@ -30,14 +30,13 @@ use ztreamer_indexer::{
     index::{Index, IndexState, range_meta::NodeId},
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
-use ztreamer_node as node;
+use ztreamer_node::{self as node, InProcessBackend, p2p::P2pCompactService};
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
 use ztreamer_service::{
-    CompactService, HeadFollowerConfig, InProcessBackend, RangeMetaFiller, ReplicatorService,
-    StateBackend, p2p::P2pCompactService,
+    CompactService, HeadFollowerConfig, RangeMetaFiller, ReplicatorService, StateBackend,
 };
 
 mod export;
@@ -234,7 +233,7 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
             tail: client.finalized_db(),
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
-            verified_by: RangeMetaFiller::embedded_node(),
+            verified_by: node::NodeClient::embedded_id(),
         };
         if sources.wait_ready(&shutdown).await?.is_break() {
             return Ok(());
@@ -326,7 +325,8 @@ where
     let filler_index = Arc::clone(&index);
     let replicate_index = Arc::clone(&index);
     let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
-        .with_ping_enabled(cli.ping_very_insecure);
+        .with_ping_enabled(cli.ping_very_insecure)
+        .with_node_version(node::NodeClient::version());
     if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }

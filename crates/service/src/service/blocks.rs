@@ -26,7 +26,8 @@ impl CompactService {
         Ok(project_block(record.0, pools, nullifiers))
     }
 
-    pub(crate) async fn encoded_block(
+    /// Answers `GetBlock`, or `GetBlockNullifiers` when `nullifiers` is set.
+    pub async fn encoded_block(
         &self,
         request: proto::BlockId,
         nullifiers: bool,
@@ -37,7 +38,8 @@ impl CompactService {
         Ok(self.record_as::<EncodedBlockRecord>(request).await?.block)
     }
 
-    pub(crate) async fn encoded_range(
+    /// Answers `GetBlockRange`, or `GetBlockRangeNullifiers` when `nullifiers` is set.
+    pub async fn encoded_range(
         &self,
         request: proto::BlockRange,
         nullifiers: bool,

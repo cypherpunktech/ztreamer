@@ -76,7 +76,7 @@ pub(crate) enum FillError {
 /// Writes a [`RangeMeta`] row for each sealed range that has none.
 ///
 /// ```ignore
-/// let filler = RangeMetaFiller::embedded(index, compact.backend());
+/// let filler = RangeMetaFiller::new(index, compact.backend(), NodeClient::embedded_id());
 /// tokio::spawn(filler.run(compact.subscribe(), shutdown));
 /// ```
 pub struct RangeMetaFiller {
@@ -100,21 +100,6 @@ impl RangeMetaFiller {
     /// that gave its answers.
     pub fn new(index: Arc<Index>, backend: Arc<dyn StateBackend>, verified_by: NodeId) -> Self {
         Self { index, backend, verified_by, reads: TaskTracker::new() }
-    }
-
-    /// A filler that asks the embedded Zakura node through `backend`. The rows name
-    /// [`RangeMetaFiller::embedded_node`].
-    pub fn embedded(index: Arc<Index>, backend: Arc<dyn StateBackend>) -> Self {
-        Self::new(index, backend, Self::embedded_node())
-    }
-
-    /// The node that the rows of the embedded Zakura node name: `embedded`, with Zakura's
-    /// version.
-    pub fn embedded_node() -> NodeId {
-        NodeId {
-            url: "embedded".into(),
-            version: zakurad::application::build_version().to_string(),
-        }
     }
 
     /// Fills the missing rows once. Then fills them again each time a new snapshot shows that
@@ -420,8 +405,7 @@ impl Epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InProcessBackend, test_utils::fixtures};
-    use zakura_chain::parameters::Network;
+    use crate::test_utils::{EmptyChain, fixtures};
 
     fn open(dir: &tempfile::TempDir) -> Arc<Index> {
         Arc::new(
@@ -430,15 +414,8 @@ mod tests {
     }
 
     async fn filler(index: &Arc<Index>) -> RangeMetaFiller {
-        let (_state, read, _tip, _change) = zakura_state::init(
-            zakura_state::Config::ephemeral(),
-            &Network::Mainnet,
-            block::Height::MAX,
-            0,
-        )
-        .await
-        .unwrap();
-        RangeMetaFiller::embedded(Arc::clone(index), Arc::new(InProcessBackend::new(read)))
+        let verified_by = NodeId { url: "embedded".into(), version: "test".into() };
+        RangeMetaFiller::new(Arc::clone(index), Arc::new(EmptyChain), verified_by)
     }
 
     fn empty_records(count: u32) -> Vec<CompactBlockRecord> {

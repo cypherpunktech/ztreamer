@@ -45,11 +45,12 @@ use ztreamer_indexer::{
     test_utils::{populate, raw_block},
     types::RawIndexBlock,
 };
+use ztreamer_node::{InProcessBackend, NodeClient};
 use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
     replicator_server::{Replicator, ReplicatorServer},
 };
-use ztreamer_service::{InProcessBackend, RangeMetaFiller, ReplicatorService, ServingSnapshot};
+use ztreamer_service::{RangeMetaFiller, ReplicatorService, ServingSnapshot};
 
 use crate::{
     manifest::Manifest,
@@ -93,7 +94,7 @@ impl SourceIndex {
         let (sender, snapshots) = watch::channel(ServingSnapshot::from(source.state));
         drop(sender);
         let backend = Arc::new(InProcessBackend::new(read));
-        RangeMetaFiller::embedded(Arc::clone(&source.index), backend)
+        RangeMetaFiller::new(Arc::clone(&source.index), backend, NodeClient::embedded_id())
             .run(snapshots, std::future::pending())
             .await;
         source
