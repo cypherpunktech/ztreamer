@@ -10,8 +10,12 @@ use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
 use ztreamer_remote::{Method, RpcError, ZakuraClient};
 
-use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentSender};
-use crate::{index::SEAL_DEPTH, parser::parse_block, types::RawIndexBlock};
+use ztreamer_indexer::{
+    index::SEAL_DEPTH,
+    parser::parse_block,
+    pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats},
+    types::RawIndexBlock,
+};
 
 /// The number of `getblock` requests that one worker keeps in flight.
 const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
@@ -39,13 +43,14 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 /// worker keeps a fixed number of requests in flight ahead of the block that it waits for. The
 /// requests continue while the worker parses and sends a block, and while it waits for
 /// read-ahead budget. The node thus gets up to
-/// [`PipelineConfig::workers`](super::PipelineConfig::workers) times that number of `getblock`
-/// requests at the same time.
+/// [`PipelineConfig::workers`](ztreamer_indexer::pipeline::PipelineConfig::workers) times that
+/// number of `getblock` requests at the same time.
 ///
 /// ```no_run
-/// use ztreamer_indexer::pipeline::{HistoricalPipeline, PipelineConfig, RemoteTailSource};
+/// use ztreamer_indexer::pipeline::{HistoricalPipeline, PipelineConfig};
 /// # use ztreamer_indexer::index::Index;
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
+/// use ztreamer_service::remote::RemoteTailSource;
 ///
 /// # async fn demo(index: std::sync::Arc<Index>) -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
@@ -253,12 +258,13 @@ mod tests {
         test_utils::{MockChain, MockNode, Reply, Seen},
     };
 
-    use super::*;
-    use crate::{
+    use ztreamer_indexer::{
         index::BlockId,
         pipeline::{HistoricalPipeline, PipelineConfig},
         test_utils::{grow_chain, open_index},
     };
+
+    use super::*;
 
     fn runtime() -> Runtime {
         Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()

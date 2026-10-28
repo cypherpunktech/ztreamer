@@ -31,7 +31,6 @@
 //!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`RangeMetaFiller`]: crate::RangeMetaFiller
-//! [`RemoteTailSource`]: ztreamer_indexer::pipeline::RemoteTailSource
 //! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
 //! [`StateBackend`]: crate::StateBackend
 //! [`CompactService`]: crate::CompactService
@@ -39,6 +38,8 @@
 
 mod backend;
 mod head;
+mod tail;
 
 pub use backend::{RemoteBackend, RemoteConnectError};
 pub use head::RemoteHeadSource;
+pub use tail::RemoteTailSource;
