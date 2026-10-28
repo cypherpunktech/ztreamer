@@ -2,7 +2,7 @@ use super::*;
 use crate::test_utils::{hash, open_index, parsed, record};
 use crate::{
     codec::{CodecError, ProtobufBlockRecord, StoredBlock, decode_range_record, encode_range},
-    index::range_meta::{BlobDigest, BlobMismatch, full_meta},
+    index::range_meta::{BlobDigest, BlobMismatch, VerifyState, full_meta},
     ingest::OrderedBuilder,
 };
 

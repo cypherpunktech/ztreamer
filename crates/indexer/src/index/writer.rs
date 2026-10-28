@@ -1,4 +1,5 @@
-//! One LMDB write transaction over the index.
+//! One LMDB write transaction over the index, and the writes that use it: an append, the two
+//! reorg replacements, and an install.
 //!
 //! Every mutation keeps the mutable rows, the hash index, the sealed ranges, and the persisted
 //! state consistent, and [`IndexWriter::commit`] is the only path that advances the generation.
@@ -10,12 +11,12 @@ use heed::{Env, RwTxn};
 use super::{
     BlockId, IndexError, IndexState, RANGE_SIZE,
     range_meta::{RangeMeta, VerifyState},
-    tables::Tables,
+    tables::{RangeChain, Tables, range_start},
     telemetry::{WriteStage, WriteTimer, record_state_metrics},
 };
 use crate::{
-    codec::{CompactBlockRecord, TreeSizes, encode_range_from_bytes},
-    ingest::EncodedBlock,
+    codec::{CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes},
+    ingest::{EncodedBatch, EncodedBlock},
 };
 
 /// Batch rows that are not yet in any table, in height order.
@@ -57,10 +58,163 @@ impl<'env> IndexWriter<'env> {
     }
 
     /// Starts a write transaction on the current generation. The caller must check the state.
-    pub(crate) fn start_latest(env: &'env Env, tables: Tables) -> Result<Self, IndexError> {
+    fn start_latest(env: &'env Env, tables: Tables) -> Result<Self, IndexError> {
         let txn = env.write_txn()?;
         let state = tables.metadata.get_state(&txn)?;
         Ok(Self { txn, tables, state, timer: None })
+    }
+
+    /// Starts the write of an install at `start`. Refuses an install that is not at the next
+    /// range start, and an index with mutable rows.
+    pub(crate) fn start_install(
+        env: &'env Env,
+        tables: Tables,
+        start: u32,
+    ) -> Result<Self, IndexError> {
+        let writer = Self::start_latest(env, tables)?;
+        let state = writer.state();
+        let next = state.next_range_start()?;
+        if start != next {
+            return Err(IndexError::RangeOrder { start, next });
+        }
+        if state.has_mutable_rows() {
+            return Err(IndexError::MutableRows);
+        }
+        Ok(writer)
+    }
+
+    /// Writes a batch with encoded records, packs the newly sealed ranges, and commits. Refuses
+    /// a batch that does not continue the tip.
+    pub(crate) fn append(mut self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
+        let EncodedBatch { base_generation, seal_through, blocks, end_tree_sizes } = batch;
+        let state = self.state();
+        let first = blocks.first().expect("builders never emit empty batches");
+        let expected_height = match state.durable_tip {
+            Some(tip) => tip.height.checked_add(1).ok_or(IndexError::Overflow)?,
+            None => 0,
+        };
+        if first.height != expected_height
+            || state.durable_tip.is_some_and(|tip| first.previous_hash != tip.hash)
+        {
+            return Err(IndexError::StaleBatch { batch_generation: base_generation });
+        }
+
+        self.start_timer();
+        self.put_hashes(&blocks)?;
+        let last = blocks.last().expect("the batch is non-empty");
+        self.set_tip(BlockId::new(last.height, last.hash), end_tree_sizes);
+        let mut blocks = blocks.into_iter().peekable();
+        self.seal_ranges(seal_through, &mut blocks)?;
+        self.put_mutable_blocks(blocks)?;
+        self.commit()
+    }
+
+    /// Replaces every mutable block after `ancestor` with `records`, seals the complete ranges,
+    /// and commits.
+    pub(crate) fn replace_mutable_suffix(
+        mut self,
+        ancestor: BlockId,
+        records: Vec<CompactBlockRecord>,
+        seal_through: Option<u32>,
+    ) -> Result<IndexState, IndexError> {
+        let state = self.state();
+        if state.sealed_through.is_some_and(|sealed| ancestor.height < sealed) {
+            return Err(IndexError::Sealed { height: ancestor.height + 1 });
+        }
+        let ancestor_record = self.read(ancestor.height)?;
+        if ancestor_record.hash != ancestor.hash {
+            return Err(IndexError::Replacement { height: ancestor.height });
+        }
+
+        let delete_start = ancestor.height.checked_add(1).ok_or(IndexError::Overflow)?;
+        let mut expected_height = delete_start;
+        let mut previous_hash = ancestor.hash;
+        for record in &records {
+            if record.height != expected_height || record.previous_hash != previous_hash {
+                return Err(IndexError::Replacement { height: expected_height });
+            }
+            expected_height = expected_height.checked_add(1).ok_or(IndexError::Overflow)?;
+            previous_hash = record.hash;
+        }
+
+        let old_tip = state.durable_tip.ok_or(IndexError::Metadata)?;
+        if ancestor.height > old_tip.height {
+            return Err(IndexError::Replacement { height: ancestor.height });
+        }
+        (delete_start..=old_tip.height).try_for_each(|height| self.delete_mutable_block(height))?;
+        records.iter().try_for_each(|record| self.put_block(record))?;
+
+        let (tip, tree_sizes) =
+            records.last().map_or((ancestor, ancestor_record.end_tree_sizes), |record| {
+                (BlockId::new(record.height, record.hash), record.end_tree_sizes)
+            });
+        self.set_tip(tip, tree_sizes);
+        self.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
+        self.commit()
+    }
+
+    /// Rebuilds every physical range that a deep reorg touches, and commits.
+    pub(crate) fn replace_deep_suffix(
+        mut self,
+        common_ancestor: BlockId,
+        replacement: Vec<CompactBlockRecord>,
+        seal_through: Option<u32>,
+    ) -> Result<IndexState, IndexError> {
+        let old_tip = self.state().durable_tip.ok_or(IndexError::Metadata)?;
+        let common = self.read(common_ancestor.height)?;
+        if common.hash != common_ancestor.hash {
+            return Err(IndexError::Replacement { height: common_ancestor.height });
+        }
+
+        let affected_start = range_start(common_ancestor.height);
+        let old_records = (affected_start..=old_tip.height)
+            .map(|height| self.read(height))
+            .collect::<Result<Vec<_>, _>>()?;
+        let prefix_len = (common_ancestor.height - affected_start + 1) as usize;
+        let mut canonical = old_records[..prefix_len].to_vec();
+        canonical.extend(replacement);
+        if canonical.windows(2).any(|pair| {
+            pair[0].height.checked_add(1) != Some(pair[1].height)
+                || pair[1].previous_hash != pair[0].hash
+        }) {
+            return Err(IndexError::Replacement { height: common_ancestor.height });
+        }
+
+        // Do all deletes before the first put: `canonical` shares its prefix hashes
+        // with `old_records`.
+        old_records.iter().try_for_each(|record| self.delete_block(record))?;
+        self.delete_ranges_from(affected_start)?;
+        canonical.iter().try_for_each(|record| self.put_block(record))?;
+        let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
+        self.set_tip(BlockId::new(tip.height, tip.hash), tip.end_tree_sizes);
+        self.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
+        self.commit()
+    }
+    /// Checks that `meta` describes the range `chain` at `start`, then writes the range, its
+    /// hash entries and `meta`, and moves the tip to the range end.
+    pub(crate) fn install(
+        mut self,
+        start: u32,
+        blob: &[u8],
+        chain: &RangeChain,
+        meta: &RangeMeta,
+    ) -> Result<IndexState, IndexError> {
+        let last = &chain.last;
+        let entry = &meta.entry;
+        if entry.range_version != RANGE_FORMAT_VERSION
+            || entry.start_height != start
+            || entry.end_height != last.height
+            || entry.end_hash != last.hash
+            || entry.end_tree_sizes != last.end_tree_sizes
+            || meta.state == VerifyState::Rejected
+        {
+            return Err(IndexError::RangeMeta { start });
+        }
+
+        self.put_new_hashes(&chain.ids)?;
+        self.put_sealed_range(start, blob, meta)?;
+        self.set_tip(BlockId::new(last.height, last.hash), last.end_tree_sizes);
+        self.commit()
     }
 
     /// The state as this transaction has changed it so far.
