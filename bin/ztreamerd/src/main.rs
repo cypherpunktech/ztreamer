@@ -231,7 +231,7 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
         };
         let client = node::NodeClient::from_services(services);
         let sources = NodeSources {
-            tail: client.database(),
+            tail: client.finalized_db(),
             head: client.clone(),
             backend: InProcessBackend::with_node(client),
             verified_by: RangeMetaFiller::embedded_node(),
