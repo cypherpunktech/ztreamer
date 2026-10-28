@@ -18,11 +18,12 @@ use zakura_chain::{
 use zakura_state::ReadStateService;
 
 use crate::{
-    backend::{InProcessBackend, StateBackend},
+    backend::{BackendError, InProcessBackend, StateBackend},
     telemetry::ServiceMetrics,
 };
 
 use ztreamer_indexer::{
+    blocking::BlockingTask,
     codec::{CompactBlockRecord, StoredBlock},
     index::{BlockId, Index, IndexError, IndexState},
 };
@@ -275,18 +276,19 @@ impl CompactService {
         let lookup = if request.hash.is_empty() {
             let height = u32::try_from(request.height)
                 .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
-            tokio::task::spawn_blocking(move || index.read_block_as(generation, height).map(Some))
+            BlockingTask::spawn(move || index.read_block_as(generation, height).map(Some))
         } else {
             let hash = request
                 .hash
                 .try_into()
                 .map(block::Hash)
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            tokio::task::spawn_blocking(move || index.read_block_by_hash_as(generation, hash))
+            BlockingTask::spawn(move || index.read_block_by_hash_as(generation, hash))
         };
         lookup
+            .join()
             .await
-            .map_err(|error| Status::unavailable(format!("LMDB reader failed: {error}")))?
+            .map_err(BackendError::from)?
             .map_err(index_status)?
             .ok_or_else(|| Status::not_found("block is not in the indexed canonical chain"))
     }

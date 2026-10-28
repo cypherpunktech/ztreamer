@@ -38,6 +38,7 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
+    blocking::BlockingTask,
     frontier::FromRpc,
     index::range_meta::{self, NodeBytes, SubtreeNode},
 };
@@ -244,17 +245,15 @@ trait FromNodeBytes: ZcashDeserialize + Send + 'static {
     fn from_node_bytes(bytes: Vec<u8>) -> impl Future<Output = Result<Self, BackendError>> + Send {
         let span = tracing::Span::current();
         async move {
-            tokio::task::spawn_blocking(move || {
-                span.in_scope(|| bytes.zcash_deserialize_into::<Self>())
-            })
-            .await
-            .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
-            .map_err(|error| {
-                BackendError::Unexpected(format!(
-                    "remote zakura sent a bad {}: {error}",
-                    Self::WHAT
-                ))
-            })
+            BlockingTask::spawn(move || span.in_scope(|| bytes.zcash_deserialize_into::<Self>()))
+                .join()
+                .await?
+                .map_err(|error| {
+                    BackendError::Unexpected(format!(
+                        "remote zakura sent a bad {}: {error}",
+                        Self::WHAT
+                    ))
+                })
         }
     }
 }
@@ -466,7 +465,7 @@ impl StateBackend for RemoteBackend {
             )));
         }
         let span = tracing::Span::current();
-        let trees = tokio::task::spawn_blocking(move || {
+        let trees = BlockingTask::spawn(move || {
             span.in_scope(|| {
                 Ok::<_, BackendError>(TreeState {
                     sapling: RpcTree::from_treestate("Sapling", response.sapling())?,
@@ -475,8 +474,8 @@ impl StateBackend for RemoteBackend {
                 })
             })
         })
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))??;
+        .join_flattened()
+        .await?;
         self.lock_tree_states().put(hash, trees.clone());
         Ok(trees)
     }

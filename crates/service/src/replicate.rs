@@ -17,9 +17,12 @@ use prost::bytes::Bytes;
 use tokio::sync::{Semaphore, watch};
 use tonic::{Request, Response, Status};
 use zakura_chain::parameters::Network;
-use ztreamer_indexer::index::{
-    Index, IndexError,
-    range_meta::{MANIFEST_VERSION, VerifyState},
+use ztreamer_indexer::{
+    blocking::BlockingTask,
+    index::{
+        Index, IndexError,
+        range_meta::{MANIFEST_VERSION, VerifyState},
+    },
 };
 use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, ManifestEntry, RangeChunk,
@@ -28,6 +31,7 @@ use ztreamer_protocol::replicate::{
 
 use crate::{
     ServingSnapshot,
+    backend::BackendError,
     service::{RpcStream, index_status},
 };
 
@@ -84,9 +88,10 @@ impl ReplicatorService {
         read: impl FnOnce(&Index) -> Result<T, IndexError> + Send + 'static,
     ) -> Result<T, Status> {
         let index = Arc::clone(&self.index);
-        tokio::task::spawn_blocking(move || read(&index))
+        BlockingTask::spawn(move || read(&index))
+            .join()
             .await
-            .map_err(|error| Status::internal(format!("index read task failed: {error}")))?
+            .map_err(BackendError::from)?
             .map_err(index_status)
     }
 }

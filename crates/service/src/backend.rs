@@ -30,6 +30,7 @@ use zakura_chain::{
     transparent,
 };
 use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
+use ztreamer_indexer::blocking::{BlockingTask, BlockingTaskCancelled};
 use ztreamer_node::NodeClient;
 
 /// Why a backend request failed. Each variant maps to one gRPC status code.
@@ -46,6 +47,13 @@ pub enum BackendError {
     /// The backend answered with something it should not have. Maps to `INTERNAL`.
     #[error("{0}")]
     Unexpected(String),
+}
+
+/// The blocking pool stopped before the work of a request ran: the backend cannot answer now.
+impl From<BlockingTaskCancelled> for BackendError {
+    fn from(error: BlockingTaskCancelled) -> Self {
+        Self::Unavailable(error.to_string())
+    }
 }
 
 /// A backend answer with an amount out of range is an answer that it should not have sent.
@@ -233,9 +241,9 @@ where
     T: Send + 'static,
     E: std::fmt::Display + Send + 'static,
 {
-    tokio::task::spawn_blocking(call)
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?
+    BlockingTask::spawn(call)
+        .join()
+        .await?
         .map_err(|error| BackendError::Unavailable(error.to_string()))
 }
 
@@ -386,13 +394,13 @@ impl StateBackend for InProcessBackend {
     ) -> Result<transaction::Hash, BackendError> {
         let node = self.node()?.clone();
         let runtime = tokio::runtime::Handle::current();
-        let submitted = tokio::task::spawn_blocking(move || {
+        let submitted = BlockingTask::spawn(move || {
             runtime
                 .block_on(node.submit_transaction(transaction))
                 .map_err(|error| error.to_string())
         })
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?;
+        .join()
+        .await?;
         submitted.map(|id| id.mined_id()).map_err(|error| {
             BackendError::Rejected(format!("Zakura rejected transaction: {error}"))
         })

@@ -8,10 +8,14 @@ use zakura_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction},
 };
+use ztreamer_indexer::blocking::BlockingTask;
 use ztreamer_protocol::proto;
 
 use super::{CompactService, ProducedStream, RpcStream, ensure_tip_ready};
-use crate::project::{PoolSelection, compact_mempool_txs, excluded_txids};
+use crate::{
+    backend::BackendError,
+    project::{PoolSelection, compact_mempool_txs, excluded_txids},
+};
 
 impl CompactService {
     pub(crate) async fn send_transaction(
@@ -106,9 +110,10 @@ impl CompactService {
     ) -> Result<RpcStream<proto::CompactTx>, Status> {
         PoolSelection::from_mempool_request(&request.pool_types)?;
         let transactions = self.backend.mempool_transactions().await?;
-        let compact = tokio::task::spawn_blocking(move || mempool_compact(transactions, &request))
+        let compact = BlockingTask::spawn(move || mempool_compact(transactions, &request))
+            .join()
             .await
-            .map_err(|error| Status::internal(format!("mempool conversion failed: {error}")))??;
+            .map_err(BackendError::from)??;
         Ok(Box::pin(tokio_stream::iter(compact.into_iter().map(Ok))))
     }
 }

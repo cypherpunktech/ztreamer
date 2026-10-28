@@ -24,6 +24,7 @@ use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use zakurad::components::metrics::{self, MetricsEndpoint};
 use ztreamer_indexer::{
+    blocking::BlockingTask,
     index::{BlockId, Index, range_meta::NodeId},
     pipeline::RemoteTailSource,
 };
@@ -377,9 +378,10 @@ impl IndexTip {
     /// Reads the durable tip of `index` on a blocking thread.
     async fn read(index: &Arc<Index>) -> Result<Self> {
         let index = Arc::clone(index);
-        let state = tokio::task::spawn_blocking(move || index.state())
+        let state = BlockingTask::spawn(move || index.state())
+            .join()
             .await
-            .wrap_err("index state task panicked")??;
+            .wrap_err("read the index state")??;
         Ok(Self(state.durable_tip()))
     }
 

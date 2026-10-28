@@ -26,6 +26,7 @@ use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
 use zakurad::{components::metrics::MetricsEndpoint, config::ZakuradConfig};
 use ztreamer_indexer::{
+    blocking::BlockingTask,
     head::{CanonicalBlockSource, HeadSyncError},
     index::{Index, IndexState, range_meta::NodeId},
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
@@ -145,10 +146,10 @@ impl DaemonArgs {
     async fn open_index(&self, network: &Network) -> Result<Arc<Index>> {
         let (path, map_size) = (self.index_dir.clone(), self.index_map_size.get());
         let (name, genesis_hash) = (network.to_string(), network.genesis_hash());
-        let index =
-            tokio::task::spawn_blocking(move || Index::open(path, map_size, &name, genesis_hash))
-                .await
-                .wrap_err("index open task panicked")??;
+        let index = BlockingTask::spawn(move || Index::open(path, map_size, &name, genesis_hash))
+            .join()
+            .await
+            .wrap_err("open the index")??;
         Ok(Arc::new(index))
     }
 
@@ -355,20 +356,22 @@ async fn sync_historical(
     info!("syncing historical compact index");
     let historical_started = Instant::now();
     let stop = Arc::new(AtomicBool::new(false));
-    let mut historical = tokio::task::spawn_blocking({
+    let historical = BlockingTask::spawn({
         let stop = Arc::clone(&stop);
         move || {
             HistoricalPipeline::new(&sync_index, &source, pipeline)?
                 .with_stop(&stop)
                 .sync_until_stable()
         }
-    });
+    })
+    .join();
+    tokio::pin!(historical);
     let state = tokio::select! {
-        result = &mut historical => result.wrap_err("historical index task panicked")??,
+        result = &mut historical => result.wrap_err("run the historical index pass")??,
         _ = shutdown.cancelled() => {
             info!("stopping the historical index pass before shutdown");
             stop.store(true, Ordering::Relaxed);
-            let state = historical.await.wrap_err("historical index task panicked")??;
+            let state = historical.await.wrap_err("run the historical index pass")??;
             info!(
                 height = state.durable_tip().map(|tip| tip.height),
                 elapsed_seconds = historical_started.elapsed().as_secs_f64(),

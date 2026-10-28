@@ -20,7 +20,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
-use ztreamer_indexer::index::{Index, range_meta::NodeId};
+use ztreamer_indexer::{
+    blocking::BlockingTask,
+    index::{Index, range_meta::NodeId},
+};
 use ztreamer_remote::ZakuraClient;
 use ztreamer_service::RemoteBackend;
 use ztreamer_verify::{
@@ -137,9 +140,10 @@ impl Replica {
             .wrap_err("check the chain of the remote zakura node")?;
         let sealed = {
             let index = Arc::clone(index);
-            tokio::task::spawn_blocking(move || index.state())
+            BlockingTask::spawn(move || index.state())
+                .join()
                 .await
-                .wrap_err("index state task panicked")??
+                .wrap_err("read the index state")??
                 .sealed_through()
         };
         // The samples and the tail read the block bodies from the next block on.

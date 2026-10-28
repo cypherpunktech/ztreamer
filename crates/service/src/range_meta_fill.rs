@@ -32,6 +32,7 @@ use zakura_chain::{
     subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
 use ztreamer_indexer::{
+    blocking::{BlockingTask, BlockingTaskCancelled},
     codec::{CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, decode_range_record},
     index::{
         Index, IndexError, RANGE_SIZE,
@@ -62,9 +63,9 @@ pub(crate) enum FillError {
     /// The node did not answer.
     #[error(transparent)]
     Backend(#[from] BackendError),
-    /// The blocking thread for the index reads failed.
-    #[error("index read task failed: {0}")]
-    Task(#[from] tokio::task::JoinError),
+    /// The blocking pool stopped before an index read ran.
+    #[error(transparent)]
+    Cancelled(#[from] BlockingTaskCancelled),
     /// A sealed range is not in the index now. A deep reorg replaced it.
     #[error("sealed range at {start} changed during the fill")]
     Replaced {
@@ -262,8 +263,13 @@ impl RangeMetaFiller {
         &self,
         read: impl FnOnce(&Index) -> Result<T, FillError> + Send + 'static,
     ) -> Result<T, FillError> {
-        let index = Arc::clone(&self.index);
-        self.reads.spawn_blocking(move || read(&index)).await?
+        let (index, token) = (Arc::clone(&self.index), self.reads.token());
+        BlockingTask::spawn(move || {
+            let _token = token;
+            read(&index)
+        })
+        .join_flattened()
+        .await
     }
 }
 
