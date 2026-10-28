@@ -200,6 +200,8 @@ impl Service for P2pCompactService {
 
         let service = self.clone();
         tokio::spawn(async move {
+            // A panic cancels the connection. Then zakura closes it and calls `remove_peer`.
+            let cancel_on_panic = connection_cancel.drop_guard_ref();
             let mut decoder = MessageDecoder::default();
             loop {
                 let frame = tokio::select! {
@@ -224,6 +226,7 @@ impl Service for P2pCompactService {
                     break;
                 }
             }
+            cancel_on_panic.disarm();
             service.remove(&peer_id, conn_id);
         });
     }
