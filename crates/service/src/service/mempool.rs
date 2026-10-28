@@ -3,8 +3,6 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 use zakura_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
@@ -12,7 +10,7 @@ use zakura_chain::{
 };
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream, ensure_tip_ready};
+use super::{CompactService, ProducedStream, RpcStream, ensure_tip_ready};
 use crate::project::{PoolSelection, compact_mempool_txs, excluded_txids};
 
 impl CompactService {
@@ -35,8 +33,7 @@ impl CompactService {
             snapshot.visible_tip
         };
         let mut transactions = backend.mempool_transactions().await?;
-        let (sender, receiver) = mpsc::channel(1);
-        tokio::spawn(async move {
+        Ok(ProducedStream::spawn(|sender| async move {
             // The stream ends when the head follower publishes a new visible tip. While the head
             // is stale or in deep reorg recovery, no new tip comes. Thus the stream fails.
             let tip_changed = async move {
@@ -100,8 +97,7 @@ impl CompactService {
                     }
                 };
             }
-        });
-        Ok(Box::pin(ReceiverStream::new(receiver)))
+        }))
     }
 
     pub(crate) async fn mempool_tx(

@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready, index_status};
+use super::{
+    CompactService, ProducedStream, RpcStream, ServingSnapshot, ensure_tip_ready, index_status,
+};
 
 impl CompactService {
     pub(crate) async fn tree_state(
@@ -45,8 +45,7 @@ impl CompactService {
         snapshot: ServingSnapshot,
     ) -> RpcStream<proto::SubtreeRoot> {
         let index = Arc::clone(&self.index);
-        let (sender, receiver) = mpsc::channel(1);
-        tokio::task::spawn_blocking(move || {
+        ProducedStream::spawn_blocking(move |sender| {
             for (root_hash, height) in roots {
                 let block = match snapshot.volatile(height) {
                     Some(block) => block.clone(),
@@ -69,8 +68,7 @@ impl CompactService {
                     return;
                 }
             }
-        });
-        Box::pin(ReceiverStream::new(receiver))
+        })
     }
 
     pub(crate) async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {

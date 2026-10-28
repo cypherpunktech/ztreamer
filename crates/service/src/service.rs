@@ -32,11 +32,13 @@ mod address;
 mod blocks;
 mod head;
 mod mempool;
+mod stream;
 #[cfg(test)]
 mod test_utils;
 mod tree;
 
 pub use head::{HeadFollowerConfig, HeadFollowerError};
+use stream::ProducedStream;
 
 pub(crate) type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 const MAX_RANGE_STREAMS: usize = 16;

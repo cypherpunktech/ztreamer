@@ -2,13 +2,11 @@
 
 use std::collections::HashSet;
 
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 use zakura_chain::{block, transparent};
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream};
+use super::{CompactService, ProducedStream, RpcStream};
 
 const MAX_UTXO_ADDRESSES: usize = 1_000;
 impl CompactService {
@@ -43,8 +41,7 @@ impl CompactService {
             .await?;
 
         let service = self.clone();
-        let (sender, receiver) = mpsc::channel(1);
-        tokio::spawn(async move {
+        Ok(ProducedStream::spawn(|sender| async move {
             for hash in transactions {
                 match service.mined_transaction(hash).await {
                     Ok(Some(transaction)) => {
@@ -66,8 +63,7 @@ impl CompactService {
                     }
                 }
             }
-        });
-        Ok(Box::pin(ReceiverStream::new(receiver)))
+        }))
     }
 
     pub(crate) async fn taddress_balance(
