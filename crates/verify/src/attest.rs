@@ -23,12 +23,14 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     blocking::BlockingTaskCancelled,
     codec::CodecError,
-    frontier::{FromRpc, RpcDecodeError},
     index::range_meta::{Attested, NodeBytes, Pool, PoolRoots, SubtreeNode},
     parser::CompactParseError,
     types::{BlockAtHeightError, FetchAtHeightError, RawBlockError},
 };
-use ztreamer_remote::{RpcError, ZakuraClient};
+use ztreamer_remote::{
+    RpcError, ZakuraClient,
+    frontier::{FromRpc, RpcDecodeError},
+};
 
 use crate::{
     epoch::{Epoch, EpochProof, Trees},
@@ -418,7 +420,7 @@ impl Attestor for JsonRpcAttestor {
 }
 
 /// Reads the `finalRoot` of `pool` in the byte order of the pool. See
-/// [`ztreamer_indexer::frontier`]. A pool with no `finalState` is not active, and has no root.
+/// [`ztreamer_remote::frontier`]. A pool with no `finalState` is not active, and has no root.
 /// It is a free function because it is generic over the root type of the pool.
 fn final_root<R: FromRpc>(pool: Pool, commitments: &Commitments) -> Result<Option<R>, NodeError> {
     match (commitments.final_root(), commitments.final_state()) {
