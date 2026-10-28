@@ -1,19 +1,32 @@
-//! A synthetic indexed [`CompactService`](crate::CompactService) and a local gRPC server, shared
-//! by tests, benchmarks and examples.
+//! A synthetic indexed [`CompactService`](crate::CompactService), a [`StateBackend`] over an empty
+//! chain, and a local gRPC server, shared by tests, benchmarks and examples.
 //!
 //! Compiled for this crate's own tests and for targets that enable the `test-utils` feature.
 
-use crate::CompactService;
+use crate::{
+    CompactService, NodeVersion,
+    backend::{AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState},
+};
 use prost::Message as _;
+use sapling_crypto::Node as SaplingNode;
 use std::{
+    collections::HashSet,
+    ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Channel, Server};
-use zakura_chain::{block, parameters::Network};
-use zakura_state::Config;
+use zakura_chain::{
+    amount::{Amount, NonNegative},
+    block::{self, Block},
+    ironwood, orchard,
+    parameters::Network,
+    subtree::NoteCommitmentSubtreeIndex,
+    transaction::{self, Transaction, UnminedTx},
+    transparent,
+};
 use ztreamer_indexer::{
     codec::CompactBlockRecord,
     index::{Index, IndexState},
@@ -28,7 +41,109 @@ pub type Client = CompactTxStreamerClient<Channel>;
 /// The error type returned by [`consume`].
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-/// A [`CompactService`] over a temporary index and an ephemeral Zakura state.
+/// A [`StateBackend`] over an empty Mainnet chain with no mempool.
+///
+/// It gives the answers of the embedded Zakura over an empty ephemeral state, read with no node
+/// handle: no tip, no blocks, no transactions, empty trees and subtrees, a zero balance, no
+/// UTXOs. Mempool requests fail with [`BackendError::Unavailable`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EmptyChain;
+
+impl EmptyChain {
+    /// The node version that [`EphemeralService`] reports.
+    pub fn node_version() -> NodeVersion {
+        NodeVersion { build: "v0.0.0-test".into(), subversion: "/ztreamer-test/".into() }
+    }
+
+    fn no_mempool<T>() -> Result<T, BackendError> {
+        Err(BackendError::Unavailable("the empty chain has no mempool".into()))
+    }
+}
+
+#[tonic::async_trait]
+impl StateBackend for EmptyChain {
+    fn network(&self) -> Network {
+        Network::Mainnet
+    }
+
+    async fn tip_height(&self) -> Result<Option<block::Height>, BackendError> {
+        Ok(None)
+    }
+
+    async fn block(&self, _hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
+        Ok(None)
+    }
+
+    async fn transaction(
+        &self,
+        _hash: transaction::Hash,
+    ) -> Result<Option<MinedTransaction>, BackendError> {
+        Ok(None)
+    }
+
+    async fn tree_state(&self, _hash: block::Hash) -> Result<TreeState, BackendError> {
+        Ok(TreeState::default())
+    }
+
+    async fn sapling_subtrees(
+        &self,
+        _start: NoteCommitmentSubtreeIndex,
+        _limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> Result<Subtrees<SaplingNode>, BackendError> {
+        Ok(Subtrees::new())
+    }
+
+    async fn orchard_subtrees(
+        &self,
+        _start: NoteCommitmentSubtreeIndex,
+        _limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> Result<Subtrees<orchard::tree::Node>, BackendError> {
+        Ok(Subtrees::new())
+    }
+
+    async fn ironwood_subtrees(
+        &self,
+        _start: NoteCommitmentSubtreeIndex,
+        _limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> Result<Subtrees<ironwood::tree::Node>, BackendError> {
+        Ok(Subtrees::new())
+    }
+
+    async fn address_transaction_ids(
+        &self,
+        _address: transparent::Address,
+        _heights: RangeInclusive<block::Height>,
+    ) -> Result<Vec<transaction::Hash>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    async fn address_balance(
+        &self,
+        _addresses: HashSet<transparent::Address>,
+    ) -> Result<Amount<NonNegative>, BackendError> {
+        Ok(Amount::zero())
+    }
+
+    async fn address_utxos(
+        &self,
+        _addresses: HashSet<transparent::Address>,
+    ) -> Result<Vec<AddressUtxo>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    async fn mempool_transactions(&self) -> Result<Vec<UnminedTx>, BackendError> {
+        Self::no_mempool()
+    }
+
+    async fn submit_transaction(
+        &self,
+        _transaction: Transaction,
+    ) -> Result<transaction::Hash, BackendError> {
+        Self::no_mempool()
+    }
+}
+
+/// A [`CompactService`] over a temporary index and an [`EmptyChain`].
 ///
 /// A test keeps the whole value, for example as `ctx`, and reads its fields. It owns the index
 /// directory, so the directory stays until the test ends.
@@ -54,11 +169,8 @@ impl EphemeralService {
             [] => index.state().unwrap(),
             records => fixtures::populate(&index, records, seal_through),
         };
-        let (_state, read, _tip, _change) =
-            zakura_state::init(Config::ephemeral(), &Network::Mainnet, block::Height::MAX, 0)
-                .await
-                .unwrap();
-        let service = CompactService::new(Arc::clone(&index), state, "main", read);
+        let service = CompactService::with_backend(Arc::clone(&index), state, "main", EmptyChain)
+            .with_node_version(EmptyChain::node_version());
         Self { service, index, state, dir }
     }
 

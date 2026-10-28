@@ -12,6 +12,7 @@ use zakura_chain::{
 use zakura_state::{Config, Request};
 use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_GENESIS_BYTES};
 use ztreamer_indexer::index::{Index, IndexState};
+use ztreamer_node::InProcessBackend;
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_service::{CompactService, test_utils::LocalServer};
 
@@ -63,7 +64,8 @@ async fn streamed_balance_deduplicates_and_limits_addresses() {
                 .unwrap();
         }
 
-        let service = CompactService::new(index, IndexState::default(), "main", read);
+        let backend = InProcessBackend::new(read);
+        let service = CompactService::with_backend(index, IndexState::default(), "main", backend);
         let server = LocalServer::serve(service).await;
         let mut client = CompactTxStreamerClient::connect(server.endpoint.clone()).await.unwrap();
 

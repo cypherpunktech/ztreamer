@@ -13,6 +13,7 @@ workspace = true
 # its snapshot directory, an HTTP server for that directory and a Replicator gRPC server.
 test-utils = [
     "dep:tempfile",
+    "dep:ztreamer-node",
     "dep:ztreamer-service",
     "hyper/server",
     "tokio/net",
@@ -47,6 +48,7 @@ zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
 ztreamer-indexer = { path = "../indexer" }
+ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
 ztreamer-service = { path = "../service", optional = true }
@@ -61,6 +63,7 @@ tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thre
 tokio-stream = { version = "0.1", features = ["net"] }
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
+ztreamer-node = { path = "../node" }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 ztreamer-service = { path = "../service" }
 

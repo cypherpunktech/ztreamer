@@ -24,16 +24,12 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 tonic = "0.14.6"
-tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1"
 zakura-chain.workspace = true
-zakura-network.workspace = true
 zakura-rpc.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
-zakurad.workspace = true
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
-ztreamer-node = { path = "../node" }
 ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]

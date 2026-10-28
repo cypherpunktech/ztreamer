@@ -1,4 +1,4 @@
-//! Zakura custom-service transport for [`crate::CompactService`].
+//! Zakura custom-service transport for [`ztreamer_service::CompactService`].
 
 use std::{
     collections::HashSet,
@@ -13,13 +13,13 @@ use zakura_network::zakura::{
     ZakuraConnId, ZakuraPeerId, ZakuraServiceId,
 };
 use ztreamer_protocol::p2p::MessageDecoder;
-pub use ztreamer_protocol::p2p::{
+use ztreamer_protocol::p2p::{
     CAPABILITY, FRAME_FLAG_MORE, MAX_MESSAGE_BYTES, Message, P2pStatus, SERVICE_ID, STREAM_KIND,
     STREAM_VERSION,
 };
 
-use crate::CompactService;
 use ztreamer_protocol::proto;
+use ztreamer_service::CompactService;
 
 const FRAME_PAYLOAD_BYTES: usize = LOCAL_MAX_CONTROL_FRAME_BYTES as usize - 8;
 const STREAMS: [Stream; 1] = [Stream {
@@ -30,6 +30,7 @@ const STREAMS: [Stream; 1] = [Stream {
     ..Stream::PERSISTENT
 }];
 
+/// Serves a [`CompactService`] to Zakura peers as a Zakura custom service.
 #[derive(Clone)]
 pub struct P2pCompactService {
     compact: Arc<OnceLock<CompactService>>,
@@ -47,6 +48,7 @@ impl std::fmt::Debug for P2pCompactService {
 }
 
 impl P2pCompactService {
+    /// Creates a frontend that serves `compact` now.
     pub fn new(compact: CompactService) -> Self {
         let service = Self::pending();
         service.compact.set(compact).unwrap_or_else(|_| unreachable!("new OnceLock is empty"));
@@ -63,6 +65,7 @@ impl P2pCompactService {
         self.compact.set(compact).map_err(|_| "compact service is already installed")
     }
 
+    /// The custom service that Zakura registers. It provides [`SERVICE_ID`] and seeks none.
     pub fn registration(self: &Arc<Self>) -> CustomService {
         CustomService {
             service: self.clone(),
@@ -296,7 +299,7 @@ mod tests {
         index::IndexState,
     };
 
-    use crate::test_utils::EphemeralService;
+    use ztreamer_service::test_utils::EphemeralService;
 
     #[tokio::test]
     async fn forwards_streaming_compact_ranges() {

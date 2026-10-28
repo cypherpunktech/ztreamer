@@ -1,10 +1,14 @@
-//! In-process Zakura client used by Ztreamer.
+//! The embedded mode of Ztreamer: the in-process Zakura client, its block sources, its
+//! [`StateBackend`](ztreamer_service::StateBackend) and the Zakura p2p transport.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod backend;
 mod finalized;
 mod head;
+pub mod p2p;
 
+pub use backend::InProcessBackend;
 pub use finalized::FinalizedDb;
 
 use std::sync::Arc;
@@ -17,6 +21,8 @@ use zakura_chain::{
 };
 use zakura_node_services::BoxError;
 use zakura_state::{ChainTipChange, HashOrHeight as BlockId};
+use ztreamer_indexer::index::range_meta::NodeId;
+use ztreamer_service::NodeVersion;
 
 /// An error returned by a [`NodeClient`] request.
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +72,23 @@ impl NodeClient {
     /// Wraps the handles delivered by Zakura's startup readiness hook.
     pub const fn from_services(services: zakurad::node::NodeServices) -> Self {
         Self { services }
+    }
+
+    /// The node that the `range_meta` rows of the embedded Zakura name: `embedded`, with the
+    /// Zakura version.
+    pub fn embedded_id() -> NodeId {
+        NodeId {
+            url: "embedded".into(),
+            version: zakurad::application::build_version().to_string(),
+        }
+    }
+
+    /// The Zakura build and user agent that `GetLightdInfo` reports.
+    pub fn version() -> NodeVersion {
+        NodeVersion {
+            build: format!("v{}", zakurad::application::build_version()),
+            subversion: zakurad::application::user_agent(),
+        }
     }
 
     /// Returns the current best chain tip, if the state is not empty.

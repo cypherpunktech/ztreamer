@@ -15,12 +15,8 @@ use zakura_chain::{
     serialization::ZcashSerialize,
     transaction,
 };
-use zakura_state::ReadStateService;
 
-use crate::{
-    backend::{InProcessBackend, StateBackend},
-    telemetry::ServiceMetrics,
-};
+use crate::{backend::StateBackend, telemetry::ServiceMetrics};
 
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, StoredBlock},
@@ -38,7 +34,8 @@ mod tree;
 
 pub use head::{HeadFollowerConfig, HeadFollowerError};
 
-pub(crate) type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
+/// A stream of gRPC answers.
+pub type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 const MAX_RANGE_STREAMS: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,6 +68,17 @@ impl From<IndexState> for ServingSnapshot {
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("volatile head does not connect to the durable index")]
 pub struct SnapshotError;
+
+/// The node version that `GetLightdInfo` reports.
+///
+/// The default is empty. ztreamerd sets the version of its Zakura build.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NodeVersion {
+    /// The node build. `GetLightdInfo` reports it as `zcashd_build`.
+    pub build: String,
+    /// The node user agent. `GetLightdInfo` reports it as `zcashd_subversion`.
+    pub subversion: String,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Readiness {
@@ -133,6 +141,7 @@ pub struct CompactService {
     snapshot: watch::Sender<ServingSnapshot>,
     chain_name: Arc<str>,
     backend: Arc<dyn StateBackend>,
+    node_version: Arc<NodeVersion>,
     range_streams: Arc<Semaphore>,
     ping_enabled: bool,
     metrics: Arc<ServiceMetrics>,
@@ -148,17 +157,6 @@ impl std::fmt::Debug for CompactService {
 }
 
 impl CompactService {
-    /// Serves chain reads from the embedded node's state. Mempool requests fail with
-    /// `UNAVAILABLE`.
-    pub fn new(
-        index: Arc<Index>,
-        state: IndexState,
-        chain_name: impl Into<Arc<str>>,
-        zakura: ReadStateService,
-    ) -> Self {
-        Self::with_backend(index, state, chain_name, InProcessBackend::new(zakura))
-    }
-
     /// Serves chain state and node requests through any [`StateBackend`].
     pub fn with_backend(
         index: Arc<Index>,
@@ -175,6 +173,7 @@ impl CompactService {
             snapshot,
             chain_name,
             backend: Arc::new(backend),
+            node_version: Arc::default(),
             range_streams: Arc::new(Semaphore::new(MAX_RANGE_STREAMS)),
             ping_enabled: false,
             metrics,
@@ -183,6 +182,12 @@ impl CompactService {
 
     pub const fn with_ping_enabled(mut self, enabled: bool) -> Self {
         self.ping_enabled = enabled;
+        self
+    }
+
+    /// Sets the node version that `GetLightdInfo` reports.
+    pub fn with_node_version(mut self, version: NodeVersion) -> Self {
+        self.node_version = Arc::new(version);
         self
     }
 
@@ -289,7 +294,8 @@ impl CompactService {
             .ok_or_else(|| Status::not_found("block is not in the indexed canonical chain"))
     }
 
-    pub(crate) fn latest_block(&self) -> Result<proto::BlockId, Status> {
+    /// Answers `GetLatestBlock`.
+    pub fn latest_block(&self) -> Result<proto::BlockId, Status> {
         let snapshot = self.snapshot();
         ensure_tip_ready(&snapshot)?;
         let tip =
@@ -297,7 +303,8 @@ impl CompactService {
         Ok(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.0.to_vec() })
     }
 
-    pub(crate) fn lightd_info(&self) -> proto::LightdInfo {
+    /// Answers `GetLightdInfo`.
+    pub fn lightd_info(&self) -> proto::LightdInfo {
         let tip = self.snapshot().visible_tip;
         let tip_height = tip.map_or(0, |tip| tip.height);
         let network = self.backend.network();
@@ -316,8 +323,8 @@ impl CompactService {
                 .to_string(),
             block_height: u64::from(tip_height),
             estimated_height: u64::from(tip_height),
-            zcashd_build: format!("v{}", zakurad::application::build_version()),
-            zcashd_subversion: zakurad::application::user_agent(),
+            zcashd_build: self.node_version.build.clone(),
+            zcashd_subversion: self.node_version.subversion.clone(),
             upgrade_name: next_upgrade.map_or_else(String::new, |(_, upgrade)| upgrade.to_string()),
             upgrade_height: next_upgrade.map_or(0, |(height, _)| u64::from(height.0)),
             lightwallet_protocol_version: "v0.5.0".to_owned(),
@@ -325,7 +332,8 @@ impl CompactService {
         }
     }
 
-    pub(crate) fn ping(&self) -> Result<proto::PingResponse, Status> {
+    /// Answers `Ping`. Fails with `UNIMPLEMENTED` unless ping is enabled.
+    pub fn ping(&self) -> Result<proto::PingResponse, Status> {
         if !self.ping_enabled {
             return Err(Status::unimplemented(
                 "Ping is disabled; start ztreamerd with --ping-very-insecure to enable it",
@@ -334,7 +342,8 @@ impl CompactService {
         Ok(proto::PingResponse { entry: 1, exit: 0 })
     }
 
-    pub(crate) async fn transaction(
+    /// Answers `GetTransaction`.
+    pub async fn transaction(
         &self,
         request: proto::TxFilter,
     ) -> Result<proto::RawTransaction, Status> {

@@ -160,14 +160,16 @@ impl Replicator for ReplicatorService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CompactService, test_utils::fixtures};
+    use crate::{
+        CompactService,
+        test_utils::{EmptyChain, fixtures},
+    };
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{
         Code,
         transport::{Channel, Server},
     };
-    use zakura_chain::block;
     use ztreamer_indexer::index::{
         RANGE_SIZE,
         range_meta::{Frontiers, ManifestEntry as Entry, RangeMeta},
@@ -228,19 +230,11 @@ mod tests {
         /// Serves CompactTxStreamer and the fixture's Replicator on one free local port, as
         /// `ztreamerd` does, and returns the endpoint.
         async fn serve(&self) -> String {
-            let (_state, read, _tip, _change) = zakura_state::init(
-                zakura_state::Config::ephemeral(),
-                &Network::Mainnet,
-                block::Height::MAX,
-                0,
-            )
-            .await
-            .unwrap();
-            let compact = CompactService::new(
+            let compact = CompactService::with_backend(
                 Arc::clone(&self.index),
                 self.index.state().unwrap(),
                 "main",
-                read,
+                EmptyChain,
             );
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let endpoint = format!("http://{}", listener.local_addr().unwrap());
