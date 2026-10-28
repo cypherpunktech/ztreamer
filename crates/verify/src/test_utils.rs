@@ -50,9 +50,10 @@ use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
     replicator_server::{Replicator, ReplicatorServer},
 };
-use ztreamer_service::{RangeMetaFiller, ReplicatorService, ServingSnapshot};
+use ztreamer_service::ServingSnapshot;
 
 use crate::{
+    RangeMetaFiller, ReplicatorService,
     manifest::Manifest,
     snapshot::{RangePath, SnapshotWriter},
 };

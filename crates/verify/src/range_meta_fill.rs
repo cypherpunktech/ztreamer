@@ -42,9 +42,9 @@ use ztreamer_indexer::{
     },
 };
 
-use crate::{
+use ztreamer_service::{
     ServingSnapshot,
-    backend::{BackendError, StateBackend, Subtrees, TreeState},
+    backend::{BackendError, StateBackend, Subtrees},
 };
 
 /// The number of filled ranges between two progress lines in the log.
@@ -252,28 +252,6 @@ impl RangeMetaFiller {
     }
 }
 
-/// Each frontier in the `zcashd` RPC encoding, or empty when the pool is not active.
-impl From<&TreeState> for Frontiers {
-    fn from(trees: &TreeState) -> Self {
-        Self {
-            sapling: trees.sapling.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
-            orchard: trees.orchard.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
-            ironwood: trees.ironwood.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
-        }
-    }
-}
-
-/// Each tree root, or `None` when the pool is not active.
-impl From<&TreeState> for PoolRoots {
-    fn from(trees: &TreeState) -> Self {
-        Self {
-            sapling: trees.sapling.as_ref().map(|tree| tree.root()),
-            orchard: trees.orchard.as_ref().map(|tree| tree.root()),
-            ironwood: trees.ironwood.as_ref().map(|tree| tree.root()),
-        }
-    }
-}
-
 /// A sealed range as a scan finds it.
 #[derive(Clone, Copy, Debug)]
 struct Slot {
@@ -405,7 +383,7 @@ impl Epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{EmptyChain, fixtures};
+    use ztreamer_service::test_utils::{EmptyChain, fixtures};
 
     fn open(dir: &tempfile::TempDir) -> Arc<Index> {
         Arc::new(

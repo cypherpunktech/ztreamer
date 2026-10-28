@@ -35,9 +35,8 @@ use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
-use ztreamer_service::{
-    CompactService, HeadFollowerConfig, RangeMetaFiller, ReplicatorService, StateBackend,
-};
+use ztreamer_service::{CompactService, HeadFollowerConfig, StateBackend};
+use ztreamer_verify::{RangeMetaFiller, ReplicatorService};
 
 mod export;
 mod lifecycle;

@@ -28,6 +28,7 @@ use zakura_chain::{
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
+use ztreamer_indexer::index::range_meta::{Frontiers, PoolRoots};
 
 /// Why a backend request failed. Each variant maps to one gRPC status code.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -81,6 +82,28 @@ pub struct TreeState {
     pub orchard: Option<Arc<orchard::tree::NoteCommitmentTree>>,
     /// Ironwood tree.
     pub ironwood: Option<Arc<ironwood::tree::NoteCommitmentTree>>,
+}
+
+/// Each frontier in the `zcashd` RPC encoding, or empty when the pool is not active.
+impl From<&TreeState> for Frontiers {
+    fn from(trees: &TreeState) -> Self {
+        Self {
+            sapling: trees.sapling.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+            orchard: trees.orchard.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+            ironwood: trees.ironwood.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+        }
+    }
+}
+
+/// Each tree root, or `None` when the pool is not active.
+impl From<&TreeState> for PoolRoots {
+    fn from(trees: &TreeState) -> Self {
+        Self {
+            sapling: trees.sapling.as_ref().map(|tree| tree.root()),
+            orchard: trees.orchard.as_ref().map(|tree| tree.root()),
+            ironwood: trees.ironwood.as_ref().map(|tree| tree.root()),
+        }
+    }
 }
 
 /// Completed note commitment subtrees of one pool, by subtree index.
