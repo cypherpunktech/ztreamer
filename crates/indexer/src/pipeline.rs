@@ -12,12 +12,10 @@ use std::{
 use tracing::info;
 
 mod flow_control;
-mod remote;
 mod telemetry;
 mod zakura;
 pub use flow_control::SegmentSender;
 use flow_control::{ReadAheadReceiver, ReadAheadSender};
-pub use remote::RemoteTailSource;
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
@@ -167,8 +165,8 @@ impl From<BlockAtHeightError> for PipelineError {
 /// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
 /// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
 /// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
-/// read in-process with its native range iterators. [`RemoteTailSource`] reads a remote node
-/// over JSON-RPC.
+/// read in-process with its native range iterators. `ztreamer_service::remote::RemoteTailSource`
+/// reads a remote node over JSON-RPC.
 ///
 /// The methods are called from blocking worker threads, never from an async context. A source
 /// that talks to the network blocks on its own runtime handle.
@@ -212,8 +210,9 @@ pub trait HistoricalSource: Sync {
 /// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
-/// `ztreamerd` builds one over the embedded `ZakuraDb` or over [`RemoteTailSource`]. A source in
-/// another crate builds one the same way:
+/// `ztreamerd` builds one over the embedded `ZakuraDb` or over
+/// `ztreamer_service::remote::RemoteTailSource`. A source in another crate builds one the same
+/// way:
 ///
 /// ```no_run
 /// # use std::sync::atomic::AtomicBool;

@@ -37,7 +37,6 @@ tempfile = "3"
 zakura-test.workspace = true
 # Enables `test_utils` for this crate's benches.
 ztreamer-indexer = { path = ".", features = ["test-utils"] }
-ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 
 [[bench]]
 name = "parser"
