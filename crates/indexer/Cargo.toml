@@ -23,9 +23,7 @@ tokio = { version = "1", features = ["rt"] }
 tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
-zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test = { workspace = true, optional = true }
-ztreamer-node = { path = "../node" }
 ztreamer-jsonrpc = { path = "../jsonrpc" }
 ztreamer-protocol = { path = "../protocol" }
 

@@ -1,4 +1,4 @@
-//! The production [`HistoricalSource`]: Zakura's finalized database. It reads the transactions of
+//! The embedded [`HistoricalSource`]: Zakura's finalized database. It reads the transactions of
 //! a segment with one range iterator, and each header and transaction hash by its key.
 
 use std::time::Instant;
@@ -8,21 +8,28 @@ use zakura_chain::{
     serialization::{CompactSizeMessage, ZcashSerialize},
 };
 use zakura_state::{TransactionLocation, ZakuraDb};
+use ztreamer_indexer::{
+    parser::parse_stored_block,
+    pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats},
+};
 
-use super::{HistoricalSource, PipelineError, WorkerStats, flow_control::SegmentSender};
-use crate::parser::parse_stored_block;
+/// Zakura's finalized database as a [`HistoricalSource`]. [`NodeClient::finalized_db`] gives it.
+///
+/// [`NodeClient::finalized_db`]: crate::NodeClient::finalized_db
+#[derive(Clone, Debug)]
+pub struct FinalizedDb(pub(crate) ZakuraDb);
 
-impl HistoricalSource for ZakuraDb {
+impl HistoricalSource for FinalizedDb {
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
-        Ok(ZakuraDb::tip(self))
+        Ok(ZakuraDb::tip(&self.0))
     }
 
     fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError> {
-        Ok(self.block_header(Height(height).into()).map(|header| header.hash()))
+        Ok(self.0.block_header(Height(height).into()).map(|header| header.hash()))
     }
 
     fn prune_height(&self) -> Result<u32, PipelineError> {
-        Ok(ZakuraDb::prune_height(self).unwrap_or(Height::MIN).0)
+        Ok(ZakuraDb::prune_height(&self.0).unwrap_or(Height::MIN).0)
     }
 
     fn process_segment(
@@ -37,12 +44,12 @@ impl HistoricalSource for ZakuraDb {
         let transaction_range = TransactionLocation::min_for_height(Height(start))
             ..=TransactionLocation::max_for_height(Height(end));
         let mut transactions =
-            self.raw_transactions_by_location_range(transaction_range).peekable();
+            self.0.raw_transactions_by_location_range(transaction_range).peekable();
 
         for raw_height in start..=end {
             let height = Height(raw_height);
             let started = Instant::now();
-            let header = self.block_header(height.into());
+            let header = self.0.block_header(height.into());
             stats.header_read += started.elapsed();
             let header =
                 header.ok_or(PipelineError::SourceGap { expected: raw_height, actual: None })?;
@@ -59,7 +66,7 @@ impl HistoricalSource for ZakuraDb {
                 block_transactions.push(transaction);
 
                 let started = Instant::now();
-                let txid = self.transaction_hash(transaction_location);
+                let txid = self.0.transaction_hash(transaction_location);
                 stats.txid_read += started.elapsed();
                 let Some(txid) = txid else {
                     return Err(PipelineError::SourceChanged);
@@ -71,7 +78,7 @@ impl HistoricalSource for ZakuraDb {
             }
             // A hash after the last transaction means that the block changed during the read.
             let next = TransactionLocation::from_usize(height, block_transactions.len());
-            if self.transaction_hash(next).is_some() {
+            if self.0.transaction_hash(next).is_some() {
                 return Err(PipelineError::SourceChanged);
             }
 

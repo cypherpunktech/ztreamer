@@ -4766,11 +4766,9 @@ dependencies = [
  "tracing",
  "zakura-chain",
  "zakura-sapling-crypto",
- "zakura-state",
  "zakura-test",
  "ztreamer-indexer",
  "ztreamer-jsonrpc",
- "ztreamer-node",
  "ztreamer-protocol",
 ]
 
@@ -4801,11 +4799,13 @@ version = "0.1.0"
 dependencies = [
  "thiserror",
  "tokio",
+ "tonic",
  "tower",
  "zakura",
  "zakura-chain",
  "zakura-node-services",
  "zakura-state",
+ "ztreamer-indexer",
 ]
 
 [[package]]

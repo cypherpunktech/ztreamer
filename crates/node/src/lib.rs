@@ -2,6 +2,11 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod finalized;
+mod head;
+
+pub use finalized::FinalizedDb;
+
 use std::sync::Arc;
 use tokio::sync::{oneshot, watch};
 use tower::ServiceExt as _;
@@ -78,6 +83,11 @@ impl NodeClient {
     /// Can be used to modify the database without doing any consensus checks.
     pub fn database(&self) -> zakura_state::ZakuraDb {
         self.services.read_state.db().clone()
+    }
+
+    /// Returns the finalized database as the source of the historical pass.
+    pub fn finalized_db(&self) -> FinalizedDb {
+        FinalizedDb(self.database())
     }
 
     /// Waits until the synchronizer is likely within its recent-tip window.

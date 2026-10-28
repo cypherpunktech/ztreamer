@@ -13,7 +13,6 @@ use tracing::info;
 
 mod flow_control;
 mod telemetry;
-mod zakura;
 pub use flow_control::SegmentSender;
 use flow_control::{ReadAheadReceiver, ReadAheadSender};
 use telemetry::{PipelineMetrics, SegmentMetrics};
@@ -210,7 +209,7 @@ pub trait HistoricalSource: Sync {
 /// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
-/// `ztreamerd` builds one over the embedded `ZakuraDb` or over
+/// `ztreamerd` builds one over `ztreamer_node::FinalizedDb` or over
 /// `ztreamer_service::remote::RemoteTailSource`. A source in another crate builds one the same
 /// way:
 ///

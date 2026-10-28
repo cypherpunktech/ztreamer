@@ -1,9 +1,10 @@
 //! Live canonical-head polling, persistence-depth handling, and ordinary or deep reorg recovery.
 
-use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
-use zakura_state::MAX_BLOCK_REORG_HEIGHT;
+use zakura_chain::{
+    block,
+    parameters::{GENESIS_PREVIOUS_BLOCK_HASH, constants::MAX_BLOCK_REORG_HEIGHT},
+};
 use ztreamer_jsonrpc::RpcError;
-use ztreamer_node::NodeClient;
 
 use crate::{
     blocking::BlockingTaskCancelled,
@@ -108,28 +109,6 @@ pub trait CanonicalBlockSource: Send {
     /// The default reads the block with [`block`](Self::block).
     async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
         Ok(self.block(height).await?.map(|block| block.hash))
-    }
-}
-
-#[tonic::async_trait]
-impl CanonicalBlockSource for NodeClient {
-    async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-        Ok(NodeClient::tip(self).map(|(height, hash)| BlockId::new(height.0, hash)))
-    }
-
-    async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
-        let block = NodeClient::block(self, block::Height(height)).await;
-        match block {
-            Ok(Some(block)) => {
-                let block = RawIndexBlock::try_from(&*block)?;
-                if block.height.0 != height {
-                    return Err(HeadError::Height { expected: height, actual: block.height.0 });
-                }
-                Ok(Some(block))
-            }
-            Ok(None) => Ok(None),
-            Err(error) => Err(HeadError::Node(error.to_string())),
-        }
     }
 }
 
