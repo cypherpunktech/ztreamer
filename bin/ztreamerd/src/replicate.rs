@@ -131,7 +131,10 @@ impl Replica {
         index: &Arc<Index>,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<()>> {
-        // `RemoteNode::sources` checks the genesis block again, after the import.
+        // `RemoteNode::sources` checks the chain and the genesis block again, after the import. The
+        // import can take hours, and in that time the node can restart on another chain, or
+        // another node can answer at the URL. That second check refuses such a node before the
+        // daemon serves from it.
         RemoteBackend::connect(client.clone(), network.clone())
             .await
             .wrap_err("check the chain of the remote zakura node")?;
