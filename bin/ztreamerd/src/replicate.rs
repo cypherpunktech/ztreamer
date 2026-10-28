@@ -22,7 +22,7 @@ use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
 use ztreamer_remote::ZakuraClient;
-use ztreamer_service::RemoteBackend;
+use ztreamer_service::remote::RemoteBackend;
 use ztreamer_verify::{
     attest::JsonRpcAttestor,
     fetch::{HttpSource, PeerSource, RangeSource},

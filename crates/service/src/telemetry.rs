@@ -17,7 +17,7 @@ use ztreamer_indexer::{
     types::RawIndexBlock,
 };
 
-use crate::service::{RpcStream, ServingSnapshot};
+use crate::compact::{RpcStream, ServingSnapshot};
 
 pub(crate) struct ServiceMetrics {
     active: Gauge,

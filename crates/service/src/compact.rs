@@ -28,8 +28,6 @@ mod address;
 mod blocks;
 mod head;
 mod mempool;
-#[cfg(test)]
-mod test_utils;
 mod tree;
 
 pub use head::{HeadFollowerConfig, HeadFollowerError};

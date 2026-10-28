@@ -296,3 +296,24 @@ pub async fn consume(
     }
     Ok(Observation { first: first.unwrap(), complete: started.elapsed(), bytes, blocks })
 }
+
+#[cfg(test)]
+pub(crate) use ztreamer_indexer::test_utils::{hash, raw_block};
+
+/// An empty block at `height` that chains onto [`hash`] of the previous height.
+#[cfg(test)]
+pub(crate) fn parsed(height: u32) -> ztreamer_indexer::types::ParsedCompactBlock {
+    fixtures::parsed(fixtures::record(height, Vec::new()))
+}
+
+#[cfg(test)]
+pub(crate) fn record(height: u32) -> ztreamer_indexer::codec::CompactBlockRecord {
+    ztreamer_indexer::codec::CompactBlockRecord {
+        height,
+        hash: hash(height),
+        previous_hash: hash(height - 1),
+        time: height,
+        transactions: Vec::new(),
+        end_tree_sizes: ztreamer_indexer::codec::TreeSizes::default(),
+    }
+}
