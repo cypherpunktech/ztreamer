@@ -1,5 +1,5 @@
-//! The production [`HistoricalSource`]: Zakura's finalized database, read with its native
-//! range iterators.
+//! The production [`HistoricalSource`]: Zakura's finalized database. It reads the transactions of
+//! a segment with one range iterator, and each header and transaction hash by its key.
 
 use std::time::Instant;
 
@@ -34,27 +34,18 @@ impl HistoricalSource for ZakuraDb {
         parsed_tx: &mut SegmentSender<'_>,
         stats: &mut WorkerStats,
     ) -> Result<(), PipelineError> {
-        let mut headers = self.block_headers_by_height_range(Height(start)..=Height(end));
         let transaction_range = TransactionLocation::min_for_height(Height(start))
             ..=TransactionLocation::max_for_height(Height(end));
         let mut transactions =
-            self.raw_transactions_by_location_range(transaction_range.clone()).peekable();
-        let mut transaction_hashes =
-            self.transaction_hashes_by_location_range(transaction_range).peekable();
+            self.raw_transactions_by_location_range(transaction_range).peekable();
 
         for raw_height in start..=end {
             let height = Height(raw_height);
             let started = Instant::now();
-            let header = headers.next();
+            let header = self.block_header(height.into());
             stats.header_read += started.elapsed();
-            let (actual_height, header) =
+            let header =
                 header.ok_or(PipelineError::SourceGap { expected: raw_height, actual: None })?;
-            if actual_height != height {
-                return Err(PipelineError::SourceGap {
-                    expected: raw_height,
-                    actual: Some(actual_height.0),
-                });
-            }
 
             let mut block_transactions = Vec::new();
             let mut txids = Vec::new();
@@ -68,20 +59,19 @@ impl HistoricalSource for ZakuraDb {
                 block_transactions.push(transaction);
 
                 let started = Instant::now();
-                let txid = transaction_hashes.next();
+                let txid = self.transaction_hash(transaction_location);
                 stats.txid_read += started.elapsed();
-                let Some((location, txid)) = txid else {
+                let Some(txid) = txid else {
                     return Err(PipelineError::SourceChanged);
                 };
-                if location != transaction_location {
-                    return Err(PipelineError::SourceChanged);
-                }
                 txids.push(txid);
             }
             if block_transactions.is_empty() {
                 return Err(PipelineError::MissingBody { height: raw_height });
             }
-            if transaction_hashes.peek().is_some_and(|(location, _)| location.height == height) {
+            // A hash after the last transaction means that the block changed during the read.
+            let next = TransactionLocation::from_usize(height, block_transactions.len());
+            if self.transaction_hash(next).is_some() {
                 return Err(PipelineError::SourceChanged);
             }
 
