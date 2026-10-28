@@ -45,8 +45,9 @@ use crate::{
     snapshot::{Latest, LatestError, RangePath, SignatureFile},
 };
 
-/// The times that [`Fetcher::blob`] continues one blob after a transfer error.
-pub const MAX_RESUMES: u32 = 3;
+/// The transfer errors of one blob in a row with no new byte, after which [`Fetcher::blob`]
+/// stops. A transfer that receives a byte before its error sets the count to zero.
+pub const MAX_RESUMES_WITHOUT_PROGRESS: u32 = 5;
 
 /// The `GetRange` streams that one [`PeerSource`] opens at a time. It is the stream limit of the
 /// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
@@ -230,20 +231,29 @@ impl Fetcher {
 
     /// The blob of `entry`, with the length and the digest of the entry.
     ///
-    /// A request or a transfer that fails continues from the last byte received, at most
-    /// [`MAX_RESUMES`] times. A blob with a wrong length or digest is [`FetchError::Digest`].
-    /// The stream of a failed transfer is dropped before the next request, thus the source can
-    /// release its place before the resume.
+    /// A request or a transfer that fails continues from the last byte received. A transfer
+    /// that received bytes resumes at once, with no limit: each resume asks for fewer bytes. A
+    /// transfer that received no byte resumes after a wait of [`StalledResumes`], at most
+    /// [`MAX_RESUMES_WITHOUT_PROGRESS`] times in a row. A blob with a wrong length or digest is
+    /// [`FetchError::Digest`]. The stream of a failed transfer is dropped before the next
+    /// request, thus the source can release its place before the resume.
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
-        let mut resumes = 0;
-        while let Err(error) = self.transfer(entry, &mut blob).await {
-            if !error.is_transfer() || resumes == MAX_RESUMES {
+        let mut stalled = StalledResumes::default();
+        loop {
+            let offset = blob.len();
+            let Err(error) = self.transfer(entry, &mut blob).await else {
+                break;
+            };
+            let received = blob.len() - offset;
+            let wait = error.is_transfer().then(|| stalled.wait_after(received)).flatten();
+            let Some(wait) = wait else {
                 return Err(error);
-            }
-            resumes += 1;
-            let (start_height, offset) = (entry.start_height, blob.len());
-            warn!(%error, start_height, offset, "range transfer stopped; resuming");
+            };
+            let (start_height, offset, error) =
+                (entry.start_height, blob.len(), ErrorChain(&error));
+            warn!(%error, start_height, offset, received, ?wait, "range transfer stopped; resuming");
+            tokio::time::sleep(wait).await;
         }
         entry
             .check_blob(&blob)
@@ -260,6 +270,52 @@ impl Fetcher {
                 break;
             };
             blob.extend_from_slice(&chunk?);
+        }
+        Ok(())
+    }
+}
+
+/// The failed transfers of one blob in a row that received no byte, and the wait before the
+/// next resume.
+///
+/// A failed transfer that received bytes sets the count to zero, and the resume does not wait.
+/// The first failed transfer with no byte waits [`Self::FIRST_WAIT`], and each next one waits
+/// double the wait before. After [`MAX_RESUMES_WITHOUT_PROGRESS`] such transfers, there is no
+/// next resume.
+#[derive(Clone, Copy, Debug, Default)]
+struct StalledResumes {
+    count: u32,
+}
+
+impl StalledResumes {
+    /// The wait after the first failed transfer with no byte.
+    const FIRST_WAIT: Duration = Duration::from_secs(1);
+
+    /// The wait before the resume after a failed transfer that received `received` bytes, or
+    /// `None` when the blob has no resume left.
+    fn wait_after(&mut self, received: usize) -> Option<Duration> {
+        if received > 0 {
+            self.count = 0;
+            return Some(Duration::ZERO);
+        }
+        (self.count < MAX_RESUMES_WITHOUT_PROGRESS).then(|| {
+            self.count += 1;
+            Self::FIRST_WAIT * 2_u32.pow(self.count - 1)
+        })
+    }
+}
+
+/// The `Display` form of an error, then of each of its sources, joined with `: `. Thus a log
+/// shows why a transfer stopped: the I/O error below `HTTP body failed`, for example.
+struct ErrorChain<'a>(&'a (dyn std::error::Error + Send + Sync));
+
+impl fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut source = self.0.source();
+        while let Some(error) = source {
+            write!(f, ": {error}")?;
+            source = error.source();
         }
         Ok(())
     }
@@ -609,6 +665,53 @@ mod tests {
             requests,
             [(relative.to_owned(), None), (relative.to_owned(), Some(format!("bytes={half}-")))]
         );
+    }
+
+    #[tokio::test]
+    async fn a_transfer_that_progresses_resumes_more_than_the_limit_without_progress() {
+        let http = Http::new().await;
+        let entry = &http.snapshot.manifest.entries()[1];
+        let path = http.snapshot.range_path(entry);
+        let relative = path.strip_prefix(http.snapshot.dir.path()).unwrap().to_str().unwrap();
+        let cuts = MAX_RESUMES_WITHOUT_PROGRESS as usize + 2;
+        http.server.cut_next_answers(relative, cuts);
+
+        let blob = http.fetcher(SEED).blob(entry).await.unwrap();
+
+        assert_eq!(blob, http.blob(1_000));
+        // Each cut answer sends half of the bytes after its offset.
+        let mut offset = 0;
+        let mut expected = vec![(relative.to_owned(), None)];
+        for _ in 0..cuts {
+            offset += (blob.len() - offset) / 2;
+            expected.push((relative.to_owned(), Some(format!("bytes={offset}-"))));
+        }
+        let requests: Vec<_> =
+            http.server.requests().into_iter().filter(|(path, _)| path == relative).collect();
+        assert_eq!(requests, expected);
+    }
+
+    #[test]
+    fn stalled_resumes_double_the_wait_and_stop_at_the_limit() {
+        let mut stalled = StalledResumes::default();
+        let waits: Vec<_> = (0..6).map(|_| stalled.wait_after(0)).collect();
+        let secs = |secs| Some(Duration::from_secs(secs));
+        assert_eq!(waits, [secs(1), secs(2), secs(4), secs(8), secs(16), None]);
+
+        // A transfer that progresses starts the count again.
+        let mut stalled = StalledResumes::default();
+        let waits: Vec<_> =
+            [0, 0, 7, 0].into_iter().map(|bytes| stalled.wait_after(bytes)).collect();
+        assert_eq!(waits, [secs(1), secs(2), Some(Duration::ZERO), secs(1)]);
+    }
+
+    #[test]
+    fn an_error_chain_shows_each_source() {
+        let error = FetchError::Digest { start_height: 7, mismatch: BlobMismatch::Digest };
+
+        let chain = ErrorChain(&error).to_string();
+
+        assert_eq!(chain, format!("{error}: {}", BlobMismatch::Digest));
     }
 
     #[tokio::test]
