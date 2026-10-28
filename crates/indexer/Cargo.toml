@@ -26,8 +26,8 @@ zakura-chain.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test = { workspace = true, optional = true }
 ztreamer-node = { path = "../node" }
+ztreamer-jsonrpc = { path = "../jsonrpc" }
 ztreamer-protocol = { path = "../protocol" }
-ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }

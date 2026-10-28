@@ -4769,9 +4769,9 @@ dependencies = [
  "zakura-state",
  "zakura-test",
  "ztreamer-indexer",
+ "ztreamer-jsonrpc",
  "ztreamer-node",
  "ztreamer-protocol",
- "ztreamer-remote",
 ]
 
 [[package]]
@@ -4840,6 +4840,7 @@ dependencies = [
  "zakura-rpc",
  "zakura-state",
  "zakura-test",
+ "ztreamer-indexer",
  "ztreamer-jsonrpc",
  "ztreamer-remote",
 ]

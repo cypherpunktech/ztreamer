@@ -19,7 +19,7 @@ use flow_control::{ReadAheadReceiver, ReadAheadSender};
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
-use ztreamer_remote::RpcError;
+use ztreamer_jsonrpc::RpcError;
 
 use crate::{
     index::{Index, IndexError, IndexState},
