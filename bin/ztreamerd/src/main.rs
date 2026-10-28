@@ -45,7 +45,7 @@ mod lifecycle;
 mod remote;
 mod replicate;
 #[cfg(test)]
-mod test_support;
+mod test_utils;
 
 /// Must be larger than the full mainnet index. That index was 17.3 GiB at height 3,532,489
 /// (2026-10-27).
