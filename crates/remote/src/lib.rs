@@ -35,6 +35,7 @@ mod auth;
 mod client;
 mod envelope;
 mod error;
+pub mod frontier;
 mod https;
 mod methods;
 #[cfg(any(test, feature = "test-utils"))]

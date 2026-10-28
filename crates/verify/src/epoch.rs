@@ -17,7 +17,6 @@ use pasta_curves::{group::ff::PrimeField, pallas};
 use zakura_chain::{ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
-    frontier::{FromRpc, RpcDecodeError},
     index::{
         CheckedRange,
         range_meta::{
@@ -27,6 +26,7 @@ use ztreamer_indexer::{
     },
     types::CompactShieldedAction,
 };
+use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
 
 use crate::range::{Check, RangeBlob, RangeLink, Reject};
 

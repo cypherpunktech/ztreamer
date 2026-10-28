@@ -46,7 +46,7 @@ pub enum RpcDecodeError {
 ///
 /// ```
 /// use zakura_chain::sapling;
-/// use ztreamer_indexer::frontier::FromRpc;
+/// use ztreamer_remote::frontier::FromRpc;
 ///
 /// // The Sapling `finalRoot` at height 3,524,999, as the node prints it.
 /// let printed = "63a3da9f0249167a8c04e45c43dcb62145d78dd0917c2d2f2f49414696e00c0b";

@@ -37,11 +37,8 @@ use zakura_rpc::{
     methods::GetAddressUtxosRequest,
 };
 use zakura_state::HashOrHeight;
-use ztreamer_indexer::{
-    frontier::FromRpc,
-    index::range_meta::{self, NodeBytes, SubtreeNode},
-};
-use ztreamer_remote::{RpcError, ZakuraClient};
+use ztreamer_indexer::index::range_meta::{self, NodeBytes, SubtreeNode};
+use ztreamer_remote::{RpcError, ZakuraClient, frontier::FromRpc};
 
 use crate::backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,

@@ -6,7 +6,6 @@
 
 pub mod blocking;
 pub mod codec;
-pub mod frontier;
 pub mod head;
 pub mod index;
 pub mod ingest;
