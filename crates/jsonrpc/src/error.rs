@@ -154,7 +154,7 @@ pub enum RpcError {
 
 impl RpcError {
     /// The message of zakura for a `getblockhash` height above its tip.
-    pub(crate) const ABOVE_TIP_MESSAGE: &str = "Provided index is greater than the current tip";
+    pub const ABOVE_TIP_MESSAGE: &str = "Provided index is greater than the current tip";
 
     /// Error code from the node, when the node answered with an error object.
     pub const fn rpc_code(&self) -> Option<RpcCode> {

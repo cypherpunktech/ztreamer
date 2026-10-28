@@ -112,9 +112,10 @@ impl RpcConfig {
     }
 }
 
-/// The failures that a call retries, up to the retry count of the [`RetryPolicy`].
+/// The failures that a call retries, up to the retry count of the [`RetryPolicy`]. Pass it to
+/// [`RpcClient::call_with`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Retries {
+pub enum Retries {
     /// Retries the failures that [`RpcError::is_retryable`] accepts.
     Retryable,
     /// Retries only a failure where the request did not reach the node
@@ -210,7 +211,7 @@ impl RpcClient {
     }
 
     /// Calls `method` as [`Self::call`] does, but retries only the failures in `retries`.
-    pub(crate) async fn call_with<P, R>(
+    pub async fn call_with<P, R>(
         &self,
         method: &str,
         params: P,

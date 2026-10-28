@@ -19,7 +19,7 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 
-use crate::{RpcClient, RpcConfig, RpcError, client::Retries};
+use ztreamer_jsonrpc::{Retries, RpcClient, RpcConfig, RpcError};
 
 /// A zakura JSON-RPC method that [`ZakuraClient`] calls.
 ///

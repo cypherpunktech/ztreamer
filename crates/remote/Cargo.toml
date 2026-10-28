@@ -3,37 +3,48 @@ name = "ztreamer-remote"
 version = "0.1.0"
 edition.workspace = true
 repository.workspace = true
-description = "JSON-RPC client for a remote zakura node"
+description = "Typed JSON-RPC calls to a remote zakura node"
 
 [lints]
 workspace = true
 
 [features]
 # A mock zakura node for tests, in `ztreamer_remote::test_utils`.
-test-utils = ["hyper/server", "tokio/macros", "tokio/net", "tokio/rt", "tokio/sync"]
+test-utils = [
+    "dep:bytes",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:serde_json",
+    "dep:tokio",
+    "hyper/http1",
+    "hyper/server",
+    "tokio/macros",
+    "tokio/net",
+    "tokio/rt",
+    "tokio/sync",
+    "ztreamer-jsonrpc/test-utils",
+]
 
 [dependencies]
-base64 = "0.22"
-bytes = "1"
+bytes = { version = "1", optional = true }
 http = "1"
-http-body-util = "0.1"
-hyper = { version = "1", features = ["client", "http1"] }
-hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
-hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+http-body-util = { version = "0.1", optional = true }
+hyper = { version = "1", optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
 incrementalmerkletree.workspace = true
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", optional = true }
 thiserror = "2"
-tokio = { version = "1", features = ["time"] }
-tracing = "0.1"
-webpki-roots = "1"
+tokio = { version = "1", optional = true }
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
 zcash_primitives.workspace = true
+ztreamer-jsonrpc = { path = "../jsonrpc" }
 
 [dev-dependencies]
+base64 = "0.22"
 hex = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
