@@ -1,8 +1,8 @@
 use super::*;
 use crate::test_utils::{hash, open_index, parsed, record};
 use crate::{
-    codec::{ProtobufBlockRecord, decode_range_record, encode_range},
-    index::range_meta::{BlobDigest, full_meta},
+    codec::{CodecError, ProtobufBlockRecord, decode_range_record, encode_range},
+    index::range_meta::{BlobDigest, BlobMismatch, full_meta},
     ingest::OrderedBuilder,
 };
 

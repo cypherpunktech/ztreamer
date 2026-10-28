@@ -115,23 +115,26 @@
 use std::{fs, io, path::Path, time::Instant};
 
 use heed::{Env, EnvOpenOptions, RoTxn, RwTxn};
-use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
+use zakura_chain::block;
 
-use crate::codec::{
-    CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, StoredBlock, TreeSizes,
-    decode_range_record,
-};
+#[cfg(any(test, feature = "test-utils"))]
+use crate::codec::TreeSizes;
+use crate::codec::{CompactBlockRecord, RANGE_FORMAT_VERSION, StoredBlock, decode_range_record};
 use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod checked_range;
+mod error;
 mod metadata;
 pub mod range_meta;
+mod state;
 mod tables;
 mod telemetry;
 mod writer;
 pub use checked_range::{CheckedRange, RangeCheckError};
+pub use error::IndexError;
 use metadata::Metadata;
-use range_meta::{BlobMismatch, RangeMeta, VerifyState};
+use range_meta::{RangeMeta, VerifyState};
+pub use state::{BlockId, ChainIdentity, IndexState};
 use tables::{RangeChain, SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
@@ -141,28 +144,6 @@ pub const RANGE_SIZE: u32 = 1_000;
 pub const PERSIST_DEPTH: u32 = 10;
 pub const SEAL_DEPTH: u32 = 100;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// References a block by hash and height.
-pub struct BlockId {
-    pub height: u32,
-    pub hash: block::Hash,
-}
-
-impl BlockId {
-    pub const fn new(height: u32, hash: block::Hash) -> Self {
-        Self { height, hash }
-    }
-}
-
-/// The chain of an index, as its identity row stores it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChainIdentity {
-    /// The network name that the index was opened with, for example `Mainnet`.
-    pub network: String,
-    /// The hash of the genesis block.
-    pub genesis_hash: block::Hash,
-}
-
 /// The metadata row and the packed blob of one sealed range, from one LMDB snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SealedRangeWithMeta {
@@ -170,138 +151,6 @@ pub struct SealedRangeWithMeta {
     pub meta: RangeMeta,
     /// The packed blob of the range, as in `sealed_ranges`.
     pub blob: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-/// Represents the [`Index`]'s current sync state.
-pub struct IndexState {
-    /// The highest contiguous compact block committed to the `mutable_blocks` database.
-    pub(crate) durable_tip: Option<BlockId>,
-    /// The highest height committed to the `sealed_ranges` database.
-    ///
-    /// Blocks above this height live in the `mutable_blocks` database.
-    pub(crate) sealed_through: Option<u32>,
-    /// The highest height through which every sealed range is verified against a node.
-    ///
-    /// Embedded mode never sets it. It is at most `sealed_through`.
-    pub(crate) verified_through: Option<u32>,
-    /// LMDB's monotonically increasing revision number.
-    /// Incremented on each successful atomic index mutation.
-    pub(crate) generation: u64,
-    /// Cumulative [`TreeSizes`] at the end of `durable_tip`
-    pub(crate) tree_sizes: TreeSizes,
-}
-
-impl IndexState {
-    /// Returns the highest contiguous compact block committed to the
-    /// `mutable_blocks` database.
-    pub const fn durable_tip(&self) -> Option<BlockId> {
-        self.durable_tip
-    }
-
-    /// Returns the highest height committed to the `sealed_ranges` database.
-    ///
-    /// Blocks above this height live in the `mutable_blocks` database.
-    pub const fn sealed_through(&self) -> Option<u32> {
-        self.sealed_through
-    }
-
-    /// Returns the highest height through which every sealed range is verified against a node,
-    /// or `None` when no range is.
-    pub const fn verified_through(&self) -> Option<u32> {
-        self.verified_through
-    }
-
-    /// Identifies the exact committed revision of the durable index that an
-    /// [`IndexState`] describes.
-    pub const fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// Cumulative [`TreeSizes`] at the end of [`IndexState::durable_tip`]
-    pub const fn tree_sizes(&self) -> TreeSizes {
-        self.tree_sizes
-    }
-
-    /// Returns the first height of the next range to seal: `sealed_through + 1`, or 0 if no range
-    /// is sealed.
-    pub(crate) fn next_range_start(&self) -> Result<u32, IndexError> {
-        self.sealed_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
-    }
-
-    /// Returns the first height of the next range to verify: `verified_through + 1`, or 0 if no
-    /// range is verified.
-    pub(crate) fn next_verify_start(&self) -> Result<u32, IndexError> {
-        self.verified_through
-            .map_or(Ok(0), |height| height.checked_add(1).ok_or(IndexError::Overflow))
-    }
-
-    /// The hash that the first block of an installed range links to: the hash of the tip, or the
-    /// genesis previous hash on an empty index. An install requires no mutable rows. Thus the
-    /// tip is the last block of the sealed ranges.
-    pub(crate) fn install_parent_hash(&self) -> block::Hash {
-        self.durable_tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash)
-    }
-
-    /// Returns `true` if the index has mutable rows. The mutable rows cover the heights above
-    /// `sealed_through` to the durable tip. Thus they exist only if the tip is above
-    /// `sealed_through`.
-    pub(crate) fn has_mutable_rows(&self) -> bool {
-        self.durable_tip.map(|tip| tip.height) != self.sealed_through
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum IndexError {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Heed(#[from] heed::Error),
-    #[error(transparent)]
-    Codec(#[from] CodecError),
-    #[error("LMDB network, genesis hash, or fixed index policy does not match")]
-    Identity,
-    #[error("LMDB metadata is incomplete or inconsistent")]
-    Metadata,
-    #[error("write batch was built from stale index generation {batch_generation}")]
-    StaleBatch { batch_generation: u64 },
-    #[error("mutable range starting at {start} is incomplete")]
-    IncompleteRange { start: u32 },
-    #[error("LMDB compact coverage is not contiguous at height {height}")]
-    Continuity { height: u32 },
-    #[error("LMDB hash index does not match compact block at height {height}")]
-    HashIndex { height: u32 },
-    #[error("serving snapshot generation {expected} does not match LMDB generation {actual}")]
-    Generation { expected: u64, actual: u64 },
-    #[error("compact block height {height} is outside indexed coverage")]
-    Coverage { height: u32 },
-    #[error("height or generation overflow")]
-    Overflow,
-    #[error("ordinary reorg replacement would modify sealed block {height}")]
-    Sealed { height: u32 },
-    #[error("replacement suffix does not connect at height {height}")]
-    Replacement { height: u32 },
-    #[error("range metadata at {start} does not describe a sealed range that starts there")]
-    RangeMeta { start: u32 },
-    #[error("height {height} is not the first height of a range")]
-    RangeStart { height: u32 },
-    #[error("sealed range at {start} is not the next range; the next range starts at {next}")]
-    RangeOrder { start: u32, next: u32 },
-    #[error("range blob does not continue the chain at height {height}")]
-    RangeBlob { height: u32 },
-    #[error("block hash at height {height} is in the index already")]
-    DuplicateHash { height: u32 },
-    #[error("index has mutable rows; an install needs an index with no mutable rows")]
-    MutableRows,
-    /// A range blob does not have the `blob_len` or the `blob_digest` of its metadata.
-    #[error("range blob at {start} does not match its metadata: {mismatch}")]
-    Blob {
-        /// The first height of the range.
-        start: u32,
-        /// The value that does not match: the length or the digest.
-        mismatch: BlobMismatch,
-    },
 }
 
 /// Ztreamer's five-database LMDB index.
