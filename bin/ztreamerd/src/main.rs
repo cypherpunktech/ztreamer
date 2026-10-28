@@ -413,10 +413,9 @@ async fn reconcile_head(
     }
 }
 
-/// Runs the head follower and the gRPC server until shutdown or until either task stops. The
-/// server serves CompactTxStreamer and Replicator on one listener. Runs `filler` beside them and
-/// stops it with them. Returns when the filler holds the index no more, so the caller can close
-/// the index.
+/// Runs the head follower, the gRPC server and `filler` until shutdown or until one of the three
+/// tasks stops. The server serves CompactTxStreamer and Replicator on one listener. Returns when
+/// the filler holds the index no more, so the caller can close the index.
 async fn serve(
     compact: CompactService,
     source: impl CanonicalBlockSource + 'static,
@@ -427,7 +426,7 @@ async fn serve(
     shutdown: &CancellationToken,
 ) -> Result<()> {
     let (server_shutdown, _) = watch::channel(false);
-    let filler = tokio::spawn(
+    let mut filler = tokio::spawn(
         filler.run(compact.subscribe(), shutdown_requested(server_shutdown.subscribe())),
     );
     let mut follower = tokio::spawn({
@@ -452,21 +451,23 @@ async fn serve(
         }
     });
 
-    let mut grpc_result = None;
-    let mut follower_result = None;
+    let (mut grpc_result, mut follower_result, mut filler_result) = (None, None, None);
     tokio::select! {
         _ = shutdown.cancelled() => {},
         result = &mut grpc => grpc_result = Some(result),
         result = &mut follower => follower_result = Some(result),
+        result = &mut filler => filler_result = Some(result),
     }
-    let task_exited = grpc_result.is_some() || follower_result.is_some();
+    let task_exited = grpc_result.is_some() || follower_result.is_some() || filler_result.is_some();
     let _ = server_shutdown.send(true);
 
     // Drain all three tasks before inspecting a result, including on failure. The filler
     // returns after its last index read on a blocking thread.
-    let (grpc_result, follower_result) =
-        lifecycle::drain_both((grpc, grpc_result), (follower, follower_result)).await;
-    let filler_result = filler.await;
+    let ((grpc_result, follower_result), filler_result) = lifecycle::drain_both(
+        (lifecycle::drain_both((grpc, grpc_result), (follower, follower_result)), None),
+        (filler, filler_result),
+    )
+    .await;
     task_result(grpc_result, "gRPC")?;
     task_result(follower_result, "head follower")?;
     filler_result.wrap_err("range_meta filler task panicked")?;
