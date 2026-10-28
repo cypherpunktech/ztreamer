@@ -45,7 +45,7 @@
 //! ranges only in height order, with no gaps. [`Index::install_checked_range`] does the same
 //! install for a [`CheckedRange`]: the checks of the blob that do not need the index ran before,
 //! on another thread. During an import, the index has no mutable rows.
-//! Thus the durable tip is `sealed_through`. [`Index::read_sealed_range_bytes`] reads the packed
+//! Thus the durable tip is `sealed_through`. [`IndexSnapshot::sealed_range`] reads the packed
 //! range that a snapshot gives.
 //!
 //! # Rules
@@ -78,16 +78,17 @@
 //! so writing it does not invalidate the readers of the current generation. An install writes a
 //! `range_meta` row and a range in one commit. Thus an install increases the generation.
 //!
-//! An LMDB read transaction sees one committed state. The `read_*` methods take a generation, and
-//! they return [`IndexError::Generation`] if the index has a different generation. Thus a reader
-//! cannot mix blocks from two commits. [`Index::read_range_latest`] reads the current generation.
-//! Its caller checks the chain between two calls.
+//! An LMDB read transaction sees one committed state. Each read goes through an [`IndexSnapshot`]:
+//! one read transaction. [`Index::snapshot`] returns [`IndexError::Generation`] if the index has a
+//! different generation. Thus a reader cannot mix blocks from two commits. [`Index::latest`] reads
+//! the current generation. A caller that reads across commits checks the chain between two
+//! snapshots.
 //!
 //! # Startup checks
 //!
 //! [`Index::open`] rejects an environment with a different identity: a different network, genesis
 //! hash, [`SCHEMA_VERSION`], [`RANGE_SIZE`], [`PERSIST_DEPTH`] or [`SEAL_DEPTH`]. Then
-//! [`Index::verify_continuity`] checks:
+//! [`IndexSnapshot::verify_continuity`] checks:
 //!
 //! - the number of rows in each block table,
 //! - that the height keys of `sealed_ranges` and `mutable_blocks` start at 0 and have no gaps,
@@ -114,18 +115,19 @@
 
 use std::{fs, io, path::Path, time::Instant};
 
-use heed::{Env, EnvOpenOptions, RoTxn, RwTxn};
+use heed::{Env, EnvOpenOptions, RwTxn};
 use zakura_chain::block;
 
 #[cfg(any(test, feature = "test-utils"))]
 use crate::codec::TreeSizes;
-use crate::codec::{CompactBlockRecord, RANGE_FORMAT_VERSION, StoredBlock, decode_range_record};
+use crate::codec::{CompactBlockRecord, RANGE_FORMAT_VERSION};
 use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod checked_range;
 mod error;
 mod metadata;
 pub mod range_meta;
+mod snapshot;
 mod state;
 mod tables;
 mod telemetry;
@@ -134,6 +136,7 @@ pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
 use metadata::Metadata;
 use range_meta::{RangeMeta, VerifyState};
+pub use snapshot::IndexSnapshot;
 pub use state::{BlockId, ChainIdentity, IndexState};
 use tables::{RangeChain, SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
@@ -143,15 +146,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const RANGE_SIZE: u32 = 1_000;
 pub const PERSIST_DEPTH: u32 = 10;
 pub const SEAL_DEPTH: u32 = 100;
-
-/// The metadata row and the packed blob of one sealed range, from one LMDB snapshot.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SealedRangeWithMeta {
-    /// The `range_meta` row of the range.
-    pub meta: RangeMeta,
-    /// The packed blob of the range, as in `sealed_ranges`.
-    pub blob: Vec<u8>,
-}
 
 /// Ztreamer's five-database LMDB index.
 pub struct Index {
@@ -212,27 +206,32 @@ impl Index {
         txn.commit()?;
 
         let index = Self { env, tables };
-        index.verify_continuity()?;
+        index.latest()?.verify_continuity()?;
         record_state_metrics(index.state()?);
         Ok(index)
     }
 
+    /// The state of the index at the current generation.
     pub fn state(&self) -> Result<IndexState, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.tables.metadata.get_state(&txn)
+        self.latest().map(|index_snapshot| index_snapshot.state())
     }
 
-    /// Returns the index state. If the index is not at `generation`, returns
+    /// A snapshot of the index at `generation`. If the index is at another generation, returns
     /// [`IndexError::Generation`].
-    pub fn state_at(&self, generation: u64) -> Result<IndexState, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.read_generation(&txn, generation)
+    pub fn snapshot(&self, generation: u64) -> Result<IndexSnapshot<'_>, IndexError> {
+        let snapshot = self.latest()?;
+        let actual = snapshot.state().generation;
+        if actual != generation {
+            return Err(IndexError::Generation { expected: generation, actual });
+        }
+        Ok(snapshot)
     }
 
-    /// Reads the metadata of the sealed range that starts at `start`, if any was written.
-    pub fn range_meta(&self, start: u32) -> Result<Option<RangeMeta>, IndexError> {
+    /// A snapshot of the index at the current generation.
+    pub fn latest(&self) -> Result<IndexSnapshot<'_>, IndexError> {
         let txn = self.env.read_txn()?;
-        self.tables.range_meta.get(&txn, start)
+        let state = self.tables.metadata.get_state(&txn)?;
+        Ok(IndexSnapshot::new(txn, self.tables, state))
     }
 
     /// Writes the metadata of the sealed range that starts at `start`, replacing any earlier
@@ -254,67 +253,6 @@ impl Index {
         self.tables.range_meta.put(&mut txn, start, meta)?;
         txn.commit()?;
         Ok(())
-    }
-
-    /// Reads the packed blob of the sealed range that starts at `start`. The bytes are the same
-    /// as in `sealed_ranges`. Returns `None` if no sealed range starts at `start`. Reads the
-    /// current generation.
-    pub fn read_sealed_range_bytes(&self, start: u32) -> Result<Option<Vec<u8>>, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.sealed_range_bytes_in(&txn, start)
-    }
-
-    /// Reads the packed blob of the sealed range that starts at `start` from a generation-pinned
-    /// LMDB snapshot. Returns `None` if no sealed range starts at `start`.
-    pub fn read_sealed_range_bytes_at(
-        &self,
-        generation: u64,
-        start: u32,
-    ) -> Result<Option<Vec<u8>>, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.read_generation(&txn, generation)?;
-        self.sealed_range_bytes_in(&txn, start)
-    }
-
-    /// Reads the `range_meta` row and the packed blob of the sealed range that starts at `start`
-    /// from one generation-pinned LMDB snapshot. Thus a commit between two reads cannot give a
-    /// row and a blob of different commits. Returns `None` if the range has no row.
-    pub fn read_sealed_range_with_meta_at(
-        &self,
-        generation: u64,
-        start: u32,
-    ) -> Result<Option<SealedRangeWithMeta>, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.read_generation(&txn, generation)?;
-        let Some(meta) = self.tables.range_meta.get(&txn, start)? else {
-            return Ok(None);
-        };
-        let blob = self.sealed_range_bytes_in(&txn, start)?;
-        Ok(blob.map(|blob| SealedRangeWithMeta { meta, blob }))
-    }
-
-    fn sealed_range_bytes_in(
-        &self,
-        txn: &RoTxn<'_>,
-        start: u32,
-    ) -> Result<Option<Vec<u8>>, IndexError> {
-        if start != range_start(start) {
-            return Err(IndexError::RangeStart { height: start });
-        }
-        Ok(self.tables.sealed_ranges.get(txn, start)?.map(<[u8]>::to_vec))
-    }
-
-    /// Reads the metadata rows of the sealed ranges that start at or above `start`, in height
-    /// order, from a generation-pinned LMDB snapshot. A sealed range with no row is not in the
-    /// list.
-    pub fn range_metas_from(
-        &self,
-        generation: u64,
-        start: u32,
-    ) -> Result<Vec<RangeMeta>, IndexError> {
-        let txn = self.env.read_txn()?;
-        self.read_generation(&txn, generation)?;
-        self.tables.range_meta.rows_from(&txn, start)
     }
 
     /// Sets the tip of an empty index to `tip`, with `tree_sizes`, as if sealed ranges cover
@@ -460,221 +398,6 @@ impl Index {
         writer.put_sealed_range(start, blob, meta)?;
         writer.set_tip(BlockId::new(last.height, last.hash), last.end_tree_sizes);
         writer.commit()
-    }
-
-    pub fn read_block(
-        &self,
-        generation: u64,
-        height: u32,
-    ) -> Result<CompactBlockRecord, IndexError> {
-        self.read_block_as(generation, height)
-    }
-
-    /// Reads one block from a generation-pinned LMDB snapshot.
-    pub fn read_block_as<T: StoredBlock>(
-        &self,
-        generation: u64,
-        height: u32,
-    ) -> Result<T, IndexError> {
-        let txn = self.env.read_txn()?;
-        let state = self.read_generation(&txn, generation)?;
-        self.tables.read(&txn, state, height)
-    }
-
-    pub fn read_block_by_hash(
-        &self,
-        generation: u64,
-        hash: block::Hash,
-    ) -> Result<Option<CompactBlockRecord>, IndexError> {
-        self.read_block_by_hash_as(generation, hash)
-    }
-
-    /// Resolves and reads one canonical block hash from a generation-pinned LMDB snapshot.
-    pub fn read_block_by_hash_as<T: StoredBlock>(
-        &self,
-        generation: u64,
-        hash: block::Hash,
-    ) -> Result<Option<T>, IndexError> {
-        let txn = self.env.read_txn()?;
-        let state = self.read_generation(&txn, generation)?;
-        self.tables
-            .hash_to_height
-            .get(&txn, &hash)?
-            .map(|height| self.tables.read(&txn, state, height))
-            .transpose()
-    }
-
-    /// Incrementally reads an inclusive range under one LMDB read transaction.
-    ///
-    /// Returning `false` from `emit` stops cleanly, allowing a cancelled client to release the
-    /// transaction without decoding the rest of the range.
-    pub fn read_range(
-        &self,
-        generation: u64,
-        start: u32,
-        end: u32,
-        emit: impl FnMut(CompactBlockRecord) -> bool,
-    ) -> Result<(), IndexError> {
-        let txn = self.env.read_txn()?;
-        let state = self.read_generation(&txn, generation)?;
-        self.read_range_in(&txn, state, start, end, emit)
-    }
-
-    pub fn read_range_latest(
-        &self,
-        start: u32,
-        end: u32,
-        emit: impl FnMut(CompactBlockRecord) -> bool,
-    ) -> Result<(), IndexError> {
-        self.read_range_latest_as(start, end, emit)
-    }
-
-    /// Reads an inclusive range against the current generation, with no generation check:
-    /// a caller streaming across commits verifies chain continuity between calls itself.
-    pub fn read_range_latest_as<T: StoredBlock>(
-        &self,
-        start: u32,
-        end: u32,
-        emit: impl FnMut(T) -> bool,
-    ) -> Result<(), IndexError> {
-        let txn = self.env.read_txn()?;
-        let state = self.tables.metadata.get_state(&txn)?;
-        self.read_range_in(&txn, state, start, end, emit)
-    }
-
-    fn read_range_in<T: StoredBlock>(
-        &self,
-        txn: &RoTxn<'_>,
-        state: IndexState,
-        start: u32,
-        end: u32,
-        mut emit: impl FnMut(T) -> bool,
-    ) -> Result<(), IndexError> {
-        let tip = state.durable_tip.ok_or(IndexError::Coverage { height: start })?;
-        if start > tip.height {
-            return Err(IndexError::Coverage { height: start });
-        }
-        if end > tip.height {
-            return Err(IndexError::Coverage { height: end });
-        }
-
-        let ascending = start <= end;
-        let mut height = start;
-        loop {
-            if state.sealed_through.is_some_and(|sealed| height <= sealed) {
-                let range = self
-                    .tables
-                    .sealed_ranges
-                    .find(txn, height)?
-                    .ok_or(IndexError::Coverage { height })?;
-                let chunk_end =
-                    if ascending { end.min(range.end()) } else { end.max(range.start()) };
-                loop {
-                    if !emit(range.read(height)?) {
-                        return Ok(());
-                    }
-                    if height == chunk_end {
-                        break;
-                    }
-                    height = if ascending { height + 1 } else { height - 1 };
-                }
-            } else if !emit(self.tables.read(txn, state, height)?) {
-                return Ok(());
-            }
-
-            if height == end {
-                return Ok(());
-            }
-            height = if ascending { height + 1 } else { height - 1 };
-        }
-    }
-
-    fn read_generation(&self, txn: &RoTxn<'_>, generation: u64) -> Result<IndexState, IndexError> {
-        let state = self.tables.metadata.get_state(txn)?;
-        if state.generation != generation {
-            return Err(IndexError::Generation { expected: generation, actual: state.generation });
-        }
-        Ok(state)
-    }
-
-    /// Checks sealed-range summaries and every mutable suffix row without rescanning sealed blocks.
-    pub fn verify_continuity(&self) -> Result<(), IndexError> {
-        let txn = self.env.read_txn()?;
-        let Tables { metadata, sealed_ranges, mutable_blocks, hash_to_height, range_meta } =
-            self.tables;
-        let state = metadata.get_state(&txn)?;
-        let Some(tip) = state.durable_tip else {
-            if self.tables.has_blocks(&txn)? || !range_meta.starts(&txn)?.is_empty() {
-                return Err(IndexError::Metadata);
-            }
-            return Ok(());
-        };
-        for start in range_meta.starts(&txn)? {
-            if start != range_start(start) || sealed_ranges.get(&txn, start)?.is_none() {
-                return Err(IndexError::RangeMeta { start });
-            }
-        }
-
-        let sealed_blocks = state.sealed_through.map_or(0, |height| u64::from(height) + 1);
-        if sealed_ranges.len(&txn)? != sealed_blocks / u64::from(RANGE_SIZE)
-            || mutable_blocks.len(&txn)? != u64::from(tip.height) + 1 - sealed_blocks
-            || hash_to_height.len(&txn)? != u64::from(tip.height) + 1
-        {
-            return Err(IndexError::Continuity { height: 0 });
-        }
-
-        let mut next_height = 0u64;
-        let mut previous_hash = None;
-        for entry in sealed_ranges.iter(&txn)? {
-            let (start, bytes) = entry?;
-            if u64::from(start) != next_height {
-                return Err(IndexError::Continuity { height: next_height as u32 });
-            }
-            let first = decode_range_record(bytes, 0)?;
-            let last = decode_range_record(bytes, RANGE_SIZE as usize - 1)?;
-            if previous_hash.is_some_and(|hash| first.previous_hash != hash) {
-                return Err(IndexError::Continuity { height: start });
-            }
-            hash_to_height.check(&txn, &first)?;
-            hash_to_height.check(&txn, &last)?;
-            previous_hash = Some(last.hash);
-            next_height += u64::from(RANGE_SIZE);
-        }
-        if next_height != sealed_blocks {
-            return Err(IndexError::Continuity { height: next_height as u32 });
-        }
-
-        for entry in mutable_blocks.iter(&txn)? {
-            let (height, bytes) = entry?;
-            if u64::from(height) != next_height {
-                return Err(IndexError::Continuity { height: next_height as u32 });
-            }
-            let record = CompactBlockRecord::decode(bytes)?;
-            if record.height != height
-                || previous_hash.is_some_and(|hash| record.previous_hash != hash)
-            {
-                return Err(IndexError::Continuity { height });
-            }
-            hash_to_height.check(&txn, &record)?;
-            previous_hash = Some(record.hash);
-            next_height += 1;
-        }
-        let missing_tip = IndexError::Continuity { height: tip.height };
-        let tip_record: CompactBlockRecord = if state
-            .sealed_through
-            .is_some_and(|sealed| tip.height <= sealed)
-        {
-            sealed_ranges.find(&txn, tip.height)?.ok_or(missing_tip)?.read(tip.height)?
-        } else {
-            CompactBlockRecord::decode(mutable_blocks.get(&txn, tip.height)?.ok_or(missing_tip)?)?
-        };
-        if next_height != u64::from(tip.height) + 1
-            || previous_hash != Some(tip.hash)
-            || state.tree_sizes != tip_record.end_tree_sizes
-        {
-            return Err(IndexError::Continuity { height: tip.height });
-        }
-        Ok(())
     }
 
     /// Atomically writes a batch and packs newly sealed ranges.

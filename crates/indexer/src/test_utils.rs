@@ -5,7 +5,7 @@
 
 use crate::{
     codec::{BLOCK_FORMAT_VERSION, CompactBlockRecord, TreeSizes},
-    index::{Index, IndexState},
+    index::{Index, IndexState, range_meta::RangeMeta},
     ingest::OrderedBuilder,
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
@@ -123,6 +123,25 @@ pub fn encode_with_unshielded_transaction(record: &CompactBlockRecord) -> Vec<u8
 /// For a test that needs another chain identity or map size, call [`Index::open`].
 pub fn open_index(path: impl AsRef<Path>) -> Index {
     Index::open(path, 64 * 1024 * 1024, "Mainnet", block::Hash([1; 32])).unwrap()
+}
+
+/// Reads the `range_meta` row of the sealed range that starts at `start`, at the current
+/// generation.
+///
+/// # Panics
+///
+/// Panics if the read fails or the range has no row.
+pub fn range_meta_row(index: &Index, start: u32) -> RangeMeta {
+    index.latest().unwrap().range_meta(start).unwrap().unwrap()
+}
+
+/// Reads the packed blob of the sealed range that starts at `start`, at the current generation.
+///
+/// # Panics
+///
+/// Panics if the read fails or no sealed range starts at `start`.
+pub fn sealed_range_blob(index: &Index, start: u32) -> Vec<u8> {
+    index.latest().unwrap().sealed_range(start).unwrap().unwrap()
 }
 
 /// Writes `records` into `index` in batches and returns the resulting state.

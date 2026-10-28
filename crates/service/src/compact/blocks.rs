@@ -143,7 +143,7 @@ impl CompactService {
         // Bound active streams so large ranges do not all compete for throughput.
         // The permit lasts until the response stream is dropped, including transport
         // backpressure. Each stream buffers one chunk; its LMDB transaction ends
-        // inside read_range_latest_as before yielding to the transport.
+        // with its index snapshot, before yielding to the transport.
         let mut records = Vec::<T>::new().into_iter();
         // (hash, previous_hash) of the last record sent; every chunk must chain onto it.
         let mut last: Option<(block::Hash, block::Hash)> = None;
@@ -170,9 +170,11 @@ impl CompactService {
                 }
                 let mut chunk = Vec::with_capacity(64);
                 let result = if durable {
-                    index.read_range_latest_as(height, chunk_end, |record| {
-                        chunk.push(record);
-                        true
+                    index.latest().and_then(|index_snapshot| {
+                        index_snapshot.read_blocks(height, chunk_end, |record| {
+                            chunk.push(record);
+                            true
+                        })
                     })
                 } else {
                     (0..=height.abs_diff(chunk_end)).try_for_each(|offset| {

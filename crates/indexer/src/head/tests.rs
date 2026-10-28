@@ -156,7 +156,7 @@ fn a_tip_change_reads_the_new_blocks_only() {
             head.iter().map(|block| block.height).collect::<Vec<_>>(),
             (143..=152).collect::<Vec<_>>()
         );
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 
@@ -185,11 +185,19 @@ fn a_reorg_in_the_window_reads_the_changed_blocks_and_replaces_the_suffix() {
         assert_eq!(head[2].hash, branch_hash(145));
         for height in 140..=142 {
             assert_eq!(
-                index.read_block(state.generation(), height).unwrap(),
-                fresh.read_block(fresh_state.generation(), height).unwrap()
+                index
+                    .snapshot(state.generation())
+                    .unwrap()
+                    .block::<CompactBlockRecord>(height)
+                    .unwrap(),
+                fresh
+                    .snapshot(fresh_state.generation())
+                    .unwrap()
+                    .block::<CompactBlockRecord>(height)
+                    .unwrap()
             );
         }
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 
@@ -253,8 +261,15 @@ fn rolls_the_durable_tip_back_to_a_shorter_chain() {
 
         assert_eq!(state.durable_tip().unwrap().height, 5);
         assert!(head.is_empty());
-        assert!(index.read_block_by_hash(state.generation(), hash(6)).unwrap().is_none());
-        index.verify_continuity().unwrap();
+        assert!(
+            index
+                .snapshot(state.generation())
+                .unwrap()
+                .block_by_hash::<CompactBlockRecord>(hash(6))
+                .unwrap()
+                .is_none()
+        );
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 
@@ -273,10 +288,18 @@ fn atomically_replaces_a_durable_reorg() {
             sync_head_once(&index, &mut source, &head, PipelineConfig::default()).await.unwrap();
 
         assert_eq!(state.durable_tip().unwrap().height, 111);
-        assert_eq!(index.read_block(state.generation(), 21).unwrap().hash, branch_hash(21));
+        assert_eq!(
+            index
+                .snapshot(state.generation())
+                .unwrap()
+                .block::<CompactBlockRecord>(21)
+                .unwrap()
+                .hash,
+            branch_hash(21)
+        );
         assert_eq!(head.first().unwrap().height, 112);
         assert_eq!(head.last().unwrap().height, 121);
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 
@@ -300,10 +323,18 @@ fn deep_reorg_is_reported_then_recovered() {
                 .unwrap();
 
         assert_eq!(state.durable_tip().unwrap().height, 111);
-        assert_eq!(index.read_block(state.generation(), 20).unwrap().hash, branch_hash(20));
+        assert_eq!(
+            index
+                .snapshot(state.generation())
+                .unwrap()
+                .block::<CompactBlockRecord>(20)
+                .unwrap()
+                .hash,
+            branch_hash(20)
+        );
         assert_eq!(head.first().unwrap().height, 112);
         assert_eq!(head.last().unwrap().height, 121);
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 
@@ -324,11 +355,19 @@ fn restart_recovers_a_persisted_noncanonical_suffix() {
         let (state, head) =
             recover_deep_reorg(&index, &mut source, &[], PipelineConfig::default()).await.unwrap();
         assert_eq!(state.durable_tip().unwrap().height, 99);
-        assert_eq!(index.read_block(state.generation(), 99).unwrap().hash, hash(99));
+        assert_eq!(
+            index
+                .snapshot(state.generation())
+                .unwrap()
+                .block::<CompactBlockRecord>(99)
+                .unwrap()
+                .hash,
+            hash(99)
+        );
         assert_eq!(head.first().unwrap().height, 100);
         assert_eq!(head.first().unwrap().hash, branch_hash(100));
         assert_eq!(head.last().unwrap().height, 105);
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     });
 }
 

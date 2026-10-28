@@ -42,7 +42,7 @@ use ztreamer_indexer::{
         range_meta::{BlobDigest, ManifestEntry},
     },
     parser::parse_block,
-    test_utils::{populate, raw_block},
+    test_utils::{populate, range_meta_row, raw_block, sealed_range_blob},
     types::RawIndexBlock,
 };
 use ztreamer_node::{InProcessBackend, NodeClient};
@@ -146,7 +146,7 @@ impl SourceIndex {
     pub fn entries(&self) -> Vec<ManifestEntry> {
         let ranges = self.state.sealed_through().unwrap() / RANGE_SIZE + 1;
         let mut entries: Vec<_> = (0..ranges)
-            .map(|range| self.index.range_meta(range * RANGE_SIZE).unwrap().unwrap().entry)
+            .map(|range| range_meta_row(&self.index, range * RANGE_SIZE).entry)
             .collect();
         entries.last_mut().unwrap().epoch_end = true;
         entries
@@ -526,7 +526,7 @@ impl Replicator for Peer {
         };
         let open = OpenStream::new(&self.open_streams, place);
         self.requests.lock().unwrap().push((start_height, offset));
-        let blob = Bytes::from(self.index.read_sealed_range_bytes(start_height).unwrap().unwrap());
+        let blob = Bytes::from(sealed_range_blob(&self.index, start_height));
         let at = usize::try_from(offset).unwrap();
         let cut = self.cut.lock().unwrap().take_if(|cut| *cut == start_height).is_some();
         let cut_at = cut.then(|| at + (blob.len() - at) / 2);

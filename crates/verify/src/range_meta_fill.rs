@@ -267,10 +267,11 @@ impl Slot {
         let Some(sealed_through) = sealed_through else {
             return Ok(Vec::new());
         };
+        let index_snapshot = index.latest()?;
         (0..=sealed_through)
             .step_by(RANGE_SIZE as usize)
             .map(|start| {
-                let row = index
+                let row = index_snapshot
                     .range_meta(start)?
                     .map(|meta| (meta.entry.epoch_end, meta.entry.end_tree_sizes));
                 Ok(Self { start, row })
@@ -292,7 +293,7 @@ struct RangeRead {
 
 impl RangeRead {
     fn read(index: &Index, start: u32) -> Result<Self, FillError> {
-        let blob = index.read_sealed_range_bytes(start)?.ok_or(FillError::Replaced { start })?;
+        let blob = index.latest()?.sealed_range(start)?.ok_or(FillError::Replaced { start })?;
         let last = decode_range_record(&blob, RANGE_SIZE as usize - 1)?;
         let start_tree_sizes = start
             .checked_sub(1)
@@ -311,7 +312,7 @@ impl RangeRead {
     /// The record at `height` in the current generation.
     fn record(index: &Index, height: u32) -> Result<CompactBlockRecord, FillError> {
         let mut found = None;
-        index.read_range_latest(height, height, |record| {
+        index.latest()?.read_blocks::<CompactBlockRecord>(height, height, |record| {
             found = Some(record);
             false
         })?;
@@ -383,6 +384,7 @@ impl Epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ztreamer_indexer::test_utils::{range_meta_row, sealed_range_blob};
     use ztreamer_service::test_utils::{EmptyChain, fixtures};
 
     fn open(dir: &tempfile::TempDir) -> Arc<Index> {
@@ -411,8 +413,8 @@ mod tests {
         filler(&index).await.run(snapshots, std::future::pending()).await;
 
         for start in [0, 1_000, 2_000] {
-            let meta = index.range_meta(start).unwrap().unwrap();
-            let blob = index.read_sealed_range_bytes(start).unwrap().unwrap();
+            let meta = range_meta_row(&index, start);
+            let blob = sealed_range_blob(&index, start);
             let last = &records[start as usize + 999];
             let entry = &meta.entry;
             assert_eq!((entry.start_height, entry.end_height), (start, start + 999));
@@ -424,7 +426,7 @@ mod tests {
             assert_eq!(meta.verified_by.unwrap().url, "embedded");
             assert_eq!(meta.attested.unwrap().end_hash, last.hash);
         }
-        assert_eq!(index.range_meta(3_000).unwrap(), None);
+        assert_eq!(index.latest().unwrap().range_meta(3_000).unwrap(), None);
     }
 
     #[tokio::test]
@@ -455,16 +457,16 @@ mod tests {
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(1_999));
 
         // Mark the row of range 1,000. A filler that writes it again removes the mark.
-        let mut marked = index.range_meta(1_000).unwrap().unwrap();
+        let mut marked = range_meta_row(&index, 1_000);
         marked.verified_by = Some(NodeId { url: "marked".into(), version: String::new() });
         index.put_range_meta(1_000, &marked).unwrap();
-        let first = index.range_meta(0).unwrap().unwrap();
+        let first = range_meta_row(&index, 0);
 
         fixtures::populate(&index, &records[2_010..], Some(2_999));
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(2_999));
-        assert_eq!(index.range_meta(0).unwrap().unwrap(), first);
-        assert_eq!(index.range_meta(1_000).unwrap().unwrap(), marked);
-        assert_eq!(index.range_meta(2_000).unwrap().unwrap().entry.end_hash, records[2_999].hash);
+        assert_eq!(range_meta_row(&index, 0), first);
+        assert_eq!(range_meta_row(&index, 1_000), marked);
+        assert_eq!(range_meta_row(&index, 2_000).entry.end_hash, records[2_999].hash);
     }
 
     #[tokio::test]
@@ -478,7 +480,7 @@ mod tests {
         filler(&index).await.pass(None).await.unwrap();
 
         let epoch_ends: Vec<_> = (0..11)
-            .filter(|range| index.range_meta(range * RANGE_SIZE).unwrap().unwrap().entry.epoch_end)
+            .filter(|range| range_meta_row(&index, range * RANGE_SIZE).entry.epoch_end)
             .collect();
         assert_eq!(epoch_ends, [9]);
     }

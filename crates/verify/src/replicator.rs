@@ -98,7 +98,11 @@ impl Replicator for ReplicatorService {
         _request: Request<Empty>,
     ) -> Result<Response<ExportInfo>, Status> {
         let generation = self.generation()?;
-        let state = self.read(move |index| index.state_at(generation)).await?;
+        let state = self
+            .read(move |index| {
+                index.snapshot(generation).map(|index_snapshot| index_snapshot.state())
+            })
+            .await?;
         Ok(Response::new(ExportInfo {
             network: self.network.to_string(),
             genesis_hash: self.network.genesis_hash().0.to_vec(),
@@ -113,7 +117,8 @@ impl Replicator for ReplicatorService {
     ) -> Result<Response<Self::ListRangesStream>, Status> {
         let generation = self.generation()?;
         let start = request.into_inner().from_start_height;
-        let metas = self.read(move |index| index.range_metas_from(generation, start)).await?;
+        let metas =
+            self.read(move |index| index.snapshot(generation)?.range_metas_from(start)).await?;
         let entries = metas
             .into_iter()
             .filter(|meta| meta.state != VerifyState::Rejected)
@@ -133,10 +138,16 @@ impl Replicator for ReplicatorService {
             Status::resource_exhausted(format!("{MAX_RANGE_STREAMS} range streams are running"))
         })?;
         let blob = self
-            .read(move |index| index.read_sealed_range_with_meta_at(generation, start))
+            .read(move |index| {
+                let index_snapshot = index.snapshot(generation)?;
+                let Some(meta) = index_snapshot.range_meta(start)? else {
+                    return Ok(None);
+                };
+                Ok(index_snapshot.sealed_range(start)?.map(|blob| (meta, blob)))
+            })
             .await?
-            .filter(|range| range.meta.state != VerifyState::Rejected)
-            .map(|range| Bytes::from(range.blob))
+            .filter(|(meta, _)| meta.state != VerifyState::Rejected)
+            .map(|(_, blob)| Bytes::from(blob))
             .ok_or_else(|| {
                 Status::not_found(format!("no listed sealed range starts at {start}"))
             })?;

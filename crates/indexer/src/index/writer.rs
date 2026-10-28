@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(index.tables.mutable_blocks.len(&txn).unwrap(), 11);
         assert_eq!(index.tables.hash_to_height.len(&txn).unwrap(), 11);
         drop(txn);
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     }
 
     #[test]
@@ -326,6 +326,6 @@ mod tests {
         assert_eq!(committed.generation(), state.generation() + 1);
         assert_eq!(committed.durable_tip(), Some(BlockId::new(11, next.hash)));
         assert_eq!(index.state().unwrap(), committed);
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     }
 }

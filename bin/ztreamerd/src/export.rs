@@ -121,12 +121,13 @@ struct Rows {
 
 impl Rows {
     fn read(index: &Index) -> Result<Self> {
-        let Some(sealed_through) = index.state()?.sealed_through() else {
+        let index_snapshot = index.latest()?;
+        let Some(sealed_through) = index_snapshot.state().sealed_through() else {
             bail!("the index has no sealed range");
         };
         let sealed = sealed_through / RANGE_SIZE + 1;
         let entries = (0..sealed)
-            .map_while(|range| index.range_meta(range * RANGE_SIZE).transpose())
+            .map_while(|range| index_snapshot.range_meta(range * RANGE_SIZE).transpose())
             .map(|meta| meta.map(|meta| meta.entry))
             .collect::<Result<Vec<_>, _>>()?;
         let found = u32::try_from(entries.len()).expect("at most `sealed` entries");

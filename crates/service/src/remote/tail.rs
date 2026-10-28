@@ -259,6 +259,7 @@ mod tests {
     };
 
     use ztreamer_indexer::{
+        codec::CompactBlockRecord,
         index::BlockId,
         pipeline::{HistoricalPipeline, PipelineConfig},
         test_utils::{grow_chain, open_index},
@@ -357,10 +358,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.durable_tip(), Some(BlockId::new(1_999, blocks[1_999].hash())));
-        let record = index.read_block(state.generation(), 1_234).unwrap();
+        let record =
+            index.snapshot(state.generation()).unwrap().block::<CompactBlockRecord>(1_234).unwrap();
         assert_eq!(record.hash, blocks[1_234].hash());
         assert_eq!(record.previous_hash, blocks[1_233].hash());
-        index.verify_continuity().unwrap();
+        index.latest().unwrap().verify_continuity().unwrap();
     }
 
     #[test]

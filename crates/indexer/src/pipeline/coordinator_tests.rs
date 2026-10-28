@@ -178,14 +178,20 @@ fn verify(index: &Index, count: u32) -> Vec<CompactBlockRecord> {
                 transactions: parsed.transactions,
                 end_tree_sizes: sizes,
             };
-            let actual = index.read_block(state.generation(), height).unwrap();
+            let actual = index
+                .snapshot(state.generation())
+                .unwrap()
+                .block::<CompactBlockRecord>(height)
+                .unwrap();
             assert_eq!(actual, expected);
             actual
         })
         .collect();
     assert_eq!(state.tree_sizes(), sizes);
-    assert!(index.read_block(state.generation(), count).is_err());
-    index.verify_continuity().unwrap();
+    assert!(
+        index.snapshot(state.generation()).unwrap().block::<CompactBlockRecord>(count).is_err()
+    );
+    index.latest().unwrap().verify_continuity().unwrap();
     records
 }
 
@@ -237,7 +243,7 @@ fn sync_until_stable_repeats_until_the_tip_holds_still_or_stops() {
         .unwrap();
     let tip = state.durable_tip().map(|tip| tip.height).unwrap();
     assert!((300..1_106).contains(&tip), "stopped pass ends below the tip, got {tip}");
-    index.verify_continuity().unwrap();
+    index.latest().unwrap().verify_continuity().unwrap();
 }
 
 /// A channel limit of a few blocks (4 KiB). Workers must wait for the block at `next_height`.

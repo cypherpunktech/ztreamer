@@ -417,7 +417,7 @@ fn current_record(
     height: u32,
 ) -> Result<Option<CompactBlockRecord>, IndexError> {
     if state.durable_tip().is_some_and(|durable| height <= durable.height) {
-        return index.read_block(state.generation(), height).map(Some);
+        return index.snapshot(state.generation())?.block(height).map(Some);
     }
     Ok(current_head
         .binary_search_by_key(&height, |block| block.height)

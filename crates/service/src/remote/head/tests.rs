@@ -125,7 +125,7 @@ async fn sync_head_reaches_a_moving_tip_and_replaces_a_reorged_head() {
             .all(|record| record.hash == fork[record.height as usize].hash())
     );
     assert_ne!(fork[22].hash(), blocks[22].hash());
-    ctx.index.verify_continuity().unwrap();
+    ctx.index.latest().unwrap().verify_continuity().unwrap();
 }
 
 #[tokio::test]

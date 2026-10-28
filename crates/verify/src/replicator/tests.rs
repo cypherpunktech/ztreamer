@@ -5,9 +5,12 @@ use tonic::{
     Code,
     transport::{Channel, Server},
 };
-use ztreamer_indexer::index::{
-    RANGE_SIZE,
-    range_meta::{Frontiers, ManifestEntry as Entry, RangeMeta},
+use ztreamer_indexer::{
+    index::{
+        RANGE_SIZE,
+        range_meta::{Frontiers, ManifestEntry as Entry, RangeMeta},
+    },
+    test_utils::{range_meta_row, sealed_range_blob},
 };
 use ztreamer_protocol::{
     proto::{BlockId, compact_tx_streamer_client::CompactTxStreamerClient},
@@ -43,7 +46,7 @@ impl Fixture {
             (2_000, VerifyState::Unverified),
             (4_000, VerifyState::Rejected),
         ] {
-            let blob = index.read_sealed_range_bytes(start).unwrap().unwrap();
+            let blob = sealed_range_blob(&index, start);
             let range = &records[start as usize..][..RANGE_SIZE as usize];
             let entry = Entry {
                 frontiers: Frontiers { sapling: vec![0xab; 40], ..Frontiers::default() },
@@ -143,8 +146,7 @@ async fn list_ranges_starts_at_the_given_height_and_skips_unlisted_ranges() {
     while let Some(entry) = stream.message().await.unwrap() {
         listed.push(Entry::try_from(entry).unwrap());
     }
-    let expected =
-        [1_000, 2_000].map(|start| fixture.index.range_meta(start).unwrap().unwrap().entry);
+    let expected = [1_000, 2_000].map(|start| range_meta_row(&fixture.index, start).entry);
     assert_eq!(listed, expected);
 }
 
@@ -152,7 +154,7 @@ async fn list_ranges_starts_at_the_given_height_and_skips_unlisted_ranges() {
 async fn get_range_sends_the_blob_and_resumes_from_an_offset() {
     let fixture = Fixture::new();
     let mut client = fixture.client().await;
-    let blob = fixture.index.read_sealed_range_bytes(1_000).unwrap().unwrap();
+    let blob = sealed_range_blob(&fixture.index, 1_000);
     assert_eq!(range_bytes(&mut client, 1_000, 0).await, blob);
     let offset = blob.len() as u64 / 3;
     assert_eq!(range_bytes(&mut client, 1_000, offset).await, blob[offset as usize..]);
