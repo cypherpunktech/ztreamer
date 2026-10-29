@@ -154,10 +154,10 @@ impl Drop for ReadAheadSender {
     }
 }
 
-/// The sender a [`HistoricalSource`](super::HistoricalSource) gets for one segment. It checks
-/// that the worker sends the heights of the segment in ascending order. A missing height must
-/// not cause a wait: if the block at `first_missing_height` never comes, all workers wait for all
-/// time.
+/// The sender a [`FinalizedBlockSource`](super::FinalizedBlockSource) gets for one segment. It
+/// checks that the worker sends the heights of the segment in ascending order. A missing height
+/// must not cause a wait: if the block at `first_missing_height` never comes, all workers wait for
+/// all time.
 pub struct SegmentSender<'a> {
     sender: &'a mut ReadAheadSender,
     /// The height that the worker must send next.

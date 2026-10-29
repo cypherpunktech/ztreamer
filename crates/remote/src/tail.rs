@@ -1,4 +1,4 @@
-//! A [`HistoricalSource`] over the JSON-RPC interface of a remote zakura node.
+//! A [`FinalizedBlockSource`] over the JSON-RPC interface of a remote zakura node.
 
 use std::{collections::VecDeque, num::NonZeroUsize, ops::RangeInclusive, panic, time::Instant};
 
@@ -12,7 +12,7 @@ use zakura_state::HashOrHeight;
 
 use ztreamer_chain::{parser::parse_block, types::RawIndexBlock};
 use ztreamer_index::index::SEAL_DEPTH;
-use ztreamer_sync::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
+use ztreamer_sync::pipeline::{FinalizedBlockSource, PipelineError, SegmentSender, WorkerStats};
 
 /// The number of `getblock` requests that one worker keeps in flight.
 const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
@@ -28,7 +28,7 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 ///
 /// # Runtime
 ///
-/// The pipeline calls the [`HistoricalSource`] methods on blocking worker threads. This source
+/// The pipeline calls the [`FinalizedBlockSource`] methods on blocking worker threads. This source
 /// holds a [`Handle`] and uses [`Handle::block_on`] for each request. Thus:
 ///
 /// - The handle must be of a multi-thread runtime. On a current-thread runtime, only
@@ -36,7 +36,7 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 /// - Run the pipeline on a blocking thread, for example in `tokio::task::spawn_blocking` or on a
 ///   `std::thread`, never in an async task. [`Handle::block_on`] panics in an async context.
 ///
-/// [`HistoricalSource::process_segment`] spawns the `getblock` requests on the runtime. Each
+/// [`FinalizedBlockSource::process_segment`] spawns the `getblock` requests on the runtime. Each
 /// worker keeps a fixed number of requests in flight ahead of the block that it waits for. The
 /// requests continue while the worker parses and sends a block, and while it waits for
 /// read-ahead budget. The node thus gets up to
@@ -84,7 +84,7 @@ impl RemoteTailSource {
     }
 }
 
-impl HistoricalSource for RemoteTailSource {
+impl FinalizedBlockSource for RemoteTailSource {
     /// The best height minus [`SEAL_DEPTH`], or genesis on a shorter chain.
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
         Ok(Some(

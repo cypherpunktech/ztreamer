@@ -1,4 +1,4 @@
-//! The embedded [`HistoricalSource`]: Zakura's finalized database. It reads the transactions of
+//! The embedded [`FinalizedBlockSource`]: Zakura's finalized database. It reads the transactions of
 //! a segment with one range iterator, and each header and transaction hash by its key.
 
 use std::time::Instant;
@@ -9,15 +9,16 @@ use zakura_chain::{
 };
 use zakura_state::{TransactionLocation, ZakuraDb};
 use ztreamer_chain::parser::parse_stored_block;
-use ztreamer_sync::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
+use ztreamer_sync::pipeline::{FinalizedBlockSource, PipelineError, SegmentSender, WorkerStats};
 
-/// Zakura's finalized database as a [`HistoricalSource`]. [`NodeClient::finalized_db`] gives it.
+/// Zakura's finalized database as a [`FinalizedBlockSource`]. [`NodeClient::finalized_db`] gives
+/// it.
 ///
 /// [`NodeClient::finalized_db`]: crate::NodeClient::finalized_db
 #[derive(Clone, Debug)]
 pub struct FinalizedDb(pub(crate) ZakuraDb);
 
-impl HistoricalSource for FinalizedDb {
+impl FinalizedBlockSource for FinalizedDb {
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
         Ok(ZakuraDb::tip(&self.0))
     }

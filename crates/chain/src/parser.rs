@@ -160,7 +160,7 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
 }
 
 /// Parses a block from its stored parts: the header fields the index keeps and each transaction's
-/// raw bytes with its id. This is what a `HistoricalSource` of the indexer
+/// raw bytes with its id. This is what a `FinalizedBlockSource` of the indexer
 /// calls for every block it sends; it never deserializes the transactions beyond what the compact
 /// format needs.
 pub fn parse_stored_block<'a>(
