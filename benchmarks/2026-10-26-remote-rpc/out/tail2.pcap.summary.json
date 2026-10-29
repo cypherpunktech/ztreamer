@@ -1,0 +1,1 @@
+{"totals": {"requests": 10979, "methods": {"getblockchaininfo": 60, "getblockhash": 108, "getblock": 6407, "z_gettreestate": 4, "unknown": 4400}, "request_bytes": 1901498, "response_bytes": 4002487278, "first_t": 1793033224.742146, "last_t": 1793033278.84745}}

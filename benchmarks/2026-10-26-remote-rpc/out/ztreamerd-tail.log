@@ -1,0 +1,16 @@
+[2m2026-10-26T16:39:42.937311Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Trying to open metrics endpoint at 127.0.0.1:19999...
+[2m2026-10-26T16:39:42.940595Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Opened metrics endpoint at 127.0.0.1:19999
+[2m2026-10-26T16:39:43.026902Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m using remote zakura [3mnetwork[0m[2m=[0mMainnet [3mhost[0m[2m=[0m"127.0.0.1" [3mport[0m[2m=[0m18232
+[2m2026-10-26T16:39:43.038496Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura is ready [3mbest[0m[2m=[0m3531461
+[2m2026-10-26T16:39:43.038779Z[0m [32m INFO[0m [2mztreamerd[0m[2m:[0m syncing historical compact index
+[2m2026-10-26T16:39:43.734582Z[0m [32m INFO[0m [2mztreamer_indexer::pipeline[0m[2m:[0m historical pipeline stage totals [3mstart_height[0m[2m=[0m3529462 [3mtarget_height[0m[2m=[0m3531361 [3mtarget_hash[0m[2m=[0m00000000002692fec6c6ab3e8f41b770fc9821f2a8ce41295bf687fc4dbbb01f [3mfetch_read_seconds[0m[2m=[0m1.795252477 [3mfetch_header_read_seconds[0m[2m=[0m0.0 [3mfetch_transaction_read_seconds[0m[2m=[0m0.0 [3mfetch_txid_read_seconds[0m[2m=[0m0.0 [3mparse_seconds[0m[2m=[0m0.633746955 [3mworker_send_wait_seconds[0m[2m=[0m0.06330344 [3mprocessed_ranges[0m[2m=[0m8 [3mprocessed_blocks[0m[2m=[0m1900 [3mprocessed_bytes[0m[2m=[0m183917018 [3mcoordinator_receive_wait_seconds[0m[2m=[0m0.628453917 [3mbatch_send_wait_seconds[0m[2m=[0m3.517e-6 [3mwrite_seconds[0m[2m=[0m0.055463417 [3mwrite_batches[0m[2m=[0m1 [3mwritten_blocks[0m[2m=[0m1900
+[2m2026-10-26T16:39:43.735411Z[0m [32m INFO[0m [2mztreamerd[0m[2m:[0m historical compact index complete [3mheight[0m[2m=[0m3531361 [3melapsed_seconds[0m[2m=[0m0.696618875
+[2m2026-10-26T16:39:44.131750Z[0m [32m INFO[0m [2mztreamerd::lifecycle[0m[2m:[0m shutting down node and application
+Error: reconcile compact index with Zakura's canonical head
+
+Caused by:
+   0: remote Zakura head request failed: getblockhash: node returned error -1: Provided index is greater than the current tip
+   1: getblockhash: node returned error -1: Provided index is greater than the current tip
+
+Location:
+    bin/ztreamerd/src/main.rs:400:10

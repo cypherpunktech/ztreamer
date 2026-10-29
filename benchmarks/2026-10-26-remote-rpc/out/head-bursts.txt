@@ -1,0 +1,27 @@
+3531473 poll_start_after_commit_s=0.547 burst_s=0.251
+3531474 poll_start_after_commit_s=0.544 burst_s=0.203
+3531475 poll_start_after_commit_s=0.433 burst_s=0.209
+3531476 poll_start_after_commit_s=0.278 burst_s=0.207
+3531477 poll_start_after_commit_s=0.517 burst_s=0.194
+3531478 poll_start_after_commit_s=0.431 burst_s=0.210
+3531479 poll_start_after_commit_s=0.211 burst_s=0.194
+3531480 poll_start_after_commit_s=0.070 burst_s=0.178
+3531481 poll_start_after_commit_s=0.851 burst_s=0.176
+3531482 poll_start_after_commit_s=0.191 burst_s=0.174
+3531483 poll_start_after_commit_s=0.855 burst_s=0.139
+3531484 poll_start_after_commit_s=0.161 burst_s=0.109
+3531485 poll_start_after_commit_s=0.991 burst_s=0.113
+3531486 poll_start_after_commit_s=0.331 burst_s=0.094
+3531487 poll_start_after_commit_s=0.596 burst_s=0.097
+3531488 poll_start_after_commit_s=0.166 burst_s=0.094
+3531489 poll_start_after_commit_s=0.627 burst_s=0.092
+3531490 poll_start_after_commit_s=0.130 burst_s=0.093
+3531491 poll_start_after_commit_s=0.150 burst_s=0.094
+3531492 poll_start_after_commit_s=0.034 burst_s=0.093
+3531493 poll_start_after_commit_s=0.893 burst_s=0.093
+3531494 poll_start_after_commit_s=0.343 burst_s=0.093
+3531495 poll_start_after_commit_s=0.334 burst_s=0.091
+3531496 poll_start_after_commit_s=0.643 burst_s=0.094
+3531497 poll_start_after_commit_s=0.910 burst_s=0.094
+3531498 poll_start_after_commit_s=0.644 burst_s=0.089
+burst_s median=0.103 min=0.089 max=0.251

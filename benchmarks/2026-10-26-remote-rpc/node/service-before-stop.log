@@ -1,0 +1,8 @@
+Oct 26 16:30:43 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:30:43.002211Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531461))
+Oct 26 16:30:53 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:30:53.003273Z  INFO sync:try_to_sync{header_runtime_status=None}: zakurad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(3531461))
+Oct 26 16:30:59 torvus-ovh ztreamerd[3704726]: 2026-10-26T16:30:59.005152Z  INFO sync: zakurad::components::sync: waiting to restart sync timeout=10s state_tip=Some(Height(3531461))
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Thu 2026-10-22 19:44:15 UTC
+MainPID=3704726
+NRestarts=0

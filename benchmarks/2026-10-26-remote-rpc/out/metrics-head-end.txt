@@ -1,0 +1,385 @@
+# TYPE ztreamer_pipeline_committed_blocks counter
+ztreamer_pipeline_committed_blocks 0
+
+# TYPE ztreamer_index_write_seal_read_blocks counter
+ztreamer_index_write_seal_read_blocks 0
+
+# TYPE ztreamer_index_write_bytes counter
+ztreamer_index_write_bytes{stage="mutable_put"} 42273
+
+# TYPE ztreamer_remote_cache_hits_total counter
+ztreamer_remote_cache_hits_total{cache="mempool"} 0
+ztreamer_remote_cache_hits_total{cache="orchard_subtrees"} 0
+ztreamer_remote_cache_hits_total{cache="ironwood_subtrees"} 0
+ztreamer_remote_cache_hits_total{cache="sapling_subtrees"} 0
+ztreamer_remote_cache_hits_total{cache="tree_states"} 0
+
+# TYPE ztreamer_range_emitted_blocks counter
+ztreamer_range_emitted_blocks 0
+
+# TYPE zakura_build_info counter
+zakura_build_info{version="1.5.1"} 1
+
+# TYPE ztreamer_pipeline_source_transactions counter
+ztreamer_pipeline_source_transactions 0
+
+# TYPE ztreamer_remote_cache_misses_total counter
+ztreamer_remote_cache_misses_total{cache="sapling_subtrees"} 0
+ztreamer_remote_cache_misses_total{cache="ironwood_subtrees"} 0
+ztreamer_remote_cache_misses_total{cache="tree_states"} 0
+ztreamer_remote_cache_misses_total{cache="mempool"} 0
+ztreamer_remote_cache_misses_total{cache="orchard_subtrees"} 0
+
+# TYPE ztreamer_pipeline_source_blocks counter
+ztreamer_pipeline_source_blocks 0
+
+# TYPE ztreamer_remote_cache_evictions_total counter
+ztreamer_remote_cache_evictions_total{cache="orchard_subtrees"} 0
+ztreamer_remote_cache_evictions_total{cache="mempool"} 0
+ztreamer_remote_cache_evictions_total{cache="sapling_subtrees"} 0
+ztreamer_remote_cache_evictions_total{cache="ironwood_subtrees"} 0
+ztreamer_remote_cache_evictions_total{cache="tree_states"} 0
+
+# TYPE ztreamer_pipeline_source_bytes counter
+ztreamer_pipeline_source_bytes 0
+
+# TYPE ztreamer_head_source_height gauge
+ztreamer_head_source_height 3531498
+
+# TYPE ztreamer_remote_cache_entries gauge
+ztreamer_remote_cache_entries{cache="mempool"} 0
+ztreamer_remote_cache_entries{cache="tree_states"} 0
+ztreamer_remote_cache_entries{cache="sapling_subtrees"} 0
+ztreamer_remote_cache_entries{cache="ironwood_subtrees"} 0
+ztreamer_remote_cache_entries{cache="orchard_subtrees"} 0
+
+# TYPE ztreamer_pipeline_first_missing_height gauge
+ztreamer_pipeline_first_missing_height NaN
+
+# TYPE ztreamer_pipeline_target_height gauge
+ztreamer_pipeline_target_height NaN
+
+# TYPE ztreamer_range_active gauge
+ztreamer_range_active 0
+
+# TYPE ztreamer_head_visible_height gauge
+ztreamer_head_visible_height 3531498
+
+# TYPE ztreamer_index_sealed_block_height gauge
+ztreamer_index_sealed_block_height 3530999
+
+# TYPE ztreamer_pipeline_pending_bytes gauge
+ztreamer_pipeline_pending_bytes 0
+
+# TYPE ztreamer_head_ready gauge
+ztreamer_head_ready 1
+
+# TYPE ztreamer_head_fresh gauge
+ztreamer_head_fresh 1
+
+# TYPE ztreamer_index_generation gauge
+ztreamer_index_generation 4897
+
+# TYPE ztreamer_pipeline_workers_active gauge
+ztreamer_pipeline_workers_active 0
+
+# TYPE ztreamer_pipeline_ready_bytes gauge
+ztreamer_pipeline_ready_bytes 0
+
+# TYPE ztreamer_index_durable_block_height gauge
+ztreamer_index_durable_block_height 3531488
+
+# TYPE ztreamer_remote_cache_bytes gauge
+ztreamer_remote_cache_bytes{cache="ironwood_subtrees"} 0
+ztreamer_remote_cache_bytes{cache="orchard_subtrees"} 0
+ztreamer_remote_cache_bytes{cache="sapling_subtrees"} 0
+ztreamer_remote_cache_bytes{cache="tree_states"} 0
+ztreamer_remote_cache_bytes{cache="mempool"} 0
+
+# TYPE ztreamer_head_publication_seconds summary
+ztreamer_head_publication_seconds{quantile="0"} 0
+ztreamer_head_publication_seconds{quantile="0.5"} 0
+ztreamer_head_publication_seconds{quantile="0.9"} 0
+ztreamer_head_publication_seconds{quantile="0.95"} 0
+ztreamer_head_publication_seconds{quantile="0.99"} 0
+ztreamer_head_publication_seconds{quantile="0.999"} 0
+ztreamer_head_publication_seconds{quantile="1"} 0
+ztreamer_head_publication_seconds_sum 3.6105173120000003
+ztreamer_head_publication_seconds_count 26
+
+# TYPE ztreamer_pipeline_encode_seconds summary
+ztreamer_pipeline_encode_seconds{quantile="0"} 0
+ztreamer_pipeline_encode_seconds{quantile="0.5"} 0
+ztreamer_pipeline_encode_seconds{quantile="0.9"} 0
+ztreamer_pipeline_encode_seconds{quantile="0.95"} 0
+ztreamer_pipeline_encode_seconds{quantile="0.99"} 0
+ztreamer_pipeline_encode_seconds{quantile="0.999"} 0
+ztreamer_pipeline_encode_seconds{quantile="1"} 0
+ztreamer_pipeline_encode_seconds_sum 0
+ztreamer_pipeline_encode_seconds_count 0
+
+# TYPE ztreamer_pipeline_commit_seconds summary
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0.5"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0.9"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0.95"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0.99"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="0.999"} 0
+ztreamer_pipeline_commit_seconds{outcome="success",quantile="1"} 0
+ztreamer_pipeline_commit_seconds_sum{outcome="success"} 0
+ztreamer_pipeline_commit_seconds_count{outcome="success"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0.5"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0.9"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0.95"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0.99"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="0.999"} 0
+ztreamer_pipeline_commit_seconds{outcome="error",quantile="1"} 0
+ztreamer_pipeline_commit_seconds_sum{outcome="error"} 0
+ztreamer_pipeline_commit_seconds_count{outcome="error"} 0
+
+# TYPE ztreamer_pipeline_pass_seconds summary
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0.5"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0.9"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0.95"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0.99"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="0.999"} 0
+ztreamer_pipeline_pass_seconds{outcome="stopped",quantile="1"} 0
+ztreamer_pipeline_pass_seconds_sum{outcome="stopped"} 0
+ztreamer_pipeline_pass_seconds_count{outcome="stopped"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0.5"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0.9"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0.95"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0.99"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="0.999"} 0
+ztreamer_pipeline_pass_seconds{outcome="success",quantile="1"} 0
+ztreamer_pipeline_pass_seconds_sum{outcome="success"} 0.000725561
+ztreamer_pipeline_pass_seconds_count{outcome="success"} 2
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0.5"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0.9"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0.95"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0.99"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="0.999"} 0
+ztreamer_pipeline_pass_seconds{outcome="panic",quantile="1"} 0
+ztreamer_pipeline_pass_seconds_sum{outcome="panic"} 0
+ztreamer_pipeline_pass_seconds_count{outcome="panic"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0.5"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0.9"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0.95"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0.99"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="0.999"} 0
+ztreamer_pipeline_pass_seconds{outcome="error",quantile="1"} 0
+ztreamer_pipeline_pass_seconds_sum{outcome="error"} 0
+ztreamer_pipeline_pass_seconds_count{outcome="error"} 0
+
+# TYPE ztreamer_head_reconcile_seconds summary
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0.5"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0.9"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0.95"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0.99"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="0.999"} 0
+ztreamer_head_reconcile_seconds{outcome="error",quantile="1"} 0
+ztreamer_head_reconcile_seconds_sum{outcome="error"} 0
+ztreamer_head_reconcile_seconds_count{outcome="error"} 0
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0"} 0.000285798
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0.5"} 0.0003665777081671761
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0.9"} 0.0004102679681120679
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0.95"} 0.00041822122002227
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0.99"} 0.0004310441526211185
+ztreamer_head_reconcile_seconds{outcome="success",quantile="0.999"} 0.0004310441526211185
+ztreamer_head_reconcile_seconds{outcome="success",quantile="1"} 0.000448158
+ztreamer_head_reconcile_seconds_sum{outcome="success"} 4.399487107000006
+ztreamer_head_reconcile_seconds_count{outcome="success"} 1878
+
+# TYPE ztreamer_pipeline_segment_seconds summary
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0.5"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0.9"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0.95"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0.99"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="0.999"} 0
+ztreamer_pipeline_segment_seconds{outcome="success",quantile="1"} 0
+ztreamer_pipeline_segment_seconds_sum{outcome="success"} 0
+ztreamer_pipeline_segment_seconds_count{outcome="success"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0.5"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0.9"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0.95"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0.99"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="0.999"} 0
+ztreamer_pipeline_segment_seconds{outcome="error",quantile="1"} 0
+ztreamer_pipeline_segment_seconds_sum{outcome="error"} 0
+ztreamer_pipeline_segment_seconds_count{outcome="error"} 0
+
+# TYPE ztreamer_index_write_seconds summary
+ztreamer_index_write_seconds{stage="hash_index",quantile="0"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="0.5"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="0.9"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="0.95"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="0.99"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="0.999"} 0
+ztreamer_index_write_seconds{stage="hash_index",quantile="1"} 0
+ztreamer_index_write_seconds_sum{stage="hash_index"} 0.000210539
+ztreamer_index_write_seconds_count{stage="hash_index"} 1
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0.5"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0.9"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0.95"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0.99"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="0.999"} 0
+ztreamer_index_write_seconds{stage="mutable_put",quantile="1"} 0
+ztreamer_index_write_seconds_sum{stage="mutable_put"} 0.000011261
+ztreamer_index_write_seconds_count{stage="mutable_put"} 1
+ztreamer_index_write_seconds{stage="commit",quantile="0"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="0.5"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="0.9"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="0.95"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="0.99"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="0.999"} 0
+ztreamer_index_write_seconds{stage="commit",quantile="1"} 0
+ztreamer_index_write_seconds_sum{stage="commit"} 0.000608013
+ztreamer_index_write_seconds_count{stage="commit"} 1
+ztreamer_index_write_seconds{stage="encode",quantile="0"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="0.5"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="0.9"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="0.95"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="0.99"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="0.999"} 0
+ztreamer_index_write_seconds{stage="encode",quantile="1"} 0
+ztreamer_index_write_seconds_sum{stage="encode"} 0.000058508
+ztreamer_index_write_seconds_count{stage="encode"} 1
+ztreamer_index_write_seconds{stage="state_put",quantile="0"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="0.5"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="0.9"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="0.95"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="0.99"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="0.999"} 0
+ztreamer_index_write_seconds{stage="state_put",quantile="1"} 0
+ztreamer_index_write_seconds_sum{stage="state_put"} 0.000000952
+ztreamer_index_write_seconds_count{stage="state_put"} 1
+
+# TYPE ztreamer_pipeline_receive_wait_seconds summary
+ztreamer_pipeline_receive_wait_seconds{quantile="0"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="0.5"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="0.9"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="0.95"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="0.99"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="0.999"} 0
+ztreamer_pipeline_receive_wait_seconds{quantile="1"} 0
+ztreamer_pipeline_receive_wait_seconds_sum 0
+ztreamer_pipeline_receive_wait_seconds_count 0
+
+# TYPE ztreamer_pipeline_batch_send_wait_seconds summary
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0.5"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0.9"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0.95"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0.99"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="0.999"} 0
+ztreamer_pipeline_batch_send_wait_seconds{quantile="1"} 0
+ztreamer_pipeline_batch_send_wait_seconds_sum 0
+ztreamer_pipeline_batch_send_wait_seconds_count 0
+
+# TYPE ztreamer_pipeline_stage_seconds summary
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0.5"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0.9"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0.95"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0.99"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="0.999"} 0
+ztreamer_pipeline_stage_seconds{stage="worker_send_wait",quantile="1"} 0
+ztreamer_pipeline_stage_seconds_sum{stage="worker_send_wait"} 0
+ztreamer_pipeline_stage_seconds_count{stage="worker_send_wait"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0.5"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0.9"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0.95"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0.99"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="0.999"} 0
+ztreamer_pipeline_stage_seconds{stage="transaction_read",quantile="1"} 0
+ztreamer_pipeline_stage_seconds_sum{stage="transaction_read"} 0
+ztreamer_pipeline_stage_seconds_count{stage="transaction_read"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0.5"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0.9"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0.95"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0.99"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="0.999"} 0
+ztreamer_pipeline_stage_seconds{stage="parse",quantile="1"} 0
+ztreamer_pipeline_stage_seconds_sum{stage="parse"} 0
+ztreamer_pipeline_stage_seconds_count{stage="parse"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0.5"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0.9"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0.95"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0.99"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="0.999"} 0
+ztreamer_pipeline_stage_seconds{stage="header_read",quantile="1"} 0
+ztreamer_pipeline_stage_seconds_sum{stage="header_read"} 0
+ztreamer_pipeline_stage_seconds_count{stage="header_read"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0.5"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0.9"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0.95"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0.99"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="0.999"} 0
+ztreamer_pipeline_stage_seconds{stage="txid_read",quantile="1"} 0
+ztreamer_pipeline_stage_seconds_sum{stage="txid_read"} 0
+ztreamer_pipeline_stage_seconds_count{stage="txid_read"} 0
+
+# TYPE ztreamer_range_admission_seconds summary
+ztreamer_range_admission_seconds{quantile="0"} 0
+ztreamer_range_admission_seconds{quantile="0.5"} 0
+ztreamer_range_admission_seconds{quantile="0.9"} 0
+ztreamer_range_admission_seconds{quantile="0.95"} 0
+ztreamer_range_admission_seconds{quantile="0.99"} 0
+ztreamer_range_admission_seconds{quantile="0.999"} 0
+ztreamer_range_admission_seconds{quantile="1"} 0
+ztreamer_range_admission_seconds_sum 0
+ztreamer_range_admission_seconds_count 0
+
+# TYPE ztreamer_range_duration_seconds summary
+ztreamer_range_duration_seconds{outcome="success",quantile="0"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="0.5"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="0.9"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="0.95"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="0.99"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="0.999"} 0
+ztreamer_range_duration_seconds{outcome="success",quantile="1"} 0
+ztreamer_range_duration_seconds_sum{outcome="success"} 0
+ztreamer_range_duration_seconds_count{outcome="success"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0.5"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0.9"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0.95"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0.99"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="0.999"} 0
+ztreamer_range_duration_seconds{outcome="error",quantile="1"} 0
+ztreamer_range_duration_seconds_sum{outcome="error"} 0
+ztreamer_range_duration_seconds_count{outcome="error"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0.5"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0.9"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0.95"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0.99"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="0.999"} 0
+ztreamer_range_duration_seconds{outcome="cancelled",quantile="1"} 0
+ztreamer_range_duration_seconds_sum{outcome="cancelled"} 0
+ztreamer_range_duration_seconds_count{outcome="cancelled"} 0
+
+# TYPE ztreamer_range_first_seconds summary
+ztreamer_range_first_seconds{quantile="0"} 0
+ztreamer_range_first_seconds{quantile="0.5"} 0
+ztreamer_range_first_seconds{quantile="0.9"} 0
+ztreamer_range_first_seconds{quantile="0.95"} 0
+ztreamer_range_first_seconds{quantile="0.99"} 0
+ztreamer_range_first_seconds{quantile="0.999"} 0
+ztreamer_range_first_seconds{quantile="1"} 0
+ztreamer_range_first_seconds_sum 0
+ztreamer_range_first_seconds_count 0
+
