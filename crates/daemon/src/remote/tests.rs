@@ -14,6 +14,8 @@ use ztreamer_remote::{
     test_utils::{MockChain, MockNode, Reply},
 };
 
+use ztreamer_index::index::BlockId;
+
 use super::*;
 use crate::{
     DaemonConfig,
@@ -184,6 +186,33 @@ async fn an_unreachable_node_stops_the_boot() {
     let cause = error.chain().nth(1).unwrap().to_string();
     assert!(cause.starts_with(&format!("remote zakura {url} is gone: ")), "{error:?}");
     assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "no index is made");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_catch_up_waits_for_the_node_to_reach_the_index_tip() {
+    let dir = tempfile::tempdir().unwrap();
+    let node_chain = MockChain::new(&chain(4));
+    let mock = MockNode::start({
+        let node_chain = node_chain.clone();
+        move |_, request| node_chain.reply(request)
+    })
+    .await;
+    let node = node(&config(&dir, &mock.url().to_string()));
+    let info = node.client.get_blockchain_info().await.unwrap();
+    let components = RemoteComponents { node, network: Network::Mainnet, info };
+    let shutdown = CancellationToken::new();
+    let tip = IndexTip::at(BlockId::new(8, zakura_chain::block::Hash([0; 32])));
+
+    let grow = async {
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        node_chain.set_blocks(&chain(8));
+    };
+    let (tail, ()) = tokio::join!(components.tail(tip, &shutdown), grow);
+
+    assert!(matches!(tail.unwrap(), ControlFlow::Continue(_)));
+    let seen = mock.seen();
+    let info_calls = seen.iter().filter(|seen| seen.body["method"] == "getblockchaininfo").count();
+    assert!(info_calls >= 3, "the catch-up asked again while the node was behind: {info_calls}");
 }
 
 #[test]

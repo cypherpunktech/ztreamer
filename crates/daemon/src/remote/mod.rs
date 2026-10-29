@@ -5,7 +5,6 @@
 use std::{
     ops::ControlFlow,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use eyre::{Result, WrapErr, eyre};
@@ -26,9 +25,6 @@ use crate::{
     node::{HistoricalSource, IndexTip, Node, NodeComponents, StageContext, Tail},
     replicate::{Replica, ReplicaSource},
 };
-
-/// The time between two `getblockchaininfo` calls while the remote node is below the index tip.
-const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The configuration of the remote mode: the `--remote-rpc` node, its credentials, and the
 /// import of `--replicate-from` that the node attests.
@@ -204,32 +200,23 @@ impl NodeComponents for RemoteComponents {
             .wrap_err("connect to the remote zakura node")
     }
 
-    /// Waits until the best block of the node is at or above `tip`. The first check uses the
-    /// `getblockchaininfo` answer of [`Node::network`].
+    /// Waits until the best block of the node is at or above `tip` ([`NodeSyncWait`]). The first
+    /// check uses the `getblockchaininfo` answer of [`Node::network`].
     async fn tail(
         &self,
         tip: IndexTip,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), Tail<RemoteTailSource, RemoteHeadSource>>> {
-        let mut info = self.info.clone();
-        while !tip.is_reached_by(info.blocks().0) {
-            info!(
-                best = info.blocks().0,
-                index_tip = tip.height(),
-                "waiting for remote zakura to reach the index tip"
-            );
-            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
-            {
-                return Ok(ControlFlow::Break(()));
+        let info = match tip.height() {
+            Some(height) if !tip.is_reached_by(self.info.blocks().0) => {
+                let info = self.node.blockchain_info_at_height(height, shutdown).await;
+                match info.wrap_err("wait for the remote zakura node to reach the index tip")? {
+                    ControlFlow::Continue(info) => info,
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                }
             }
-            let next = self.node.blockchain_info_at_height(0, shutdown).await;
-            let ControlFlow::Continue(next) =
-                next.wrap_err("read the chain of the remote zakura node")?
-            else {
-                return Ok(ControlFlow::Break(()));
-            };
-            info = next;
-        }
+            _ => self.info.clone(),
+        };
         info!(best = info.blocks().0, "remote zakura is ready");
         info!(import_state = "tail");
         let client = &self.node.client;
