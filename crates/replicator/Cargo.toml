@@ -8,6 +8,10 @@ description = "The source side of replication: range_meta rows, the Replicator s
 [lints]
 workspace = true
 
+[features]
+# Shared test fixtures in `ztreamer_replicator::test_utils`: an index with `range_meta` rows.
+test-utils = ["ztreamer-chain/test-utils", "ztreamer-index/test-utils", "ztreamer-snapshot/test-utils"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 ed25519-dalek.workspace = true
@@ -28,6 +32,7 @@ ztreamer-snapshot = { path = "../snapshot" }
 ztreamer-sync = { path = "../sync" }
 
 [dev-dependencies]
+hex = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }

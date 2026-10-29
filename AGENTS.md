@@ -99,8 +99,8 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
   goes to its own file: the module is then `foo/mod.rs`, it ends with
   `#[cfg(test)] mod tests;`, and the tests are in `foo/tests.rs`. Integration tests in
   `tests/`. Benchmarks in `benches/`. Shared fixtures in the `test_utils` modules of
-  `ztreamer_chain`, `ztreamer_index`, `ztreamer_remote` and `ztreamer_service`, behind the
-  `test-utils` feature of each crate. `ztreamer_import::test_utils` is for the
-  tests of that crate only.
+  `ztreamer_chain`, `ztreamer_index`, `ztreamer_remote`, `ztreamer_replicator` and
+  `ztreamer_service`, behind the `test-utils` feature of each crate.
+  `ztreamer_import::test_utils` is for the tests of that crate only.
 - A module of shared test fixtures is named `test_utils`, also in a binary or inside a
   module. Never `test_support`.
