@@ -16,6 +16,7 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 missing_const_for_fn = "warn"
+self_named_module_files = "deny"
 
 [workspace.lints.rustdoc]
 all = { level = "warn", priority = -1 }

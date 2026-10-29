@@ -59,6 +59,8 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
   jobs, so split the type. A trait impl follows the orphan rule.
 - Doc every public item. Include a usage example where it helps.
   Traits get an implementation guide.
+- A module with submodules or with a separate test file is `foo/mod.rs`, never `foo.rs` next to
+  a `foo/` directory. Clippy `self_named_module_files` enforces it.
 
 ### Tracing
 
@@ -76,8 +78,8 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 
 - Tests panic. Never return `Result` from a test. `unwrap()` directly.
 - Unit tests in `mod tests` at the bottom of the file. A test module over about 200 lines
-  goes to a sibling file: `foo.rs` ends with `#[cfg(test)] mod tests;`, and the tests are in
-  `foo/tests.rs`. Integration tests in
+  goes to its own file: the module is then `foo/mod.rs`, it ends with
+  `#[cfg(test)] mod tests;`, and the tests are in `foo/tests.rs`. Integration tests in
   `tests/`. Benchmarks in `benches/`. Shared fixtures in the `test_utils` modules of
   `ztreamer_chain`, `ztreamer_index`, `ztreamer_remote` and `ztreamer_service`, behind the
   `test-utils` feature of each crate. `ztreamer_import::test_utils` is for the
