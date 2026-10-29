@@ -25,7 +25,7 @@ use ztreamer_remote::{
 use crate::{
     DaemonConfig,
     application::{NodeSources, run_application},
-    lifecycle,
+    lifecycle::{Supervisor, TaskSet},
     replicate::{Replica, ReplicaSource},
 };
 
@@ -142,18 +142,10 @@ impl RemoteNode {
     ) -> Result<()> {
         let url = self.client.rpc().url();
         info!(host = url.host(), port = url.port_u16(), "using remote zakura");
-        let shutdown = CancellationToken::new();
-        // No node runs in this process. Thus the node half of the lifecycle only waits for the
-        // shutdown, and `supervise` can drain it.
-        let node = {
-            let shutdown = shutdown.clone();
-            async move {
-                shutdown.cancelled().await;
-                Ok(())
-            }
-        };
-        let application = self.application(config, grpc_server, shutdown.clone());
-        lifecycle::supervise(node, application, shutdown, signal).await
+        // No node runs in this process. Thus only the server tasks join the set.
+        let supervisor = Supervisor::new(CancellationToken::new());
+        let application = self.application(config, grpc_server, supervisor.tasks().clone());
+        supervisor.run(signal, application).await
     }
 
     /// Reads the network from the node and opens the index of that network, as the embedded
@@ -166,8 +158,9 @@ impl RemoteNode {
         self,
         config: DaemonConfig,
         grpc_server: Server,
-        shutdown: CancellationToken,
+        tasks: TaskSet,
     ) -> Result<()> {
+        let shutdown = tasks.shutdown().clone();
         let ControlFlow::Continue(info) = self.blockchain_info_when_up(&shutdown).await? else {
             return Ok(());
         };
@@ -185,7 +178,7 @@ impl RemoteNode {
             return Ok(());
         };
         info!(import_state = "tail");
-        run_application(config, grpc_server, index, &network, None, sources, shutdown).await
+        run_application(config, grpc_server, index, &network, None, sources, tasks).await
     }
 
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.

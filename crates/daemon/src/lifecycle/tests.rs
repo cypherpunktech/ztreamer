@@ -1,187 +1,252 @@
-use std::{cell::Cell, future, rc::Rc, time::Duration};
+use std::{
+    cell::Cell,
+    future,
+    net::UdpSocket,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{
+            AtomicBool, AtomicUsize,
+            Ordering::{self, SeqCst},
+        },
+    },
+    time::Duration,
+};
 
 use eyre::eyre;
 use tokio::{sync::oneshot, time::timeout};
+use zakura_chain::block::Height as BlockHeight;
+use zakura_network::zakura::{Peer, Service, Stream, ZakuraConnId, ZakuraPeerId};
+use zakurad::{config::ZakuradConfig, node::CustomService};
+use ztreamer_embedded::NodeClient;
 
 use super::*;
 
-/// [`supervise`], with a panic when it does not finish within five seconds.
-async fn supervise_within_five_seconds(
-    node: impl Future<Output = Result<()>>,
-    application: impl Future<Output = Result<()>>,
-    shutdown: CancellationToken,
+/// [`Supervisor::run`], with a panic when it does not finish within five seconds.
+async fn run_within_five_seconds(
+    supervisor: Supervisor,
     signal: impl Future<Output = Result<()>>,
+    main: impl Future<Output = Result<()>>,
 ) -> Result<()> {
-    timeout(Duration::from_secs(5), supervise(node, application, shutdown, signal)).await.unwrap()
+    timeout(Duration::from_secs(5), supervisor.run(signal, main)).await.unwrap()
+}
+
+/// A task that waits for the shutdown of `tasks`, then counts its cleanup in `cleaned`.
+fn cleanup_task(
+    tasks: &TaskSet,
+    cleaned: &Arc<AtomicBool>,
+) -> impl Future<Output = Result<()>> + Send + 'static {
+    let (shutdown, cleaned) = (tasks.shutdown().clone(), Arc::clone(cleaned));
+    async move {
+        shutdown.cancelled().await;
+        tokio::task::yield_now().await;
+        cleaned.store(true, SeqCst);
+        Ok(())
+    }
 }
 
 #[tokio::test]
-async fn application_completion_drains_node_without_send() {
-    // Keeping an Rc across await proves the supervisor needs no Send bound.
-    let cleaned = Rc::new(Cell::new(false));
-    let shutdown = CancellationToken::new();
-    let node = async {
+async fn main_completion_drains_tasks_and_main_needs_no_send() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let cleaned = Arc::new(AtomicBool::new(false));
+    supervisor.tasks().spawn("node", "node stopped", cleanup_task(supervisor.tasks(), &cleaned));
+    // Keeping an Rc across await proves that the main work needs no Send bound.
+    let main = async {
+        let held = Rc::new(());
+        tokio::task::yield_now().await;
+        drop(held);
+        Ok(())
+    };
+    run_within_five_seconds(supervisor, future::pending(), main).await.unwrap();
+    assert!(cleaned.load(SeqCst));
+}
+
+#[tokio::test]
+async fn main_failure_still_drains_tasks() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let cleaned = Arc::new(AtomicBool::new(false));
+    supervisor.tasks().spawn("node", "node stopped", cleanup_task(supervisor.tasks(), &cleaned));
+    let main = async { Err(eyre!("main failed")) };
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
+    assert_eq!(error.to_string(), "main failed");
+    assert!(cleaned.load(SeqCst));
+}
+
+#[tokio::test]
+async fn task_failure_stops_main_waiting_for_readiness() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
+    supervisor.tasks().spawn("node", "node stopped", async { Err(eyre!("node failed")) });
+    let cleaned = Cell::new(false);
+    let main = async {
         shutdown.cancelled().await;
         tokio::task::yield_now().await;
         cleaned.set(true);
         Ok(())
     };
-    supervise_within_five_seconds(node, async { Ok(()) }, shutdown.clone(), future::pending())
-        .await
-        .unwrap();
-    assert!(cleaned.get());
-}
-
-#[tokio::test]
-async fn application_failure_still_drains_node() {
-    let cleaned = Cell::new(false);
-    let shutdown = CancellationToken::new();
-    let node = async {
-        shutdown.cancelled().await;
-        cleaned.set(true);
-        Ok(())
-    };
-    let error = supervise_within_five_seconds(
-        node,
-        async { Err(eyre!("application failed")) },
-        shutdown.clone(),
-        future::pending(),
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(error.to_string(), "application failed");
-    assert!(cleaned.get());
-}
-
-#[tokio::test]
-async fn node_failure_cancels_application_waiting_for_readiness() {
-    let shutdown = CancellationToken::new();
-    let cleaned = Cell::new(false);
-    let application = async {
-        shutdown.cancelled().await;
-        tokio::task::yield_now().await;
-        cleaned.set(true);
-        Ok(())
-    };
-    let error = supervise_within_five_seconds(
-        async { Err(eyre!("node failed")) },
-        application,
-        shutdown.clone(),
-        future::pending(),
-    )
-    .await
-    .unwrap_err();
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
     assert_eq!(error.to_string(), "node failed");
     assert!(cleaned.get());
 }
 
 #[tokio::test]
-async fn unexpected_successful_node_exit_is_an_error() {
-    let shutdown = CancellationToken::new();
-    let error = supervise_within_five_seconds(
-        async { Ok(()) },
-        async {
-            shutdown.cancelled().await;
-            Ok(())
-        },
-        shutdown.clone(),
-        future::pending(),
-    )
-    .await
-    .unwrap_err();
+async fn unexpected_successful_task_stop_is_an_error() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
+    supervisor.tasks().spawn("node", "Zakura stopped unexpectedly", async { Ok(()) });
+    let main = async {
+        shutdown.cancelled().await;
+        Ok(())
+    };
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
     assert_eq!(error.to_string(), "Zakura stopped unexpectedly");
 }
 
 #[tokio::test]
-async fn signal_drains_both_futures_concurrently_even_on_error() {
-    let shutdown = CancellationToken::new();
+async fn signal_drains_main_and_tasks_concurrently_even_on_error() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
     let (node_started_tx, node_started_rx) = oneshot::channel();
-    let (app_started_tx, app_started_rx) = oneshot::channel();
+    let (main_started_tx, main_started_rx) = oneshot::channel();
     let (node_cleanup_tx, node_cleanup_rx) = oneshot::channel();
-    let (app_cleanup_tx, app_cleanup_rx) = oneshot::channel();
-    let node = async {
+    let (main_cleanup_tx, main_cleanup_rx) = oneshot::channel();
+    let node_shutdown = shutdown.clone();
+    supervisor.tasks().spawn("node", "node stopped", async move {
         node_started_tx.send(()).unwrap();
-        shutdown.cancelled().await;
+        node_shutdown.cancelled().await;
         node_cleanup_tx.send(()).unwrap();
-        app_cleanup_rx.await.unwrap();
+        main_cleanup_rx.await.unwrap();
         Err(eyre!("node cleanup failed"))
-    };
-    let application = async {
-        app_started_tx.send(()).unwrap();
+    });
+    let main = async {
+        main_started_tx.send(()).unwrap();
         shutdown.cancelled().await;
-        app_cleanup_tx.send(()).unwrap();
+        main_cleanup_tx.send(()).unwrap();
         node_cleanup_rx.await.unwrap();
         Ok(())
     };
     let signal = async {
         node_started_rx.await.unwrap();
-        app_started_rx.await.unwrap();
+        main_started_rx.await.unwrap();
         Ok(())
     };
-    let error = supervise_within_five_seconds(node, application, shutdown.clone(), signal)
-        .await
-        .unwrap_err();
+    let error = run_within_five_seconds(supervisor, signal, main).await.unwrap_err();
     assert_eq!(error.to_string(), "node cleanup failed");
 }
 
 #[tokio::test]
-async fn signal_failure_still_drains_both_futures() {
-    let shutdown = CancellationToken::new();
-    let node_cleaned = Cell::new(false);
-    let app_cleaned = Cell::new(false);
-    let error = supervise_within_five_seconds(
-        async {
-            shutdown.cancelled().await;
-            node_cleaned.set(true);
-            Ok(())
-        },
-        async {
-            shutdown.cancelled().await;
-            app_cleaned.set(true);
-            Ok(())
-        },
-        shutdown.clone(),
-        async { Err(eyre!("signal failed")) },
-    )
-    .await
-    .unwrap_err();
+async fn signal_failure_still_drains_main_and_tasks() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
+    let task_cleaned = Arc::new(AtomicBool::new(false));
+    supervisor.tasks().spawn(
+        "node",
+        "node stopped",
+        cleanup_task(supervisor.tasks(), &task_cleaned),
+    );
+    let main_cleaned = Cell::new(false);
+    let main = async {
+        shutdown.cancelled().await;
+        main_cleaned.set(true);
+        Ok(())
+    };
+    let signal = async {
+        tokio::task::yield_now().await;
+        Err(eyre!("signal failed"))
+    };
+    let error = run_within_five_seconds(supervisor, signal, main).await.unwrap_err();
     assert_eq!(error.to_string(), "signal failed");
-    assert!(node_cleaned.get() && app_cleaned.get());
+    assert!(task_cleaned.load(SeqCst) && main_cleaned.get());
 }
 
 #[tokio::test]
-async fn drain_both_reuses_taken_results_and_awaits_the_rest() {
-    let polled = Cell::new(false);
-    let (a, b) = timeout(
-        Duration::from_secs(5),
-        drain_both(
-            (
-                async {
-                    polled.set(true);
-                    0
-                },
-                Some(1),
-            ),
-            (async { 2 }, None),
-        ),
-    )
-    .await
-    .unwrap();
-    assert_eq!((a, b), (1, 2));
-    assert!(!polled.get());
+async fn task_errors_come_in_start_order() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let (second_failed_tx, second_failed_rx) = oneshot::channel::<()>();
+    supervisor.tasks().spawn("first", "first stopped", async {
+        // Fail only after the second task failed.
+        let _ = second_failed_rx.await;
+        Err(eyre!("first failed"))
+    });
+    supervisor.tasks().spawn("second", "second stopped", async {
+        drop(second_failed_tx);
+        Err(eyre!("second failed"))
+    });
+    let shutdown = supervisor.tasks().shutdown().clone();
+    let main = async move {
+        shutdown.cancelled().await;
+        Ok(())
+    };
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
+    assert_eq!(error.to_string(), "first failed");
 }
 
-use std::{
-    net::UdpSocket,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
-use zakura_chain::block::Height as BlockHeight;
-use zakura_network::zakura::{Peer, Service, Stream, ZakuraConnId, ZakuraPeerId};
-use zakurad::{config::ZakuradConfig, node::CustomService};
-use ztreamer_embedded::NodeClient;
+#[tokio::test]
+async fn a_task_that_main_adds_later_is_supervised() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let tasks = supervisor.tasks().clone();
+    let main = async move {
+        tokio::task::yield_now().await;
+        tasks.spawn("server", "server stopped", async { Err(eyre!("server failed")) });
+        tasks.shutdown().cancelled().await;
+        Ok(())
+    };
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
+    assert_eq!(error.to_string(), "server failed");
+}
+
+#[tokio::test]
+async fn a_task_added_after_the_stop_never_starts() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let tasks = supervisor.tasks().clone();
+    let started = Arc::new(AtomicUsize::new(0));
+    let main = {
+        let started = Arc::clone(&started);
+        async move {
+            tasks.shutdown().cancelled().await;
+            tasks.spawn("late", "late stopped", async move {
+                started.fetch_add(1, SeqCst);
+                Ok(())
+            });
+            Ok(())
+        }
+    };
+    let signal = async { Ok(()) };
+    run_within_five_seconds(supervisor, signal, main).await.unwrap();
+    assert_eq!(started.load(SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_panic_is_an_error_with_the_task_name() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    supervisor.tasks().spawn("filler", "filler stopped", async { panic!("filler bug") });
+    let shutdown = supervisor.tasks().shutdown().clone();
+    let main = async move {
+        shutdown.cancelled().await;
+        Ok(())
+    };
+    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
+    assert_eq!(error.to_string(), "filler task panicked");
+}
+
+#[tokio::test]
+async fn a_future_that_is_not_send_runs_on_a_blocking_thread() {
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
+    let cleaned = Arc::new(AtomicBool::new(false));
+    let task_cleaned = Arc::clone(&cleaned);
+    supervisor.tasks().spawn_on_blocking_thread("node", "node stopped", move || async move {
+        // The Rc makes the future not Send.
+        let held = Rc::new(());
+        shutdown.cancelled().await;
+        drop(held);
+        task_cleaned.store(true, SeqCst);
+        Ok(())
+    });
+    run_within_five_seconds(supervisor, future::pending(), async { Ok(()) }).await.unwrap();
+    assert!(cleaned.load(SeqCst));
+}
+
 #[derive(Debug)]
 struct RegistrationProbe(Arc<AtomicBool>);
 
@@ -251,23 +316,30 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
     config.state = zakura_state::Config::ephemeral();
     let service_registered = Arc::new(AtomicBool::new(false));
 
-    let shutdown = CancellationToken::new();
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
     let signal_requested = CancellationToken::new();
     let (ready_tx, ready_rx) = oneshot::channel();
-    let node = async {
-        Box::pin(zakurad::node::run_with_services_ready(
-            config,
-            vec![CustomService {
-                service: Arc::new(RegistrationProbe(service_registered.clone())),
-                provides: vec![],
-                seeks: vec![],
-            }],
-            shutdown.clone(),
-            ready_tx,
-        ))
-        .await
-        .map_err(|error| eyre!("{error}"))
-    };
+    let services = vec![CustomService {
+        service: Arc::new(RegistrationProbe(service_registered.clone())),
+        provides: vec![],
+        seeks: vec![],
+    }];
+    let node_shutdown = shutdown.clone();
+    supervisor.tasks().spawn_on_blocking_thread(
+        "Zakura",
+        "Zakura stopped unexpectedly",
+        move || async move {
+            Box::pin(zakurad::node::run_with_services_ready(
+                config,
+                services,
+                node_shutdown,
+                ready_tx,
+            ))
+            .await
+            .map_err(|error| eyre!("{error}"))
+        },
+    );
     let application = async {
         let client = NodeClient::from_services(ready_rx.await?);
         assert!(service_registered.load(Ordering::Relaxed));
@@ -297,7 +369,7 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
         signal_requested.cancelled().await;
         Ok(())
     };
-    timeout(Duration::from_secs(30), supervise(node, application, shutdown.clone(), signal))
+    timeout(Duration::from_secs(30), supervisor.run(signal, application))
         .await
         .expect("node lifecycle finishes within timeout")
         .expect("node lifecycle succeeds");
@@ -317,7 +389,8 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
 
 #[tokio::test]
 async fn signal_waits_for_an_active_blocking_writer() {
-    let shutdown = CancellationToken::new();
+    let supervisor = Supervisor::new(CancellationToken::new());
+    let shutdown = supervisor.tasks().shutdown().clone();
     let (started_tx, started_rx) = oneshot::channel();
     let (finish_tx, finish_rx) = std::sync::mpsc::channel();
     let writer_finished = Arc::new(AtomicBool::new(false));
@@ -332,15 +405,16 @@ async fn signal_waits_for_an_active_blocking_writer() {
         writer.await?;
         Ok(())
     };
-    let node = async {
-        shutdown.cancelled().await;
+    let node_shutdown = shutdown.clone();
+    supervisor.tasks().spawn("node", "node stopped", async move {
+        node_shutdown.cancelled().await;
         finish_tx.send(()).unwrap();
         Ok(())
-    };
+    });
     let signal = async {
         started_rx.await.unwrap();
         Ok(())
     };
-    supervise_within_five_seconds(node, application, shutdown.clone(), signal).await.unwrap();
+    run_within_five_seconds(supervisor, signal, application).await.unwrap();
     assert!(writer_finished.load(Ordering::SeqCst));
 }

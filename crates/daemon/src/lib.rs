@@ -13,6 +13,7 @@ mod lifecycle;
 mod metrics_endpoint;
 mod remote;
 mod replicate;
+mod tasks;
 #[cfg(test)]
 mod test_utils;
 
