@@ -238,6 +238,11 @@ impl Index {
     /// Writes the metadata of the sealed range that starts at `start`, replacing any earlier
     /// row. The range must be sealed, and `meta.entry` must describe exactly that range.
     ///
+    /// The canonical block at `meta.entry.end_height` must have the hash `meta.entry.end_hash`,
+    /// else the write returns [`IndexError::RangeEndHash`]. The check and the write are in one
+    /// write transaction. Thus a deep reorg that replaces the range after the caller read it
+    /// cannot get a row for the old blocks.
+    ///
     /// The write does not advance the generation: range metadata is not part of a generation's
     /// block coverage, so readers of the current generation are not disturbed.
     pub fn put_range_meta(&self, start: u32, meta: &RangeMeta) -> Result<(), IndexError> {
@@ -250,6 +255,9 @@ impl Index {
             || state.sealed_through.is_none_or(|sealed| end > sealed)
         {
             return Err(IndexError::RangeMeta { start });
+        }
+        if self.tables.hash_to_height.get(&txn, &meta.entry.end_hash)? != Some(end) {
+            return Err(IndexError::RangeEndHash { start });
         }
         self.tables.range_meta.put(&mut txn, start, meta)?;
         txn.commit()?;
