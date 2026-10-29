@@ -105,15 +105,17 @@ impl<T: StoredBlock> RangeCursor<T> {
 
     /// Reads the volatile chunk from `height` to `chunk_end` from the serving snapshot.
     fn read_volatile(&self, height: u32, chunk_end: u32) -> Result<Vec<T>, Status> {
+        let mut chunk = Vec::with_capacity(CHUNK_BLOCKS as usize);
         (0..=height.abs_diff(chunk_end))
-            .map(|offset| {
+            .try_for_each(|offset| {
                 let height = if self.ascending { height + offset } else { height - offset };
-                self.snapshot
-                    .volatile(height)
-                    .map(T::from_record)
-                    .ok_or_else(|| index_status(IndexError::Coverage { height }))
+                let record =
+                    self.snapshot.volatile(height).ok_or(IndexError::Coverage { height })?;
+                chunk.push(T::from_record(record));
+                Ok(())
             })
-            .collect()
+            .map_err(index_status)?;
+        Ok(chunk)
     }
 
     /// Reads the next chunk, checks that it links to the last chunk, and moves the cursor past
