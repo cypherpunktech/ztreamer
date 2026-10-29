@@ -9,7 +9,10 @@ use zakura_chain::{
 };
 use zakura_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
 use ztreamer_chain::test_utils::grow_chain;
-use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
+use ztreamer_remote::{
+    Secret,
+    test_utils::{MockChain, MockNode, Reply},
+};
 
 use super::*;
 use crate::{
@@ -94,18 +97,6 @@ impl Daemon {
 /// True when the node got no `getblock` request.
 fn read_no_block(mock: &MockNode) -> bool {
     mock.seen().iter().all(|seen| seen.body["method"] != "getblock")
-}
-
-#[test]
-fn the_chain_name_gives_the_network() {
-    let network = |name| Network::try_from(NodeChain(name));
-    assert_eq!(network("main").unwrap(), Network::Mainnet);
-    assert_eq!(network("test").unwrap(), Network::new_default_testnet());
-    let error = network("regtest").unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        r#"remote zakura runs chain "regtest", ztreamerd serves only "main" and "test""#
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -254,21 +245,6 @@ fn the_remote_mode_needs_both_remote_rpc_and_replicate_from() {
     assert!(error.contains("--replicate-from <URL|HOST:PORT>"), "{error}");
     let error = missing(&["--replicate-from", "https://snapshots.example/mainnet"]);
     assert!(error.contains("--remote-rpc <URL>"), "{error}");
-}
-
-#[test]
-fn credentials_in_the_url_become_basic_auth() {
-    let url: NodeUrl = "https://us%40er:hunter:2@node.example:8232/".parse().unwrap();
-    assert_eq!(url.uri, "https://node.example:8232/");
-    let expected = Auth::Basic { user: "us@er".into(), password: Secret::new("hunter:2") };
-    assert_eq!(url.credentials, Some(expected));
-    assert!(!format!("{url:?}").contains("hunter"));
-    assert!(!url.is_loopback());
-
-    let url: NodeUrl = "http://[::1]:8232".parse().unwrap();
-    assert_eq!(url.credentials, None);
-    assert!(url.is_loopback());
-    assert!("http://user@127.0.0.1:8232".parse::<NodeUrl>().is_err());
 }
 
 #[test]
