@@ -109,8 +109,9 @@
 //!   `version (u8) | height | hash (32 bytes) | previous hash (32 bytes) | length | protobuf
 //!   CompactBlock`.
 //! - A sealed range holds [`RANGE_SIZE`] records in the same encoding, and an offset table. A
-//!   reader can decode one record and not the others. [`encode_range`](ztreamer_chain::codec::encode_range)
-//!   writes a range. The `write_range` function in `codec.rs` gives its byte layout.
+//!   reader can decode one record and not the others.
+//!   [`encode_range`](ztreamer_chain::codec::encode_range) writes a range. The `write_range`
+//!   function in `ztreamer_chain::codec` gives its byte layout.
 //! - `index/metadata.rs` gives the byte layout of the state and of the identity, and
 //!   `index/range_meta.rs` the layout of a range metadata record.
 
