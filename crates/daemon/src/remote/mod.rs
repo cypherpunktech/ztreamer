@@ -9,7 +9,6 @@ use std::{
     time::Duration,
 };
 
-use clap::Args;
 use eyre::{Result, WrapErr, eyre};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
@@ -24,10 +23,10 @@ use ztreamer_remote::{
 };
 
 use crate::{
-    DaemonArgs,
+    DaemonConfig,
     application::{NodeSources, run_application},
     lifecycle,
-    replicate::{Replica, ReplicateArgs},
+    replicate::{Replica, ReplicaSource},
 };
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
@@ -37,46 +36,60 @@ const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// [`RemoteNode`] makes them, when the node is ready for the index.
 type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBackend>;
 
-/// The command-line flags of the remote node. All are off by default. `--remote-rpc` and
-/// `--replicate-from` need each other.
-#[derive(Debug, Args)]
-pub(crate) struct RemoteArgs {
-    /// JSON-RPC URL of a remote zakura node. Needs --replicate-from. ztreamerd starts no
-    /// embedded node. It imports the sealed ranges of --replicate-from, and this node attests
-    /// them. Then ztreamerd reads the tail and the head from this node. The node gives the
-    /// network (mainnet or testnet), and the index must be of that network. For HTTP basic auth,
-    /// put the credentials in the URL: https://user:password@host:8232. Without credentials and
-    /// without --remote-rpc-cookie, a loopback URL uses the default cookie file of zakura if it
-    /// exists.
-    #[arg(long, value_name = "URL", conflicts_with = "zakura_config", requires = "replicate_from")]
-    remote_rpc: Option<NodeUrl>,
-
-    /// Cookie file of the --remote-rpc node.
-    #[arg(long, value_name = "FILE", requires = "remote_rpc")]
-    remote_rpc_cookie: Option<PathBuf>,
+/// The configuration of the remote mode: the `--remote-rpc` node, its credentials, and the
+/// import of `--replicate-from` that the node attests.
+#[derive(Clone, Debug)]
+pub struct RemoteConfig {
+    /// The JSON-RPC URL of the node, without credentials.
+    url: NodeUrl,
+    /// The credentials of `--remote-rpc-cookie` or of the URL. With `None`, a loopback URL uses
+    /// the default cookie file of zakura if it exists.
+    auth: Option<Auth>,
+    /// The source of the import.
+    replicate_from: ReplicaSource,
 }
 
-impl RemoteArgs {
-    /// The node of `--remote-rpc` with the import of `replicate`, or `None` in the embedded mode.
-    /// The default cookie file is the one of a zakura with the default configuration. It reads
-    /// the cookie file, but it does not call the node.
-    pub(crate) fn node(&self, replicate: &ReplicateArgs) -> Result<Option<RemoteNode>> {
-        let rpc = zakura_rpc::config::rpc::Config::default();
-        let client = self.client(&rpc.cookie_dir.join(rpc.cookie_file_name))?;
-        Ok(client.map(|client| RemoteNode::new(client, replicate.replica())))
+impl RemoteConfig {
+    /// The node at `url`, with the cookie file `cookie` or the credentials of the URL, and the
+    /// import of `replicate_from`. Refuses a cookie file and credentials in the URL together.
+    pub fn new(
+        url: NodeUrl,
+        cookie: Option<PathBuf>,
+        replicate_from: ReplicaSource,
+    ) -> Result<Self> {
+        let auth = match (cookie, url.credentials()) {
+            (Some(_), Some(_)) => {
+                return Err(eyre!(
+                    "use --remote-rpc-cookie or credentials in the --remote-rpc URL, not both"
+                ));
+            }
+            (Some(cookie), None) => Some(Auth::Cookie(cookie)),
+            (None, credentials) => credentials.cloned(),
+        };
+        Ok(Self { url, auth, replicate_from })
     }
 
-    /// The client of `--remote-rpc`, or `None` without that flag, with `default_cookie` as the
-    /// default cookie file.
-    pub(crate) fn client(&self, default_cookie: &Path) -> Result<Option<ZakuraClient>> {
-        let Some(url) = &self.remote_rpc else {
-            return Ok(None);
-        };
-        let auth = self.auth(default_cookie)?;
+    /// The node of this configuration with its import. The default cookie file is the one of a
+    /// zakura with the default configuration. It reads the cookie file, but it does not call the
+    /// node.
+    pub(crate) fn node(&self) -> Result<RemoteNode> {
+        let rpc = zakura_rpc::config::rpc::Config::default();
+        let client = self.client(&rpc.cookie_dir.join(rpc.cookie_file_name))?;
+        Ok(RemoteNode::new(client, self.replica()))
+    }
+
+    /// The import of `--replicate-from`.
+    pub(crate) fn replica(&self) -> Replica {
+        Replica::new(self.replicate_from.clone())
+    }
+
+    /// The client of the node, with `default_cookie` as the default cookie file.
+    pub(crate) fn client(&self, default_cookie: &Path) -> Result<ZakuraClient> {
+        let auth = self.auth(default_cookie);
         info!(?auth, "remote zakura credentials");
-        let config = ZakuraClient::config(url.uri().clone()).with_auth(auth);
+        let config = ZakuraClient::config(self.url.uri().clone()).with_auth(auth);
         let rpc = RpcClient::new(config).wrap_err("configure the --remote-rpc client")?;
-        Ok(Some(ZakuraClient::new(rpc)))
+        Ok(ZakuraClient::new(rpc))
     }
 
     /// The credentials for the node: `--remote-rpc-cookie`, else the credentials of the URL,
@@ -84,23 +97,14 @@ impl RemoteArgs {
     ///
     /// The default cookie applies only to a loopback URL, because the cookie of a local zakura
     /// gives access to that node: ztreamerd must not send it to another host.
-    fn auth(&self, default_cookie: &Path) -> Result<Auth> {
-        let Some(url) = &self.remote_rpc else {
-            return Ok(Auth::None);
-        };
-        Ok(match (&self.remote_rpc_cookie, url.credentials()) {
-            (Some(_), Some(_)) => {
-                return Err(eyre!(
-                    "use --remote-rpc-cookie or credentials in the --remote-rpc URL, not both"
-                ));
-            }
-            (Some(cookie), None) => Auth::Cookie(cookie.clone()),
-            (None, Some(credentials)) => credentials.clone(),
-            (None, None) if url.is_loopback() && default_cookie.is_file() => {
+    fn auth(&self, default_cookie: &Path) -> Auth {
+        match &self.auth {
+            Some(auth) => auth.clone(),
+            None if self.url.is_loopback() && default_cookie.is_file() => {
                 Auth::Cookie(default_cookie.to_owned())
             }
-            (None, None) => Auth::None,
-        })
+            None => Auth::None,
+        }
     }
 }
 
@@ -132,7 +136,7 @@ impl RemoteNode {
     /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
     pub(crate) async fn run_until(
         self,
-        cli: DaemonArgs,
+        config: DaemonConfig,
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
@@ -148,7 +152,7 @@ impl RemoteNode {
                 Ok(())
             }
         };
-        let application = self.application(cli, grpc_server, shutdown.clone());
+        let application = self.application(config, grpc_server, shutdown.clone());
         lifecycle::supervise(node, application, shutdown, signal).await
     }
 
@@ -160,7 +164,7 @@ impl RemoteNode {
     /// of another network.
     async fn application(
         self,
-        cli: DaemonArgs,
+        config: DaemonConfig,
         grpc_server: Server,
         shutdown: CancellationToken,
     ) -> Result<()> {
@@ -169,7 +173,7 @@ impl RemoteNode {
         };
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
-        let index = cli.open_index(&network).await?;
+        let index = config.index.open(&network).await?;
         let import =
             self.replica.import(&self.client, self.id(), &info, &network, &index, &shutdown);
         if import.await?.is_break() {
@@ -181,7 +185,7 @@ impl RemoteNode {
             return Ok(());
         };
         info!(import_state = "tail");
-        run_application(cli, grpc_server, index, &network, None, sources, shutdown).await
+        run_application(config, grpc_server, index, &network, None, sources, shutdown).await
     }
 
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.

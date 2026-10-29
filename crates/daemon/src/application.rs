@@ -31,7 +31,7 @@ use ztreamer_sync::{
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
 
-use crate::{DaemonArgs, embedded::Embedded, lifecycle};
+use crate::{DaemonConfig, ServerConfig, SyncConfig, embedded::Embedded, lifecycle};
 
 /// The chain access that one node mode gives the daemon.
 pub(crate) struct NodeSources<T, H, B> {
@@ -51,7 +51,7 @@ pub(crate) struct NodeSources<T, H, B> {
 /// this process. Then the p2p service gets the compact service. Else the remote mode logs the
 /// import state `following` after the head reconcile.
 pub(crate) async fn run_application<T, H, B>(
-    cli: DaemonArgs,
+    config: DaemonConfig,
     mut grpc_server: Server,
     index: Arc<Index>,
     network: &Network,
@@ -66,13 +66,13 @@ where
 {
     let NodeSources { tail, head, backend, verified_by } = sources;
 
-    let pipeline = PipelineConfig::from(&cli);
+    let SyncConfig { pipeline, index_only } = config.sync;
     let ControlFlow::Continue(state) =
-        sync_historical(tail, &index, pipeline, cli.index_only, &shutdown).await?
+        sync_historical(tail, &index, pipeline, index_only, &shutdown).await?
     else {
         return Ok(());
     };
-    if cli.index_only || shutdown.is_cancelled() {
+    if index_only || shutdown.is_cancelled() {
         return Ok(());
     }
 
@@ -85,7 +85,7 @@ where
         network.bip70_network_name(),
         backend,
     )
-    .with_ping_enabled(cli.ping_very_insecure)
+    .with_ping_enabled(config.servers.ping_very_insecure)
     .with_node_version(node::NodeClient::version());
     if reconcile_head(&follower, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
@@ -100,7 +100,7 @@ where
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact))
         .add_service(ReplicatorServer::new(replicator));
-    serve(follower, head, pipeline, grpc, &cli, filler, &shutdown).await
+    serve(follower, head, pipeline, grpc, &config.servers, filler, &shutdown).await
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -182,7 +182,7 @@ async fn serve(
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     grpc: Router,
-    cli: &DaemonArgs,
+    servers: &ServerConfig,
     filler: RangeMetaFiller,
     shutdown: &CancellationToken,
 ) -> Result<()> {
@@ -199,8 +199,8 @@ async fn serve(
     });
     let mut grpc = tokio::spawn({
         let receiver = server_shutdown.subscribe();
-        let address = cli.grpc_listen;
-        let tls = cli.tls_cert.is_some();
+        let address = servers.grpc_listen;
+        let tls = servers.tls.is_some();
         async move {
             info!(%address, tls, "serving CompactTxStreamer and Replicator gRPC");
             grpc.serve_with_shutdown(address, shutdown_requested(receiver))

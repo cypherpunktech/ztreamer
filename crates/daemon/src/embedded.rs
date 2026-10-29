@@ -2,7 +2,7 @@
 //! finalized database of the node, and the head and the chain state from the node. The node also
 //! serves the compact service to its p2p peers.
 
-use std::{ops::ControlFlow, sync::Arc};
+use std::{ops::ControlFlow, path::PathBuf, sync::Arc};
 
 use eyre::{Result, WrapErr, eyre};
 use tokio_util::sync::CancellationToken;
@@ -13,7 +13,7 @@ use ztreamer_embedded::{self as node, InProcessBackend};
 use ztreamer_p2p::P2pCompactService;
 
 use crate::{
-    DaemonArgs,
+    DaemonConfig,
     application::{NodeSources, run_application},
     lifecycle,
 };
@@ -25,10 +25,10 @@ pub(crate) struct EmbeddedNode {
 }
 
 impl EmbeddedNode {
-    /// Loads the Zakura configuration of `--zakura-config`. Zakura defaults and `ZAKURA_*`
+    /// Loads the Zakura configuration of `zakura_config`. Zakura defaults and `ZAKURA_*`
     /// variables apply.
-    pub(crate) fn load(cli: &DaemonArgs) -> Result<Self> {
-        let config = ZakuradConfig::load(cli.zakura_config.clone())
+    pub(crate) fn load(zakura_config: Option<PathBuf>) -> Result<Self> {
+        let config = ZakuradConfig::load(zakura_config)
             .map_err(|error| eyre!(error))
             .wrap_err("load Zakura configuration")?;
         Ok(Self { config })
@@ -38,13 +38,13 @@ impl EmbeddedNode {
     /// the index and starts Zakura.
     pub(crate) async fn run(
         self,
-        cli: DaemonArgs,
+        daemon: DaemonConfig,
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
         let Self { config } = self;
         let network = config.network.network.clone();
-        let index = cli.open_index(&network).await?;
+        let index = daemon.index.open(&network).await?;
 
         let p2p = Arc::new(P2pCompactService::pending());
         info!(network = %network, "starting embedded Zakura");
@@ -78,8 +78,16 @@ impl EmbeddedNode {
                 return Ok(());
             }
             let embedded = Some(Embedded { p2p: p2p.clone() });
-            run_application(cli, grpc_server, index, &network, embedded, sources, shutdown.clone())
-                .await
+            run_application(
+                daemon,
+                grpc_server,
+                index,
+                &network,
+                embedded,
+                sources,
+                shutdown.clone(),
+            )
+            .await
         };
 
         lifecycle::supervise(node, application, shutdown.clone(), signal).await

@@ -1,26 +1,45 @@
-//! Test fixtures for the daemon tests: a parser of the daemon flags, a free local address, a poll
-//! of `GetLatestBlock`, and a mock node with another chain name.
+//! Test fixtures for the daemon tests: the configuration of a daemon in the remote mode, a free
+//! local address, a poll of `GetLatestBlock`, and a mock node with another chain name.
 
 use std::{
     net::{SocketAddr, TcpListener},
+    num::NonZeroUsize,
+    path::Path,
     time::Duration,
 };
 
-use clap::Parser;
 use serde_json::json;
 use tokio::time::timeout;
 use ztreamer_protocol::proto::{
     BlockId, ChainSpec, compact_tx_streamer_client::CompactTxStreamerClient,
 };
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
+use ztreamer_sync::pipeline::PipelineConfig;
 
-use crate::DaemonArgs;
+use crate::{DaemonConfig, IndexConfig, Mode, RemoteConfig, ServerConfig, SyncConfig};
 
-/// The daemon flags as a command, as `ztreamerd` parses them with no subcommand.
-#[derive(Debug, Parser)]
-pub(crate) struct TestCli {
-    #[command(flatten)]
-    pub(crate) daemon: DaemonArgs,
+/// The configuration of a daemon in the remote mode on the node at `url`, with a 64 MiB index in
+/// `dir` and the import of `replicate_from`. The other values are the defaults of `ztreamerd`.
+pub(crate) fn remote_config(dir: &Path, url: &str, replicate_from: &str) -> DaemonConfig {
+    let remote =
+        RemoteConfig::new(url.parse().unwrap(), None, replicate_from.parse().unwrap()).unwrap();
+    DaemonConfig {
+        index: IndexConfig { dir: dir.to_owned(), map_size: NonZeroUsize::new(64 << 20).unwrap() },
+        sync: SyncConfig { pipeline: PipelineConfig::default(), index_only: false },
+        servers: ServerConfig {
+            grpc_listen: "127.0.0.1:9067".parse().unwrap(),
+            tls: None,
+            metrics_listen: "127.0.0.1:9999".parse().unwrap(),
+            ping_very_insecure: false,
+        },
+        mode: Mode::Remote(Box::new(remote)),
+    }
+}
+
+/// The remote configuration of `config`. Panics in the embedded mode.
+pub(crate) fn remote_mode(config: &DaemonConfig) -> &RemoteConfig {
+    let Mode::Remote(remote) = &config.mode else { panic!("not the remote mode") };
+    remote
 }
 
 /// A local address with no listener.

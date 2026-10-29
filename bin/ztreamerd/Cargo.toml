@@ -17,7 +17,9 @@ zakura-chain.workspace = true
 zeroize = "1"
 ztreamer-daemon = { path = "../../crates/daemon" }
 ztreamer-index = { path = "../../crates/index" }
+ztreamer-remote = { path = "../../crates/remote" }
 ztreamer-replicator = { path = "../../crates/replicator" }
+ztreamer-sync = { path = "../../crates/sync" }
 
 [dev-dependencies]
 serde_json = "1"
