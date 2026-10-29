@@ -15,7 +15,7 @@ use ztreamer_p2p::P2pCompactService;
 use crate::{
     DaemonConfig,
     application::{NodeSources, run_application},
-    lifecycle,
+    lifecycle::Supervisor,
 };
 
 /// An embedded Zakura node, from its configuration.
@@ -35,7 +35,8 @@ impl EmbeddedNode {
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It opens
-    /// the index and starts Zakura.
+    /// the index and starts Zakura on a thread of the blocking pool: the future of Zakura is not
+    /// `Send`.
     pub(crate) async fn run(
         self,
         daemon: DaemonConfig,
@@ -49,18 +50,26 @@ impl EmbeddedNode {
         let p2p = Arc::new(P2pCompactService::pending());
         info!(network = %network, "starting embedded Zakura");
         let shutdown = CancellationToken::new();
+        let supervisor = Supervisor::new(shutdown.clone());
+        let tasks = supervisor.tasks().clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let node = async {
-            // Keep Zakura's large startup future on the heap while polling it here.
-            Box::pin(zakurad::node::run_with_services_ready(
-                config,
-                vec![p2p.registration()],
-                shutdown.clone(),
-                ready_tx,
-            ))
-            .await
-            .map_err(|error| eyre!("Zakura failed: {error}"))
-        };
+        let services = vec![p2p.registration()];
+        let zakura_shutdown = shutdown.clone();
+        tasks.spawn_on_blocking_thread(
+            "Zakura",
+            "Zakura stopped unexpectedly",
+            move || async move {
+                // Keep Zakura's large startup future on the heap while polling it.
+                Box::pin(zakurad::node::run_with_services_ready(
+                    config,
+                    services,
+                    zakura_shutdown,
+                    ready_tx,
+                ))
+                .await
+                .map_err(|error| eyre!("Zakura failed: {error}"))
+            },
+        );
         let application = async {
             let services = tokio::select! {
                 biased;
@@ -78,19 +87,10 @@ impl EmbeddedNode {
                 return Ok(());
             }
             let embedded = Some(Embedded { p2p: p2p.clone() });
-            run_application(
-                daemon,
-                grpc_server,
-                index,
-                &network,
-                embedded,
-                sources,
-                shutdown.clone(),
-            )
-            .await
+            run_application(daemon, grpc_server, index, &network, embedded, sources, tasks).await
         };
 
-        lifecycle::supervise(node, application, shutdown.clone(), signal).await
+        supervisor.run(signal, application).await
     }
 }
 

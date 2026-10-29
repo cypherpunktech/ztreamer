@@ -1,6 +1,6 @@
 //! The part of the daemon that both node modes share: the historical index pass, the head
-//! reconcile, then the head follower, the gRPC server and the `range_meta` filler until
-//! shutdown.
+//! reconcile, then the head follower, the gRPC server and the `range_meta` filler in the
+//! [`TaskSet`] until shutdown.
 
 use std::{
     ops::ControlFlow,
@@ -12,9 +12,8 @@ use std::{
 };
 
 use eyre::{Result, WrapErr, eyre};
-use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::{Server, server::Router};
+use tonic::transport::Server;
 use tracing::info;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
@@ -27,11 +26,16 @@ use ztreamer_protocol::{
 use ztreamer_replicator::{RangeMetaFiller, ReplicatorService};
 use ztreamer_service::CompactService;
 use ztreamer_sync::{
-    head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
+    head::{CanonicalBlockSource, HeadFollower, HeadSyncError},
     pipeline::{FinalizedBlockSource, HistoricalPipeline, PipelineConfig},
 };
 
-use crate::{DaemonConfig, ServerConfig, SyncConfig, embedded::Embedded, lifecycle};
+use crate::{
+    DaemonConfig, SyncConfig,
+    embedded::Embedded,
+    lifecycle::TaskSet,
+    tasks::{FillerTask, GrpcTask, HeadFollowerTask, TASK_STOPPED},
+};
 
 /// The chain access that one node mode gives the daemon.
 pub(crate) struct NodeSources<T, H, B> {
@@ -46,10 +50,10 @@ pub(crate) struct NodeSources<T, H, B> {
     pub(crate) verified_by: NodeId,
 }
 
-/// Indexes, then serves until shutdown. The node of `sources` must be ready for the historical
-/// index pass. The `range_meta` filler runs in both modes. `embedded` is set when a node runs in
-/// this process. Then the p2p service gets the compact service. Else the remote mode logs the
-/// import state `following` after the head reconcile.
+/// Indexes, then serves until shutdown: the server tasks join `tasks`. The node of `sources` must
+/// be ready for the historical index pass. The `range_meta` filler runs in both modes. `embedded`
+/// is set when a node runs in this process. Then the p2p service gets the compact service. Else
+/// the remote mode logs the import state `following` after the head reconcile.
 pub(crate) async fn run_application<T, H, B>(
     config: DaemonConfig,
     mut grpc_server: Server,
@@ -57,7 +61,7 @@ pub(crate) async fn run_application<T, H, B>(
     network: &Network,
     embedded: Option<Embedded>,
     sources: NodeSources<T, H, B>,
-    shutdown: CancellationToken,
+    tasks: TaskSet,
 ) -> Result<()>
 where
     T: FinalizedBlockSource + Send + 'static,
@@ -65,6 +69,7 @@ where
     B: StateBackend,
 {
     let NodeSources { tail, head, backend, verified_by } = sources;
+    let shutdown = tasks.shutdown().clone();
 
     let SyncConfig { pipeline, index_only } = config.sync;
     let ControlFlow::Continue(state) =
@@ -100,7 +105,18 @@ where
     let grpc = grpc_server
         .add_service(CompactTxStreamerServer::new(compact))
         .add_service(ReplicatorServer::new(replicator));
-    serve(follower, head, pipeline, grpc, &config.servers, filler, &shutdown).await
+
+    // The supervisor drains the three tasks before it gives a result, also on failure. Thus the
+    // caller can close the index: the filler holds it no more.
+    let address = config.servers.grpc_listen;
+    let grpc = GrpcTask { router: grpc, address, tls: config.servers.tls.is_some() };
+    let filler = FillerTask { filler, snapshots: follower.subscribe() };
+    let follower = HeadFollowerTask { follower, source: head, pipeline };
+    tasks.spawn("gRPC", TASK_STOPPED, grpc.run(shutdown.clone()));
+    tasks.spawn("head follower", TASK_STOPPED, follower.run(shutdown.clone()));
+    tasks.spawn("range_meta filler", TASK_STOPPED, filler.run(shutdown.clone()));
+    shutdown.cancelled().await;
+    Ok(())
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -172,73 +188,4 @@ async fn reconcile_head(
         _ = shutdown.cancelled() => Ok(ControlFlow::Break(())),
         result = reconcile => result.map(|_| ControlFlow::Continue(())),
     }
-}
-
-/// Runs the head follower, the gRPC server and `filler` until shutdown or until one of the three
-/// tasks stops. The server serves CompactTxStreamer and Replicator on one listener. Returns when
-/// the filler holds the index no more, so the caller can close the index.
-async fn serve(
-    head: HeadFollower,
-    source: impl CanonicalBlockSource + 'static,
-    pipeline: PipelineConfig,
-    grpc: Router,
-    servers: &ServerConfig,
-    filler: RangeMetaFiller,
-    shutdown: &CancellationToken,
-) -> Result<()> {
-    let (server_shutdown, _) = watch::channel(false);
-    let mut filler =
-        tokio::spawn(filler.run(head.subscribe(), shutdown_requested(server_shutdown.subscribe())));
-    let mut follower = tokio::spawn({
-        let receiver = server_shutdown.subscribe();
-        async move {
-            head.follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
-                .await
-                .wrap_err("head follower failed")
-        }
-    });
-    let mut grpc = tokio::spawn({
-        let receiver = server_shutdown.subscribe();
-        let address = servers.grpc_listen;
-        let tls = servers.tls.is_some();
-        async move {
-            info!(%address, tls, "serving CompactTxStreamer and Replicator gRPC");
-            grpc.serve_with_shutdown(address, shutdown_requested(receiver))
-                .await
-                .wrap_err("gRPC server failed")
-        }
-    });
-
-    let (mut grpc_result, mut follower_result, mut filler_result) = (None, None, None);
-    tokio::select! {
-        _ = shutdown.cancelled() => {},
-        result = &mut grpc => grpc_result = Some(result),
-        result = &mut follower => follower_result = Some(result),
-        result = &mut filler => filler_result = Some(result),
-    }
-    let task_exited = grpc_result.is_some() || follower_result.is_some() || filler_result.is_some();
-    let _ = server_shutdown.send(true);
-
-    // Drain all three tasks before inspecting a result, including on failure. The filler
-    // returns after its last index read on a blocking thread.
-    let ((grpc_result, follower_result), filler_result) = lifecycle::drain_both(
-        (lifecycle::drain_both((grpc, grpc_result), (follower, follower_result)), None),
-        (filler, filler_result),
-    )
-    .await;
-    task_result(grpc_result, "gRPC")?;
-    task_result(follower_result, "head follower")?;
-    filler_result.wrap_err("range_meta filler task panicked")?;
-    if task_exited {
-        return Err(eyre!("daemon task stopped unexpectedly"));
-    }
-    Ok(())
-}
-
-async fn shutdown_requested(mut receiver: watch::Receiver<bool>) {
-    while !*receiver.borrow() && receiver.changed().await.is_ok() {}
-}
-
-fn task_result(result: Result<Result<()>, tokio::task::JoinError>, name: &str) -> Result<()> {
-    result.wrap_err_with(|| format!("{name} task panicked"))?
 }
