@@ -13,11 +13,15 @@
 //!   manifest from `ListRanges` with [`Manifest::from_contiguous_entries`], as
 //!   `ztreamerd export-snapshot` does. It opens at most [`PEER_RANGE_STREAMS`] `GetRange`
 //!   streams at a time. When the peer refuses a stream with `RESOURCE_EXHAUSTED`, it waits and
-//!   asks again: a busy peer is not a failed peer.
+//!   asks again: a busy peer is not a failed peer. HTTP/2 keepalive pings find a dead peer.
 //!
 //! [`Fetcher`] reads complete blobs from a source. It continues a cut transfer from the last
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
-//! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
+//! its manifest entry. A blob that fails this check is [`FetchError::Digest`]. A request of a
+//! source that sends no byte for [`MAX_WAIT_WITHOUT_BYTES`] is [`FetchError::Stalled`].
+
+mod refusal_log;
+mod source_progress;
 
 use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 
@@ -26,10 +30,10 @@ use bytes::{Bytes, BytesMut};
 use ed25519_dalek::VerifyingKey;
 use http::{Request, StatusCode, Uri, header::RANGE};
 use http_body_util::{BodyExt as _, Empty};
-use tokio::sync::Semaphore;
+use tokio::{sync::Semaphore, time::Instant};
 use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Code, Streaming, transport::Channel};
-use tracing::{debug, warn};
+use tracing::warn;
 use zakura_chain::block;
 use ztreamer_protocol::replicate::{
     self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
@@ -37,6 +41,7 @@ use ztreamer_protocol::replicate::{
 use ztreamer_remote::HttpsClient;
 use ztreamer_snapshot::manifest_entry::{BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError};
 
+use self::{refusal_log::RefusalLog, source_progress::SourceProgress};
 use crate::importer::MAX_BLOB_BYTES_BEFORE_INSTALL;
 use ztreamer_snapshot::{
     layout::{Latest, LatestError, RangePath, SignatureFile},
@@ -52,6 +57,11 @@ pub const MAX_RESUMES_WITHOUT_PROGRESS: u32 = 5;
 /// each transfer after a few bytes gets the waits and the limit of a failure with no progress,
 /// and a blob of `n` bytes needs at most `n / RESUME_PROGRESS_BYTES` resumes with progress.
 pub const RESUME_PROGRESS_BYTES: usize = 1 << 20;
+
+/// The longest time that a blob request waits when its source sends no byte. The time starts at
+/// the later of the request start and the last byte of any request of the source. Then
+/// [`Fetcher::blob`] stops with [`FetchError::Stalled`], and does not resume.
+pub const MAX_WAIT_WITHOUT_BYTES: Duration = Duration::from_secs(5 * 60);
 
 /// The `GetRange` streams that one [`PeerSource`] opens at a time. It is the stream limit of the
 /// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
@@ -193,13 +203,28 @@ pub enum FetchError {
         #[source]
         mismatch: BlobMismatch,
     },
+    /// The source sent no byte of the blob for [`MAX_WAIT_WITHOUT_BYTES`] or more.
+    #[error(
+        "range {start_height} received no byte for {} s at offset {offset}; if this repeats, \
+         use another --replicate-from source",
+        .waited.as_secs()
+    )]
+    Stalled {
+        /// The first height of the range.
+        start_height: u32,
+        /// The bytes of the blob that the fetch received.
+        offset: u64,
+        /// The time with no byte.
+        waited: Duration,
+    },
 }
 
 impl FetchError {
     /// Returns `true` for an error of the transfer, which a new request can avoid.
     ///
     /// A gRPC status that tells that the peer does not have the range or refuses the request is
-    /// not one: a new request gets the same answer.
+    /// not one: a new request gets the same answer. [`FetchError::Stalled`] is not one: the
+    /// source sent no byte for a long time, thus the fetch stops.
     fn is_transfer(&self) -> bool {
         match self {
             Self::Http { .. } | Self::Body(_) => true,
@@ -237,12 +262,18 @@ impl FetchError {
 pub struct Fetcher {
     source: Box<dyn RangeSource>,
     resume_rule: ResumeRule,
+    progress: SourceProgress,
 }
 
 impl Fetcher {
     /// A fetcher of the blobs of `source`.
     pub fn new(source: Box<dyn RangeSource>) -> Self {
-        Self { source, resume_rule: ResumeRule::default() }
+        Self::with_resume_rule(source, ResumeRule::default())
+    }
+
+    /// A fetcher of the blobs of `source` with `resume_rule`.
+    fn with_resume_rule(source: Box<dyn RangeSource>, resume_rule: ResumeRule) -> Self {
+        Self { source, resume_rule, progress: SourceProgress::default() }
     }
 
     /// The manifest of the source.
@@ -259,6 +290,11 @@ impl Fetcher {
     /// byte of the entry does not resume: the digest check decides. A blob with a wrong length
     /// or digest is [`FetchError::Digest`]. The stream of a failed transfer is dropped before
     /// the next request, thus the source can release its place before the resume.
+    ///
+    /// A request that receives no byte for [`MAX_WAIT_WITHOUT_BYTES`] stops the fetch with
+    /// [`FetchError::Stalled`], with no resume. The time starts at the later of the request start
+    /// and the last byte that any request of the source received. Thus a request that waits for
+    /// a place on a busy source does not stall while the source sends bytes to other requests.
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
         let mut stalled = StalledResumes::from(self.resume_rule);
@@ -291,32 +327,55 @@ impl Fetcher {
     }
 
     /// Appends the bytes of the blob of `entry` from `blob.len()` to `blob`, with one request.
+    /// The request stops with [`FetchError::Stalled`] when the source sends no byte for
+    /// [`ResumeRule::max_wait_without_bytes`].
     async fn transfer(&self, entry: &ManifestEntry, blob: &mut BytesMut) -> Result<(), FetchError> {
-        let mut chunks = self.source.fetch_blob(entry, blob.len() as u64).await?;
-        // More bytes than the entry gives fail the digest check: stop reading.
-        while blob.len() as u64 <= entry.blob_len {
-            let Some(chunk) = chunks.next().await else {
-                break;
-            };
-            blob.extend_from_slice(&chunk?);
-        }
-        Ok(())
+        let request_start = Instant::now();
+        let read = async {
+            let mut chunks = self.source.fetch_blob(entry, blob.len() as u64).await?;
+            // More bytes than the entry gives fail the digest check: stop reading.
+            while blob.len() as u64 <= entry.blob_len {
+                let Some(chunk) = chunks.next().await else {
+                    break;
+                };
+                let chunk = chunk?;
+                if !chunk.is_empty() {
+                    self.progress.record_byte();
+                }
+                blob.extend_from_slice(&chunk);
+            }
+            Ok(())
+        };
+        let max_wait = self.resume_rule.max_wait_without_bytes;
+        let waited = tokio::select! {
+            biased;
+            read = read => return read,
+            waited = self.progress.wait_for_stall(request_start, max_wait) => waited,
+        };
+        let (start_height, offset) = (entry.start_height, blob.len() as u64);
+        Err(FetchError::Stalled { start_height, offset, waited })
     }
 }
 
-/// The values of the resume rule of a [`Fetcher`]. The default is [`RESUME_PROGRESS_BYTES`] and
-/// a first wait of 1 s.
+/// The values of the resume rule of a [`Fetcher`]. The default is [`RESUME_PROGRESS_BYTES`], a
+/// first wait of 1 s and [`MAX_WAIT_WITHOUT_BYTES`].
 #[derive(Clone, Copy, Debug)]
 struct ResumeRule {
     /// The bytes that a failed transfer must receive to count as progress.
     progress_bytes: usize,
     /// The wait after the first failed transfer with no progress.
     first_wait: Duration,
+    /// The longest time that a request waits when its source sends no byte.
+    max_wait_without_bytes: Duration,
 }
 
 impl Default for ResumeRule {
     fn default() -> Self {
-        Self { progress_bytes: RESUME_PROGRESS_BYTES, first_wait: Duration::from_secs(1) }
+        Self {
+            progress_bytes: RESUME_PROGRESS_BYTES,
+            first_wait: Duration::from_secs(1),
+            max_wait_without_bytes: MAX_WAIT_WITHOUT_BYTES,
+        }
     }
 }
 
@@ -535,6 +594,18 @@ const _: () = assert!(
     "the peer connection window is above its limit: lower PEER_STREAM_WINDOW_BYTES"
 );
 
+/// The longest time that [`PeerSource::connect`], and each new connection of its channel, waits
+/// for the TCP connection to a peer.
+const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The time between two HTTP/2 keepalive pings to a peer, also with no open stream.
+const PEER_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The longest wait for the answer to a keepalive ping. With no answer, the connection closes
+/// and its streams fail with a transfer error. Thus a dead peer fails a stream in about 50 s,
+/// and [`Fetcher::blob`] resumes the transfer.
+const PEER_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// A ztreamer that serves the Replicator gRPC service.
 ///
 /// The clones of a source share one connection and one limit of [`PEER_RANGE_STREAMS`] open
@@ -545,6 +616,7 @@ pub struct PeerSource {
     endpoint: Uri,
     client: ReplicatorClient<Channel>,
     range_streams: RequestLimit,
+    refusals: Arc<RefusalLog>,
 }
 
 impl fmt::Debug for PeerSource {
@@ -558,15 +630,22 @@ impl PeerSource {
     /// A source over `channel`, a connection to `endpoint`.
     pub fn new(endpoint: Uri, channel: Channel) -> Self {
         let range_streams = RequestLimit::new(PEER_RANGE_STREAMS);
-        Self { endpoint, client: ReplicatorClient::new(channel), range_streams }
+        let (client, refusals) = (ReplicatorClient::new(channel), Arc::default());
+        Self { endpoint, client, range_streams, refusals }
     }
 
     /// Connects to the Replicator service at `endpoint`, with the receive windows
-    /// [`PEER_STREAM_WINDOW_BYTES`] and [`PEER_CONNECTION_WINDOW_BYTES`].
+    /// [`PEER_STREAM_WINDOW_BYTES`] and [`PEER_CONNECTION_WINDOW_BYTES`]. The connection waits
+    /// at most 10 s for TCP. It sends an HTTP/2 keepalive ping each 30 s, also with no open
+    /// stream, and closes when a ping gets no answer in 20 s.
     pub async fn connect(endpoint: Uri) -> Result<Self, FetchError> {
         let channel = Channel::builder(endpoint.clone())
             .initial_stream_window_size(PEER_STREAM_WINDOW_BYTES)
             .initial_connection_window_size(PEER_CONNECTION_WINDOW_BYTES)
+            .connect_timeout(PEER_CONNECT_TIMEOUT)
+            .http2_keep_alive_interval(PEER_KEEPALIVE_INTERVAL)
+            .keep_alive_timeout(PEER_KEEPALIVE_TIMEOUT)
+            .keep_alive_while_idle(true)
             .connect()
             .await?;
         Ok(Self::new(endpoint, channel))
@@ -575,9 +654,10 @@ impl PeerSource {
     /// Opens the `GetRange` stream of the range at `start_height` from byte `offset`.
     ///
     /// A `RESOURCE_EXHAUSTED` refusal is back-pressure: the peer runs its limit of streams. The
-    /// request waits with [`RefusalBackoff`] and asks again, with no limit on the attempts. A
-    /// stream that stopped can still hold its place on the peer for a short time after the
-    /// client drops it, thus a resume can get this refusal too.
+    /// request waits with [`RefusalBackoff`] and asks again. [`RefusalLog`] logs the refusals.
+    /// [`Fetcher`] stops the request when the peer sends no byte for
+    /// [`MAX_WAIT_WITHOUT_BYTES`]. A stream that stopped can still hold its place on the peer for
+    /// a short time after the client drops it, thus a resume can get this refusal too.
     async fn open_range_stream(
         &self,
         start_height: u32,
@@ -589,7 +669,7 @@ impl PeerSource {
             match self.client.clone().get_range(request).await {
                 Err(status) if status.code() == Code::ResourceExhausted => {
                     let wait = waits.next().expect("the backoff does not end");
-                    debug!(start_height, offset, %status, ?wait, "peer is busy; asking again");
+                    self.refusals.log_refusal(&self.endpoint, start_height, offset, &status, wait);
                     tokio::time::sleep(wait).await;
                 }
                 response => return Ok(response?.into_inner()),
