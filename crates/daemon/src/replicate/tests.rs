@@ -30,6 +30,7 @@ use ztreamer_replicator::{SnapshotExport, snapshot_writer::SnapshotWriter};
 use super::*;
 use crate::{
     DaemonConfig,
+    launcher::Launcher,
     remote::RemoteNode,
     test_utils::{free_addr, latest_block_at, node_with_chain_name, remote_config, remote_mode},
 };
@@ -149,7 +150,8 @@ async fn daemon(
     let replica =
         Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..remote.replica() };
     let client = remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap();
-    RemoteNode::new(client, replica).run_until(config, Server::builder(), signal).await
+    let node = RemoteNode::new(client, replica);
+    Launcher::new(config, Server::builder()).run(node, signal).await
 }
 
 /// Runs the replica with no signal until it stops by itself, and gives the error. Asserts that

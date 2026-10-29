@@ -2,6 +2,7 @@ use std::{future, time::Duration};
 
 use serde_json::json;
 use tokio::{task::JoinHandle, time::timeout};
+use tonic::transport::Server;
 use zakura_chain::{
     block::{Block, Height},
     serialization::ZcashDeserializeInto as _,
@@ -14,7 +15,11 @@ use ztreamer_remote::{
 };
 
 use super::*;
-use crate::test_utils::{free_addr, node_with_chain_name, remote_config, remote_mode};
+use crate::{
+    DaemonConfig,
+    launcher::Launcher,
+    test_utils::{free_addr, node_with_chain_name, remote_config, remote_mode},
+};
 
 /// A `--replicate-from` source that no server serves. The tests here stop before the import
 /// fetches from it, or test that the import fails.
@@ -48,7 +53,7 @@ fn node(config: &DaemonConfig) -> RemoteNode {
 /// Runs the daemon with no signal, until it stops by itself.
 async fn run(config: DaemonConfig) -> Result<()> {
     let node = node(&config);
-    let daemon = node.run_until(config, Server::builder(), future::pending());
+    let daemon = Launcher::new(config, Server::builder()).run(node, future::pending());
     timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
 }
 
@@ -71,7 +76,7 @@ impl Daemon {
         let node = node(&config);
         let signal = CancellationToken::new();
         let received = signal.clone().cancelled_owned();
-        let daemon = node.run_until(config, Server::builder(), async move {
+        let daemon = Launcher::new(config, Server::builder()).run(node, async move {
             received.await;
             Ok(())
         });

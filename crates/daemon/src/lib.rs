@@ -1,16 +1,18 @@
-//! The ztreamer daemon: an embedded Zakura node, or a replica import and a remote Zakura node;
-//! then historical indexing, head following, and the servers.
+//! The ztreamer daemon: one node, an embedded Zakura node or a remote zakura node, through the
+//! fixed stages of the daemon: boot, historical, catch up, and serve.
 //!
 //! `ztreamerd` makes a [`DaemonConfig`] from the command line and calls [`run_daemon`].
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod application;
 mod config;
 mod daemon;
 mod embedded;
+mod index_pass;
+mod launcher;
 mod lifecycle;
 mod metrics_endpoint;
+mod node;
 mod remote;
 mod replicate;
 mod tasks;

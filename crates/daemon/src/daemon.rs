@@ -1,10 +1,11 @@
-//! The entry of the daemon: it selects the node mode, opens the metrics endpoint and runs the
-//! daemon until shutdown.
+//! The entry of the daemon: it selects the node, opens the metrics endpoint and runs the node
+//! through the stages of the [`Launcher`] until shutdown.
 
 use eyre::Result;
 
 use crate::{
-    DaemonConfig, Mode, embedded::EmbeddedNode, lifecycle, metrics_endpoint::MetricsEndpoint,
+    DaemonConfig, Mode, embedded::EmbeddedNode, launcher::Launcher, lifecycle,
+    metrics_endpoint::MetricsEndpoint,
 };
 
 /// Runs the daemon of `config` until a shutdown signal, the end of the work
@@ -18,12 +19,12 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
         Mode::Remote(remote) => {
             let node = remote.node()?;
             metrics.start()?;
-            node.run_until(config, grpc_server, lifecycle::shutdown_signal()).await
+            Launcher::new(config, grpc_server).run(node, lifecycle::shutdown_signal()).await
         }
         Mode::Embedded { zakura_config } => {
             let node = EmbeddedNode::load(zakura_config.clone())?;
             metrics.start()?;
-            node.run(config, grpc_server, lifecycle::shutdown_signal()).await
+            Launcher::new(config, grpc_server).run(node, lifecycle::shutdown_signal()).await
         }
     }
 }

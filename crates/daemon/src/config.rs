@@ -18,7 +18,7 @@ use crate::remote::RemoteConfig;
 pub struct DaemonConfig {
     /// The LMDB compact index.
     pub index: IndexConfig,
-    /// The historical index pass and the head follower.
+    /// The block pipeline passes and the head follower.
     pub sync: SyncConfig,
     /// The gRPC server and the metrics endpoint.
     pub servers: ServerConfig,
@@ -67,12 +67,13 @@ impl IndexConfig {
     }
 }
 
-/// The historical index pass and the head follower.
+/// The block pipeline passes and the head follower.
 #[derive(Clone, Copy, Debug)]
 pub struct SyncConfig {
     /// The limits of the historical pipeline.
     pub pipeline: PipelineConfig,
-    /// Stop after the historical index pass, with no servers and no head follower.
+    /// Stop after the pass of the catch-up stage, with no head reconcile, no servers and no head
+    /// follower.
     pub index_only: bool,
 }
 
