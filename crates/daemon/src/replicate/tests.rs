@@ -1,7 +1,6 @@
-use std::{future, net::SocketAddr, path::Path, time::Duration};
+use std::{future, net::SocketAddr, num::NonZeroUsize, path::Path, time::Duration};
 
 use chrono::Utc;
-use clap::Parser;
 use ed25519_dalek::SigningKey;
 use serde_json::json;
 use tempfile::TempDir;
@@ -30,9 +29,9 @@ use ztreamer_replicator::{SnapshotExport, snapshot_writer::SnapshotWriter};
 
 use super::*;
 use crate::{
-    DaemonArgs,
+    DaemonConfig,
     remote::RemoteNode,
-    test_utils::{TestCli, free_addr, latest_block_at, node_with_chain_name},
+    test_utils::{free_addr, latest_block_at, node_with_chain_name, remote_config, remote_mode},
 };
 
 /// The ranges of the snapshot: three epochs, the last with one range.
@@ -131,27 +130,26 @@ impl Snapshot {
     }
 }
 
-/// The flags of a replica of `snapshot` on the node at `url`, with the index in `dir`, then
-/// `extra`.
-fn cli(dir: &TempDir, url: &str, snapshot: &Snapshot, extra: &[&str]) -> DaemonArgs {
-    let dir = dir.path().to_str().unwrap();
-    let flags = ["--index-dir", dir, "--index-map-size", "1073741824", "--remote-rpc", url];
-    let base = snapshot.server.base.to_string();
-    let flags = flags.into_iter().chain(["--replicate-from", &base]);
-    TestCli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
+/// The configuration of a replica of `snapshot` on the node at `url`, with a 1 GiB index in
+/// `dir`.
+fn config(dir: &TempDir, url: &str, snapshot: &Snapshot) -> DaemonConfig {
+    let mut config = remote_config(dir.path(), url, &snapshot.server.base.to_string());
+    config.index.map_size = NonZeroUsize::new(1 << 30).unwrap();
+    config
 }
 
-/// The daemon of `cli` until `signal`, with the snapshot key of `seed` in place of the built-in
-/// key, and with no default cookie file.
+/// The daemon of `config` until `signal`, with the snapshot key of `seed` in place of the
+/// built-in key, and with no default cookie file.
 async fn daemon(
-    cli: DaemonArgs,
+    config: DaemonConfig,
     seed: [u8; 32],
     signal: impl Future<Output = Result<()>>,
 ) -> Result<()> {
+    let remote = remote_mode(&config);
     let replica =
-        Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..cli.replicate.replica() };
-    let client = cli.remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap().unwrap();
-    RemoteNode::new(client, replica).run_until(cli, Server::builder(), signal).await
+        Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..remote.replica() };
+    let client = remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap();
+    RemoteNode::new(client, replica).run_until(config, Server::builder(), signal).await
 }
 
 /// Runs the replica with no signal until it stops by itself, and gives the error. Asserts that
@@ -160,7 +158,7 @@ async fn refusal(snapshot: &Snapshot, url: &str, seed: [u8; 32]) -> eyre::Report
     let dir = tempfile::tempdir().unwrap();
     let run = timeout(
         Duration::from_secs(30),
-        daemon(cli(&dir, url, snapshot, &[]), seed, future::pending()),
+        daemon(config(&dir, url, snapshot), seed, future::pending()),
     );
     let error = run.await.expect("the replica stops by itself").unwrap_err();
     assert!(!snapshot.fetched_a_range(), "{error:?}");
@@ -183,10 +181,11 @@ async fn serve_until<T>(
     served: impl AsyncFnOnce(SocketAddr) -> T,
 ) -> (BlockId, T) {
     let grpc = free_addr();
-    let cli = cli(dir, &node.url().to_string(), snapshot, &["--grpc-listen", &grpc.to_string()]);
+    let mut config = config(dir, &node.url().to_string(), snapshot);
+    config.servers.grpc_listen = grpc;
     let signal = CancellationToken::new();
     let received = signal.clone().cancelled_owned();
-    let task = tokio::spawn(daemon(cli, SEED, async move {
+    let task = tokio::spawn(daemon(config, SEED, async move {
         received.await;
         Ok(())
     }));
@@ -279,9 +278,10 @@ async fn an_index_only_replica_stops_after_the_import_and_the_tail() {
     let snapshot = Snapshot::new().await;
     let (_chain, node) = snapshot.node().await;
     let dir = tempfile::tempdir().unwrap();
-    let cli = cli(&dir, &node.url().to_string(), &snapshot, &["--index-only"]);
+    let mut config = config(&dir, &node.url().to_string(), &snapshot);
+    config.sync.index_only = true;
 
-    let run = timeout(Duration::from_secs(60), daemon(cli, SEED, future::pending()));
+    let run = timeout(Duration::from_secs(60), daemon(config, SEED, future::pending()));
     run.await.expect("the replica stops by itself").unwrap();
 
     let state = Index::open_existing(dir.path(), 1 << 30).unwrap().state().unwrap();
@@ -326,22 +326,4 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
         cause.to_string().starts_with("remote zakura has genesis block")
     };
     assert!(error.chain().any(genesis), "{error:?}");
-}
-
-#[test]
-fn replicate_from_takes_one_snapshot_or_one_peer() {
-    let parse = |flags: &[&str]| {
-        let remote = ["ztreamerd", "--remote-rpc", "http://127.0.0.1:8232"];
-        TestCli::try_parse_from(remote.iter().chain(flags)).map(|cli| cli.daemon)
-    };
-    assert!(parse(&["--replicate-from", "peer"]).is_err());
-    assert!(parse(&["--replicate-from", "peer:9068/path"]).is_err());
-    let two =
-        ["--replicate-from", "https://snapshots.example/mainnet", "--replicate-from", "peer:9068"];
-    assert!(parse(&two).is_err());
-    let snapshot = parse(&two[..2]).unwrap().replicate.replica();
-    assert_eq!(snapshot.source.to_string(), "https://snapshots.example/mainnet");
-    let peer = parse(&two[2..]).unwrap().replicate.replica();
-    assert_eq!(peer.source.to_string(), "peer:9068");
-    assert_eq!(peer.source, ReplicaSource::Peer("http://peer:9068".parse().unwrap()));
 }

@@ -4784,7 +4784,6 @@ name = "ztreamer-daemon"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clap",
  "ed25519-dalek",
  "eyre",
  "getrandom 0.3.4",
@@ -5098,6 +5097,8 @@ dependencies = [
  "zeroize",
  "ztreamer-daemon",
  "ztreamer-index",
+ "ztreamer-remote",
  "ztreamer-replicator",
  "ztreamer-snapshot",
+ "ztreamer-sync",
 ]

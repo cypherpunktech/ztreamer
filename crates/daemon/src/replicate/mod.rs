@@ -11,7 +11,6 @@
 
 use std::{fmt, ops::ControlFlow, str::FromStr, sync::Arc};
 
-use clap::Args;
 use ed25519_dalek::VerifyingKey;
 use eyre::{Result, WrapErr, ensure, eyre};
 use http::Uri;
@@ -31,30 +30,9 @@ use ztreamer_remote::RemoteBackend;
 use ztreamer_remote::ZakuraClient;
 use ztreamer_snapshot::layout::SNAPSHOT_PUBKEY;
 
-/// The command-line flag of the import. It is off by default.
-#[derive(Debug, Args)]
-pub(crate) struct ReplicateArgs {
-    /// Import the sealed ranges from this source before the tail: an http:// or https:// base
-    /// URL of a snapshot, or the host:port of a peer that serves the Replicator gRPC service
-    /// without TLS. Needs --remote-rpc: the node that attests the import, and that ztreamerd
-    /// follows after it.
-    #[arg(long, value_name = "URL|HOST:PORT", requires = "remote_rpc")]
-    replicate_from: Option<ReplicaSource>,
-}
-
-impl ReplicateArgs {
-    /// The import of `--replicate-from`. Call it only in the remote mode: there, clap makes the
-    /// flag required.
-    pub(crate) fn replica(&self) -> Replica {
-        let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
-        let source = self.replicate_from.clone().expect("--remote-rpc requires --replicate-from");
-        Replica { source, key }
-    }
-}
-
-/// A `--replicate-from` value.
+/// The source of an import: a `--replicate-from` value.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ReplicaSource {
+pub enum ReplicaSource {
     /// A snapshot directory below an http:// or https:// base URL.
     Snapshot(Uri),
     /// A peer that serves the Replicator gRPC service at `http://host:port`.
@@ -112,6 +90,12 @@ pub(crate) struct Replica {
 }
 
 impl Replica {
+    /// The import of `source`. The built-in key [`SNAPSHOT_PUBKEY`] checks its snapshots.
+    pub(crate) fn new(source: ReplicaSource) -> Self {
+        let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
+        Self { source, key }
+    }
+
     /// Imports the epochs of the manifest above the sealed tip of `index`, checked against the
     /// node of `client`. Each installed row names the node as `id`. `info` is the
     /// `getblockchaininfo` answer of the node, and `network` the network of its chain. Breaks on
