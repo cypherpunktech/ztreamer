@@ -130,10 +130,7 @@ impl CompactService {
 mod tests {
     use tokio_stream::StreamExt;
 
-    use crate::{
-        service::test_utils::{hash, record},
-        test_utils::EphemeralService,
-    };
+    use crate::test_utils::{EphemeralService, hash, record};
 
     #[tokio::test]
     async fn subtree_stream_resolves_volatile_completion_blocks() {

@@ -4,7 +4,7 @@
 //! The compact index answers block and range requests. Everything else, from transparent address
 //! lookups to tree states to the mempool, comes from a node. `ztreamer_node::InProcessBackend`
 //! reaches the embedded Zakura in-process, through its `ReadStateService` and the mempool handle.
-//! [`RemoteBackend`](crate::RemoteBackend) reaches a remote node over JSON-RPC.
+//! [`RemoteBackend`](crate::remote::RemoteBackend) reaches a remote node over JSON-RPC.
 //!
 //! The trait speaks in `zakura_chain` types, not in `ReadResponse` variants and not in the wire
 //! encodings of the light wallet protocol. The service does the wire conversion. A remote

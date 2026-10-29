@@ -8,7 +8,7 @@ use ztreamer_protocol::{
     EncodedCompactBlock, proto, wire::compact_tx_streamer_server::CompactTxStreamer,
 };
 
-use crate::{CompactService, service::RpcStream};
+use crate::{CompactService, compact::RpcStream};
 
 // Bound the per-request deduplication set.
 const MAX_BALANCE_STREAM_ADDRESSES: usize = 10_000;

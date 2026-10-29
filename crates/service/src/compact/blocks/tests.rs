@@ -5,11 +5,8 @@ use ztreamer_indexer::{codec::CompactBlockRecord, index::BlockId, ingest::Ordere
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamer;
 
 use crate::{
-    service::{
-        MAX_RANGE_STREAMS, Readiness,
-        test_utils::{hash, parsed, range, record},
-    },
-    test_utils::EphemeralService,
+    compact::{MAX_RANGE_STREAMS, Readiness},
+    test_utils::{EphemeralService, hash, parsed, range, record},
 };
 
 #[tokio::test]

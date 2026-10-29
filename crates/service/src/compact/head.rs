@@ -151,7 +151,7 @@ mod tests {
     use super::*;
     use ztreamer_indexer::{head::HeadError, types::RawIndexBlock};
 
-    use crate::{service::test_utils::raw_block, test_utils::EphemeralService};
+    use crate::test_utils::{EphemeralService, raw_block};
 
     struct HeadSource(Vec<RawIndexBlock>);
 

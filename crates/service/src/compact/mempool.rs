@@ -154,7 +154,7 @@ mod tests {
         test_utils::{MockNode, Reply},
     };
 
-    use crate::RemoteBackend;
+    use crate::remote::RemoteBackend;
 
     /// A service over an empty index and a remote node with an empty mempool. Its head is fresh.
     async fn remote_service() -> (CompactService, MockNode, tempfile::TempDir) {
