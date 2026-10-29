@@ -5008,6 +5008,7 @@ dependencies = [
  "hyper-util",
  "incrementalmerkletree",
  "lru",
+ "metrics",
  "percent-encoding",
  "serde",
  "serde_json",

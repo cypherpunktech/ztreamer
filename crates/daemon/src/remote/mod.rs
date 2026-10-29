@@ -11,13 +11,13 @@ use std::{
 use eyre::{Result, WrapErr, eyre};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::info;
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_remote::{
-    Auth, NodeChain, NodeUrl, RemoteBackend, RemoteHeadSource, RemoteTailSource, RpcClient,
-    RpcCode, ZakuraClient,
+    Auth, NodeChain, NodeSyncWait, NodeUrl, NodeWaitError, RemoteBackend, RemoteHeadSource,
+    RemoteTailSource, RpcClient, ZakuraClient,
 };
 use ztreamer_service::CompactService;
 
@@ -27,7 +27,7 @@ use crate::{
     replicate::{Replica, ReplicaSource},
 };
 
-/// The time between two `getblockchaininfo` calls while the remote node is not ready.
+/// The time between two `getblockchaininfo` calls while the remote node is below the index tip.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The configuration of the remote mode: the `--remote-rpc` node, its credentials, and the
@@ -128,35 +128,20 @@ impl RemoteNode {
         NodeId { url: self.client.rpc().url().to_string(), version: String::new() }
     }
 
-    /// `getblockchaininfo`, sent again after [`READY_POLL_INTERVAL`] while the node is out of
-    /// reach or answers [`RpcCode::IN_WARMUP`]. Breaks on shutdown.
-    async fn blockchain_info_when_up(
+    /// `getblockchaininfo` when the best block of the node is at or above `height`. It waits
+    /// while the node is in warm-up or below `height` ([`NodeSyncWait`]). A node that is gone or
+    /// refuses the call is an error, and the daemon stops: systemd starts it again. Breaks on
+    /// shutdown.
+    async fn blockchain_info_at_height(
         &self,
+        height: u32,
         shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>> {
-        loop {
-            let Some(result) =
-                shutdown.run_until_cancelled(self.client.get_blockchain_info()).await
-            else {
-                return Ok(ControlFlow::Break(()));
-            };
-            match result {
-                Err(error) if error.rpc_code() == Some(RpcCode::IN_WARMUP) => {
-                    info!(%error, "waiting for remote zakura to end its warm-up");
-                }
-                Err(error) if error.is_unsent() => {
-                    warn!(%error, "waiting for remote zakura to accept connections");
-                }
-                result => {
-                    return result
-                        .map(ControlFlow::Continue)
-                        .wrap_err("read the chain of the remote zakura node");
-                }
-            }
-            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
-            {
-                return Ok(ControlFlow::Break(()));
-            }
+    ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>, NodeWaitError> {
+        let sync = NodeSyncWait::new(self.client.clone());
+        let wait = sync.wait_for_height(height);
+        match shutdown.run_until_cancelled(wait).await {
+            Some(info) => info.map(ControlFlow::Continue),
+            None => Ok(ControlFlow::Break(())),
         }
     }
 }
@@ -164,11 +149,16 @@ impl RemoteNode {
 impl Node for RemoteNode {
     type Components = RemoteComponents;
 
-    /// Reads the network from the node. It waits while the node is out of reach or in warm-up.
+    /// Reads the network from the node. It waits while the node is in warm-up, and fails when
+    /// the node is gone or refuses the call.
     async fn network(&mut self, shutdown: &CancellationToken) -> Result<ControlFlow<(), Network>> {
         let url = self.client.rpc().url();
         info!(host = url.host(), port = url.port_u16(), "using remote zakura");
-        let ControlFlow::Continue(info) = self.blockchain_info_when_up(shutdown).await? else {
+        // Each answer with a height is at or above height 0.
+        let info = self.blockchain_info_at_height(0, shutdown).await;
+        let ControlFlow::Continue(info) =
+            info.wrap_err("read the chain of the remote zakura node")?
+        else {
             return Ok(ControlFlow::Break(()));
         };
         let network = Network::try_from(NodeChain(info.chain()))?;
@@ -232,7 +222,9 @@ impl NodeComponents for RemoteComponents {
             {
                 return Ok(ControlFlow::Break(()));
             }
-            let ControlFlow::Continue(next) = self.node.blockchain_info_when_up(shutdown).await?
+            let next = self.node.blockchain_info_at_height(0, shutdown).await;
+            let ControlFlow::Continue(next) =
+                next.wrap_err("read the chain of the remote zakura node")?
             else {
                 return Ok(ControlFlow::Break(()));
             };
