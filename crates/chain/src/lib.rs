@@ -15,6 +15,4 @@ mod protobuf;
 pub mod test_utils;
 pub mod types;
 
-pub type Digest = [u8; 32];
-pub type EphemeralKey = [u8; 32];
-pub type Ciphertext = [u8; 52];
+pub use types::{Ciphertext, Digest, EphemeralKey};
