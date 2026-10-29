@@ -127,7 +127,12 @@ impl Snapshot {
 
     /// True if a request to the snapshot server asked for a range file.
     fn fetched_a_range(&self) -> bool {
-        self.server.requests().iter().any(|(path, _)| path.starts_with("ranges/"))
+        self.fetched_ranges() > 0
+    }
+
+    /// The requests to the snapshot server for a range file.
+    fn fetched_ranges(&self) -> usize {
+        self.server.requests().iter().filter(|(path, _)| path.starts_with("ranges/")).count()
     }
 }
 
@@ -291,22 +296,29 @@ async fn an_index_only_replica_stops_after_the_import_and_the_tail() {
     assert_eq!(state.durable_tip().map(|tip| tip.height), Some(TIP - SEAL_DEPTH));
 }
 
+/// As after the tail of an older manifest, with no `range_meta` row and with mutable rows: the
+/// sealed tip is one range after the epoch end 9,999 of the snapshot, then exactly at it. The
+/// import starts at the tip, and fetches only the ranges after it. The part of the epoch through
+/// 19,999 keeps the epoch end of the rule.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_replica_that_the_tail_sealed_continues_with_the_tail() {
+async fn a_replica_that_the_tail_sealed_imports_the_ranges_after_its_tip() {
     let snapshot = Snapshot::new().await;
     let (_chain, node) = snapshot.node().await;
-    // As after the tail of an older manifest, with no `range_meta` row: one range past the epoch
-    // end 9,999 of the snapshot (`EpochBoundary`), then exactly at it (`MissingRow`).
     for sealed in [10_999, 9_999] {
         let blocks = &snapshot.blocks[..=usize::try_from(sealed + 10).unwrap()];
         let dir = SourceIndex::sealed(&Snapshot::records(blocks), sealed).into_dir();
+        let fetched_before = snapshot.fetched_ranges();
 
         let latest = serve_until_tip(&dir, &snapshot, &node).await;
 
         assert_eq!(latest.hash, snapshot.blocks.last().unwrap().hash().0);
-        assert!(!snapshot.fetched_a_range());
+        let after_tip = usize::try_from(RANGES - (sealed + 1) / RANGE_SIZE).unwrap();
+        assert_eq!(snapshot.fetched_ranges() - fetched_before, after_tip, "sealed {sealed}");
         let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
-        assert_eq!(index.state().unwrap().verified_through(), None);
+        assert_eq!(index.state().unwrap().sealed_through(), Some(SEALED));
+        let imported = range_meta_row(&index, SEALED + 1 - RANGE_SIZE);
+        assert_eq!(imported.state, VerifyState::Verified);
+        assert!(range_meta_row(&index, 19_000).entry.epoch_end, "sealed {sealed}");
     }
 }
 

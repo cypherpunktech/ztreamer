@@ -1,9 +1,16 @@
 //! The importer: installs the sealed ranges of one source in an index, in verified epochs.
 //!
 //! [`Importer::run`] reads the manifest of the source. It refuses a manifest for another
-//! network or genesis block, and an index that is sealed at or above the manifest. Then it starts the epochs after the sealed tip of the index in height order, at
-//! most two for each of the [`ImportConfig::import_workers`] at a time. The work on one epoch
-//! is:
+//! network or genesis block, and an index that is sealed at or above the manifest. If the index
+//! has sealed ranges, the manifest entry that ends at the sealed tip must have the hash and the
+//! tree sizes of the tip block ([`ImportError::SealedTip`], [`ImportError::ReorgedTip`]). The
+//! importer then deletes the mutable rows above the sealed tip: an install needs an index with
+//! none, and the tail indexes those blocks again.
+//!
+//! Then it starts the epochs after the sealed tip of the index in height order, at most two
+//! for each of the [`ImportConfig::import_workers`] at a time. A sealed tip inside an epoch of
+//! the manifest starts the import with the part of that epoch after the tip
+//! ([`Epoch::part_after`]). The work on one epoch is:
 //!
 //! 1. Take its part of a byte budget of [`MAX_BLOB_BYTES_BEFORE_INSTALL`], in height order.
 //!    The epoch keeps it until its install.
@@ -25,13 +32,13 @@
 //!
 //! The row holds the manifest entry with the `epoch_end` flag of the epoch rule: a manifest
 //! closes its last epoch at its last entry also where the rule does not
-//! ([`Epoch::closed_by_rule`]).
+//! ([`Epoch::closed_by_rule`]). A part of an epoch has the flag of the full epoch.
 //!
-//! The start frontiers of the first epoch come from the `range_meta` row of the last sealed
-//! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
-//! node does not attest. The start frontiers of each other epoch are the frontiers of the
-//! manifest entry before it. [`EpochProof::rebuild`] of the epoch before rebuilds them byte for byte,
-//! and the importer installs an epoch only after all epochs below it.
+//! The start frontiers of each epoch are the frontiers of the manifest entry before it. For
+//! the first epoch, only the manifest gives them. The importer does not trust them: wrong start
+//! frontiers give rebuilt roots that the node does not attest. For each other epoch,
+//! [`EpochProof::rebuild`] of the epoch before rebuilds them byte for byte, and the importer
+//! installs an epoch only after all epochs below it.
 //!
 //! A failed epoch stops the import. The importer first installs the epochs below it, thus the
 //! index keeps them. A restart continues after the last installed epoch, and fetches no range
@@ -40,6 +47,7 @@
 //! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
 //! [`Fetcher::blob`]: crate::fetch::Fetcher::blob
 //! [`Epoch::closed_by_rule`]: ztreamer_snapshot::epoch::Epoch::closed_by_rule
+//! [`Epoch::part_after`]: ztreamer_snapshot::epoch::Epoch::part_after
 //! [`EpochProof::attest`]: crate::proof::EpochProof::attest
 //! [`SamplePlan::sample`]: crate::sample::SamplePlan::sample
 //! [`VerifyState::Verified`]: ztreamer_index::index::range_meta::VerifyState::Verified
@@ -53,9 +61,9 @@ use tokio::sync::{Semaphore, watch};
 use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
-use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_index::index::{Index, IndexError, IndexState, range_meta::NodeId};
-use ztreamer_snapshot::manifest_entry::Frontiers;
+use ztreamer_chain::codec::CompactBlockRecord;
+use ztreamer_index::index::{BlockId, Index, IndexError, IndexState, range_meta::NodeId};
+use ztreamer_snapshot::{epoch::Epoch, manifest::Manifest, manifest_entry::ManifestEntry};
 
 use self::epoch_import::EpochImport;
 use crate::{
@@ -63,7 +71,6 @@ use crate::{
     fetch::{FetchError, Fetcher, RangeSource},
     sample::{SamplePlan, Sampler},
 };
-use ztreamer_snapshot::{epoch::Epoch, manifest::Manifest};
 
 /// The byte budget of the blobs from their fetch to their install. Each epoch takes the bytes
 /// of its blobs before its fetch, in height order, and keeps them until its install. The
@@ -173,17 +180,41 @@ pub enum ImportError {
         /// The sealed tip of the manifest.
         manifest: u32,
     },
-    /// The sealed tip of the index is not the end of an epoch of the manifest.
-    #[error("index tip {height} is inside an epoch of the manifest")]
-    EpochBoundary {
+    /// The sealed tip of the index is not the end of a range of the manifest.
+    #[error("index tip {height} is not the end of a range of the manifest")]
+    RangeBoundary {
         /// The sealed tip of the index.
         height: u32,
     },
-    /// The last sealed range of the index has no `range_meta` row, thus no frontiers.
-    #[error("sealed range {start} has no range_meta row")]
-    MissingRow {
-        /// The first height of the range.
-        start: u32,
+    /// The manifest entry that ends at the sealed tip does not have the hash or the tree sizes
+    /// of the tip block, and the node has the tip block. The source is on another chain, or it
+    /// is wrong.
+    #[error(
+        "the manifest entry through {height} does not agree with the index and the node: use \
+         another --replicate-from source"
+    )]
+    SealedTip {
+        /// The sealed tip of the index.
+        height: u32,
+    },
+    /// The node does not have the block at the sealed tip of the index: a deep reorg replaced
+    /// sealed ranges. The daemon does not recover such a reorg at the start.
+    #[error(
+        "the node does not have the index block at the sealed tip {height}: a deep reorg \
+         replaced sealed ranges; remove the index and start again"
+    )]
+    ReorgedTip {
+        /// The sealed tip of the index.
+        height: u32,
+    },
+    /// The node gave no answer for the block hash at the sealed tip.
+    #[error("node gave no answer for height {height}")]
+    Node {
+        /// The height that the failed call asked about.
+        height: u32,
+        /// Why the node gave no answer.
+        #[source]
+        source: NodeError,
     },
     /// A range of the epoch failed a check, or the node gave no answer for the epoch. The index
     /// keeps the epochs before it.
@@ -206,6 +237,15 @@ impl ImportError {
                 Self::Cancelled(cancelled)
             }
             source => Self::Epoch { epoch, source },
+        }
+    }
+
+    /// The error for `source` in a node call for `height` outside an epoch. A cancel of a
+    /// blocking task is [`ImportError::Cancelled`].
+    pub(crate) fn from_node_error(height: u32, source: NodeError) -> Self {
+        match source {
+            NodeError::Cancelled(cancelled) => Self::Cancelled(cancelled),
+            source => Self::Node { height, source },
         }
     }
 }
@@ -270,17 +310,25 @@ impl Importer {
         if let Some(index) = sealed.filter(|&sealed| sealed >= tip) {
             return Err(ImportError::Ahead { index, manifest: tip });
         }
-        let first_epoch = manifest
+        // The first epoch with entries after the sealed tip, and the entry that ends at the tip.
+        let (first_epoch, tip_entry) = manifest
             .epochs()
-            .position(|epoch| epoch.previous().map(|entry| entry.end_height) == sealed)
-            .ok_or(ImportError::EpochBoundary { height: sealed.unwrap_or_default() })?;
-        let first_start_frontiers = self.frontiers_after_sealed_tip(sealed).await?;
+            .enumerate()
+            .find_map(|(at, epoch)| match sealed {
+                None => Some((at, None)),
+                Some(sealed) => epoch.part_after(sealed).map(|part| (at, part.previous().cloned())),
+            })
+            .ok_or(ImportError::RangeBoundary { height: sealed.unwrap_or_default() })?;
+        let state = match tip_entry {
+            Some(entry) => self.continue_at_sealed_tip(&entry, state).await?,
+            None => state,
+        };
         let mut report = ImportReport {
             sealed_through: sealed,
             verified_through: state.verified_through(),
             ..ImportReport::default()
         };
-        let epoch_import = EpochImport::new(self, manifest, first_epoch, first_start_frontiers);
+        let epoch_import = EpochImport::new(self, manifest, first_epoch, sealed);
         let epoch_import = Arc::new(epoch_import);
         let blob_byte_budget = Arc::new(Semaphore::new(MAX_BLOB_BYTES_BEFORE_INSTALL as usize));
         let stop_signal = async move {
@@ -337,20 +385,59 @@ impl Importer {
         Ok(())
     }
 
-    /// The frontiers after the sealed tip: the frontiers of the row of the last sealed range,
-    /// or empty trees for an empty index.
-    async fn frontiers_after_sealed_tip(
+    /// Checks that `entry`, the manifest entry that ends at the sealed tip, has the hash and the
+    /// tree sizes of the tip block. Then deletes the mutable rows above the sealed tip, and
+    /// gives the index state after the delete.
+    ///
+    /// If `entry` does not agree with the tip block, the node decides which one is wrong: a
+    /// node with the tip block gives [`ImportError::SealedTip`], another node gives
+    /// [`ImportError::ReorgedTip`].
+    async fn continue_at_sealed_tip(
         &self,
-        sealed: Option<u32>,
-    ) -> Result<Frontiers, ImportError> {
-        let Some(sealed) = sealed else {
-            return Ok(Frontiers::default());
+        entry: &ManifestEntry,
+        state: IndexState,
+    ) -> Result<IndexState, ImportError> {
+        let height = entry.end_height;
+        let tip = self.blocking(move |index| Self::read_block(index, height)).await?;
+        if tip.hash != entry.end_hash || tip.end_tree_sizes != entry.end_tree_sizes {
+            let node_hash = self
+                .node
+                .attestor
+                .block_hash(height)
+                .await
+                .map_err(|source| ImportError::from_node_error(height, source))?;
+            return Err(if node_hash == tip.hash {
+                ImportError::SealedTip { height }
+            } else {
+                ImportError::ReorgedTip { height }
+            });
+        }
+        let Some(durable_tip) = state.durable_tip().filter(|durable| durable.height > height)
+        else {
+            return Ok(state);
         };
-        let start = sealed + 1 - RANGE_SIZE;
-        self.blocking(move |index| index.latest()?.range_meta(start))
-            .await?
-            .map(|meta| meta.entry.frontiers)
-            .ok_or(ImportError::MissingRow { start })
+        let (generation, ancestor) = (state.generation(), BlockId::new(height, tip.hash));
+        let state = self
+            .blocking(move |index| {
+                index.replace_mutable_suffix(generation, ancestor, Vec::new(), None)
+            })
+            .await?;
+        info!(
+            sealed_through = height,
+            deleted_through = durable_tip.height,
+            "deleted the mutable rows above the sealed tip; the tail indexes them again"
+        );
+        Ok(state)
+    }
+
+    /// Reads the block record at `height` from the index.
+    fn read_block(index: &Index, height: u32) -> Result<CompactBlockRecord, IndexError> {
+        let mut found = None;
+        index.latest()?.read_blocks::<CompactBlockRecord>(height, height, |record| {
+            found = Some(record);
+            false
+        })?;
+        found.ok_or(IndexError::Coverage { height })
     }
 
     /// Runs an index call on the blocking thread pool.

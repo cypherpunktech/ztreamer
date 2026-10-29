@@ -37,7 +37,8 @@ const BLOB_FETCHES_PER_EPOCH: usize = MAX_RANGES;
 pub(crate) type VerifiedRows = Vec<(CheckedRange, RangeMeta)>;
 
 /// The import of the epochs of one manifest: the importer, the manifest, and the first epoch to
-/// import. The futures of all epochs use one `EpochImport`.
+/// import. If the index is sealed inside the first epoch, the import has only the part of that
+/// epoch after the sealed tip. The futures of all epochs use one `EpochImport`.
 pub(crate) struct EpochImport {
     importer: Importer,
     manifest: Manifest,
@@ -45,8 +46,8 @@ pub(crate) struct EpochImport {
     epoch_offsets: Vec<usize>,
     /// The position of the first epoch to import.
     first_epoch: usize,
-    /// The start frontiers of the first epoch.
-    first_start_frontiers: Frontiers,
+    /// The sealed tip of the index before the import. The first epoch starts after it.
+    sealed_through: Option<u32>,
     /// One permit for each run of [`EpochProof::rebuild`]: `import_workers` permits.
     verify_permits: Semaphore,
 }
@@ -56,7 +57,7 @@ impl EpochImport {
         importer: Importer,
         manifest: Manifest,
         first_epoch: usize,
-        first_start_frontiers: Frontiers,
+        sealed_through: Option<u32>,
     ) -> Self {
         let epoch_offsets = manifest
             .epochs()
@@ -67,14 +68,7 @@ impl EpochImport {
             })
             .collect();
         let verify_permits = Semaphore::new(importer.config.import_workers.get());
-        Self {
-            importer,
-            manifest,
-            epoch_offsets,
-            first_epoch,
-            first_start_frontiers,
-            verify_permits,
-        }
+        Self { importer, manifest, epoch_offsets, first_epoch, sealed_through, verify_permits }
     }
 
     /// The positions of the epochs to import: from the first epoch to the end of the manifest.
@@ -88,10 +82,17 @@ impl EpochImport {
         2 * self.importer.config.import_workers.get()
     }
 
+    /// The epoch at `at`. For the first epoch, the part after the sealed tip.
     pub(crate) fn manifest_epoch(&self, at: usize) -> Epoch<'_> {
-        Epochs::starting_at(self.manifest.entries(), self.epoch_offsets[at])
+        let epoch = Epochs::starting_at(self.manifest.entries(), self.epoch_offsets[at])
             .next()
-            .expect("the import takes `at` from the epochs")
+            .expect("the import takes `at` from the epochs");
+        match self.sealed_through.filter(|_| at == self.first_epoch) {
+            Some(sealed) => epoch
+                .part_after(sealed)
+                .expect("`Importer::run` takes the first epoch with a part after the tip"),
+            None => epoch,
+        }
     }
 
     /// The span of the work on the epoch at `at`.
@@ -153,11 +154,11 @@ impl EpochImport {
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<CheckedRange>, EpochProof), ImportError> {
         let epoch = self.manifest_epoch(at);
-        // `EpochProof::rebuild` of the epoch before rebuilt the frontiers of the entry before.
-        let start = epoch
-            .previous()
-            .filter(|_| at != self.first_epoch)
-            .map_or(&self.first_start_frontiers, |previous| &previous.frontiers);
+        // `EpochProof::rebuild` of the epoch before rebuilt the frontiers of the entry before. For
+        // the first epoch, only the manifest gives them: the node attests them through the end
+        // roots.
+        let empty = Frontiers::default();
+        let start = epoch.previous().map_or(&empty, |previous| &previous.frontiers);
         let (proof, ranges) =
             EpochProof::rebuild_ranges(&epoch, &blobs, start).map_err(|reject| {
                 ImportError::Epoch { epoch: epoch.end_height(), source: reject.into() }

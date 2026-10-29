@@ -102,10 +102,9 @@ impl Replica {
     /// shutdown.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
-    /// manifest needs no import. Neither does an index whose sealed tip is not the end
-    /// of an epoch of the manifest, or whose last sealed range has no `range_meta` row: the tail
-    /// continues from the tip. On shutdown, the import completes the epoch that it installs, and
-    /// stops.
+    /// manifest needs no import. The import starts at the sealed tip, also inside an epoch of
+    /// the manifest. Each other import error stops the daemon. On shutdown, the import completes
+    /// the epoch that it installs, and stops.
     pub(crate) async fn import(
         &self,
         client: &ZakuraClient,
@@ -171,14 +170,6 @@ impl Replica {
         let report = match result {
             Err(ImportError::Ahead { index, manifest }) => {
                 info!(index, manifest, "the index needs no import");
-                return Ok(ControlFlow::Continue(()));
-            }
-            // The tail of an earlier start sealed ranges after the end of an older manifest. Thus
-            // the tip is inside an epoch, or its range has no row and no frontiers.
-            Err(error @ (ImportError::EpochBoundary { .. } | ImportError::MissingRow { .. }))
-                if sealed.is_some() =>
-            {
-                info!(%error, "the import cannot start at the index tip; the tail continues");
                 return Ok(ControlFlow::Continue(()));
             }
             // The blocking pool stopped: the runtime stops, as after `report.stopped`.

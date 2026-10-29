@@ -14,10 +14,15 @@ use std::iter::FusedIterator;
 use crate::manifest_entry::{MAX_COMMITMENTS, MAX_RANGES, ManifestEntry};
 
 /// Consecutive manifest entries that are verified together.
+///
+/// [`Epoch::part_after`] gives the last entries of an epoch, as an epoch of their own. An
+/// import uses it when the index is sealed inside an epoch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Epoch<'a> {
     entries: &'a [ManifestEntry],
     previous: Option<&'a ManifestEntry>,
+    /// [`Epoch::closed_by_rule`] of the full epoch.
+    closed_by_rule: bool,
 }
 
 impl<'a> Epoch<'a> {
@@ -42,11 +47,36 @@ impl<'a> Epoch<'a> {
     ///
     /// Returns `false` for a shorter last epoch of a manifest. Only the end of the manifest
     /// closes that epoch, and a longer manifest continues it.
-    pub fn closed_by_rule(&self) -> bool {
-        let base = self.previous.map_or(0, |previous| previous.end_tree_sizes.total());
-        let last = self.entries.last().expect("an epoch is never empty");
-        self.entries.len() >= MAX_RANGES
-            || last.end_tree_sizes.total().saturating_sub(base) >= MAX_COMMITMENTS
+    ///
+    /// A part from [`Epoch::part_after`] gives the value of the full epoch.
+    pub const fn closed_by_rule(&self) -> bool {
+        self.closed_by_rule
+    }
+
+    /// The entries of the epoch after `height`, as an epoch. Its previous entry is the entry
+    /// that ends at `height`, and it keeps [`Epoch::closed_by_rule`] of the full epoch.
+    ///
+    /// Returns the full epoch if `height` is the end of [`Epoch::previous`]. Returns `None` if
+    /// `height` is not the end of an entry before the last entry of the epoch: then no entry of
+    /// the epoch is after `height`, or `height` is not at a range end.
+    ///
+    /// ```
+    /// use ztreamer_snapshot::manifest::Manifest;
+    ///
+    /// # fn run(manifest: Manifest) {
+    /// // The index is sealed through 2,999, inside the first epoch.
+    /// if let Some(part) = manifest.epochs().next().and_then(|epoch| epoch.part_after(2_999)) {
+    ///     assert_eq!(part.entries()[0].start_height, 3_000);
+    /// }
+    /// # }
+    /// ```
+    pub fn part_after(self, height: u32) -> Option<Self> {
+        if self.previous.map(|previous| previous.end_height) == Some(height) {
+            return Some(self);
+        }
+        let at = self.entries.iter().position(|entry| entry.end_height == height)?;
+        let (before, after) = self.entries.split_at(at + 1);
+        (!after.is_empty()).then(|| Self { entries: after, previous: before.last(), ..self })
     }
 }
 
@@ -100,7 +130,9 @@ impl<'a> Iterator for Epochs<'a> {
             .map_or(rest.len().min(MAX_RANGES), |at| at + 1);
         let entries = &rest[..len];
         self.start += len;
-        Some(Epoch { entries, previous })
+        let last = entries.last().expect("`rest` is not empty, thus `len` is at least 1");
+        let closed_by_rule = len >= MAX_RANGES || added(last) >= MAX_COMMITMENTS;
+        Some(Epoch { entries, previous, closed_by_rule })
     }
 }
 
@@ -167,6 +199,35 @@ mod tests {
         assert_eq!(closed(&synthetic_entries(&[sapling(400_000); 7])), [true, true, false]);
         // A last epoch that reaches the cap closes by the rule.
         assert_eq!(closed(&synthetic_entries(&[sapling(10), sapling(1_060_000)])), [true]);
+    }
+
+    #[test]
+    fn a_part_after_a_range_end_keeps_the_rule_of_the_full_epoch() {
+        let entries = synthetic_entries(&[sapling(1_000); 25]);
+        let epochs: Vec<_> = Epochs::new(&entries).collect();
+
+        // 3 of the 10 ranges of the second epoch. The rule closes the full epoch, not the part.
+        let part = epochs[1].part_after(16_999).unwrap();
+        assert_eq!(part.entries(), &entries[17..20]);
+        assert_eq!(part.previous(), Some(&entries[16]));
+        assert_eq!(part.end_height(), 19_999);
+        assert!(part.closed_by_rule());
+        // The last epoch has 5 ranges: its part is not closed by the rule either.
+        assert!(!epochs[2].part_after(21_999).unwrap().closed_by_rule());
+        // At the end of the entry before the epoch, the part is the full epoch.
+        assert_eq!(epochs[1].part_after(9_999), Some(epochs[1]));
+    }
+
+    #[test]
+    fn a_part_after_the_epoch_end_or_another_height_is_none() {
+        let entries = synthetic_entries(&[sapling(1_000); 25]);
+        let epochs: Vec<_> = Epochs::new(&entries).collect();
+
+        assert_eq!(epochs[1].part_after(19_999), None);
+        assert_eq!(epochs[1].part_after(25_999), None);
+        assert_eq!(epochs[1].part_after(4_999), None);
+        assert_eq!(epochs[1].part_after(15_000), None);
+        assert_eq!(epochs[0].part_after(0), None);
     }
 
     #[test]
