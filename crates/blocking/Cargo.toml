@@ -1,0 +1,16 @@
+[package]
+name = "ztreamer-blocking"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "Work on the Tokio blocking thread pool that keeps the panics of its closure"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

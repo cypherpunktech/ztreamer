@@ -9,9 +9,9 @@
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
+use ztreamer_blocking::BlockingTask;
 use ztreamer_indexer::{
-    blocking::BlockingTask, codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block,
-    types::RawIndexBlock,
+    codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block, types::RawIndexBlock,
 };
 use ztreamer_remote::ZakuraClient;
 

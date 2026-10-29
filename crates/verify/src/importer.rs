@@ -52,8 +52,8 @@ use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::{Semaphore, watch};
 use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
+use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
 use ztreamer_indexer::{
-    blocking::{BlockingTask, BlockingTaskCancelled},
     index::{Index, IndexError, IndexState, RANGE_SIZE, range_meta::NodeId},
     manifest_entry::Frontiers,
 };

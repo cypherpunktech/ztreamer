@@ -19,7 +19,8 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 
-use ztreamer_indexer::{blocking::BlockingTask, types::RawIndexBlock};
+use ztreamer_blocking::BlockingTask;
+use ztreamer_indexer::types::RawIndexBlock;
 use ztreamer_jsonrpc::{Retries, RpcClient, RpcConfig, RpcError};
 
 use crate::FetchAtHeightError;
