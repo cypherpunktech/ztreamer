@@ -4,15 +4,15 @@ use std::{
 };
 
 use super::*;
+use crate::{
+    RpcClient, RpcCode,
+    test_utils::{MockNode, Reply},
+};
 use serde_json::{Value, json};
 use zakura_rpc::client::{
     Commitments, GetBlockchainInfoResponse, GetTreestateResponse, HexData, TransactionObject, Utxo,
 };
 use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES};
-use ztreamer_remote::{
-    RpcClient, RpcCode,
-    test_utils::{MockNode, Reply},
-};
 
 /// The mainnet answers that `connect` and the tip reads need, for a node with tip `tip`.
 fn chain_reply(method: &str, tip: u32) -> Option<Reply> {

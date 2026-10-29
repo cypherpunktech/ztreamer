@@ -154,11 +154,9 @@ mod tests {
         index::{BlockId, Index},
     };
     use ztreamer_remote::{
-        RpcClient, ZakuraClient,
+        RemoteBackend, RpcClient, ZakuraClient,
         test_utils::{MockNode, Reply},
     };
-
-    use crate::remote::RemoteBackend;
 
     /// A service over an empty index and a remote node with an empty mempool, and the sender of
     /// its snapshots. Its head is fresh.

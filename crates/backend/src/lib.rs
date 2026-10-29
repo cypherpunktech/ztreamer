@@ -5,7 +5,7 @@
 //! lookups to tree states to the mempool, comes from a node. `ztreamer_service::CompactService`
 //! and the `range_meta` filler of `ztreamer_verify` read the node through a [`StateBackend`].
 //! `ztreamer_node::InProcessBackend` reaches the embedded Zakura in-process, through its
-//! `ReadStateService` and the mempool handle. `ztreamer_service::remote::RemoteBackend` reaches a
+//! `ReadStateService` and the mempool handle. `ztreamer_remote::RemoteBackend` reaches a
 //! remote node over JSON-RPC.
 //!
 //! The trait speaks in `zakura_chain` types, not in `ReadResponse` variants and not in the wire

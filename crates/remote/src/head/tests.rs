@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+use crate::{
+    RpcClient, RpcCode,
+    test_utils::{MockChain, MockNode, Reply},
+};
 use serde_json::json;
 use tokio::sync::watch;
 use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
@@ -8,13 +12,9 @@ use ztreamer_indexer::{
     pipeline::PipelineConfig,
     test_utils::grow_chain,
 };
-use ztreamer_remote::{
-    RpcClient, RpcCode,
-    test_utils::{MockChain, MockNode, Reply},
-};
 
 use super::*;
-use crate::test_utils::EphemeralService;
+use ztreamer_service::test_utils::EphemeralService;
 
 /// A mock node that serves `chain`, and a source over it.
 async fn node(chain: &MockChain) -> (MockNode, RemoteHeadSource) {

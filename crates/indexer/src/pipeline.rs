@@ -162,7 +162,7 @@ impl From<BlockAtHeightError> for PipelineError {
 /// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
 /// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
 /// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
-/// read in-process with its native range iterators. `ztreamer_service::remote::RemoteTailSource`
+/// read in-process with its native range iterators. `ztreamer_remote::RemoteTailSource`
 /// reads a remote node over JSON-RPC.
 ///
 /// The methods are called from blocking worker threads, never from an async context. A source
@@ -208,7 +208,7 @@ pub trait HistoricalSource: Sync {
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
 /// `ztreamerd` builds one over `ztreamer_node::FinalizedDb` or over
-/// `ztreamer_service::remote::RemoteTailSource`. A source in another crate builds one the same
+/// `ztreamer_remote::RemoteTailSource`. A source in another crate builds one the same
 /// way:
 ///
 /// ```no_run

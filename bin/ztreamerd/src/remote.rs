@@ -25,7 +25,7 @@ use zakura_rpc::client::GetBlockchainInfoResponse;
 use zakurad::components::metrics;
 use ztreamer_indexer::index::{BlockId, Index, range_meta::NodeId};
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
-use ztreamer_service::remote::{RemoteBackend, RemoteHeadSource, RemoteTailSource};
+use ztreamer_remote::{RemoteBackend, RemoteHeadSource, RemoteTailSource};
 
 use crate::{
     DaemonArgs, NodeSources, lifecycle,

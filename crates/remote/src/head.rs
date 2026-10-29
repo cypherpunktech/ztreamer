@@ -1,12 +1,12 @@
 //! [`CanonicalBlockSource`] over the JSON-RPC interface of a remote zakura node.
 
+use crate::{FetchAtHeightError, ZakuraClient};
 use zakura_chain::block;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
     types::RawIndexBlock,
 };
-use ztreamer_remote::{FetchAtHeightError, ZakuraClient};
 
 /// The canonical head of a remote zakura node, read over JSON-RPC.
 ///
@@ -17,8 +17,7 @@ use ztreamer_remote::{FetchAtHeightError, ZakuraClient};
 /// height and verbosity 0. The block bytes go into the index without a second serialization.
 ///
 /// ```no_run
-/// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_service::remote::RemoteHeadSource;
+/// use ztreamer_remote::{RemoteHeadSource, RpcClient, ZakuraClient};
 ///
 /// # fn demo() -> Result<(), ztreamer_remote::RpcError> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse().unwrap());
