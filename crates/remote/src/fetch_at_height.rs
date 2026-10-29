@@ -2,7 +2,7 @@
 
 use ztreamer_blocking::BlockingTaskCancelled;
 use ztreamer_chain::types::BlockAtHeightError;
-use ztreamer_jsonrpc::RpcError;
+use ztreamer_jsonrpc::{NodeState, RpcError};
 use ztreamer_sync::head::HeadError;
 
 /// Why [`ZakuraClient::block_at_height`](crate::ZakuraClient::block_at_height) gave no block.
@@ -20,10 +20,16 @@ pub enum FetchAtHeightError {
     Cancelled(#[from] BlockingTaskCancelled),
 }
 
+/// [`RemoteHeadSource`](crate::RemoteHeadSource) maps [`FetchAtHeightError::Rpc`] itself, with
+/// the URL of the node. Here it is [`HeadError::RemoteFatal`] when the node is gone or refuses
+/// the call, and [`HeadError::Remote`] when the node is syncing.
 impl From<FetchAtHeightError> for HeadError {
     fn from(error: FetchAtHeightError) -> Self {
         match error {
-            FetchAtHeightError::Rpc(error) => Self::Remote(error.into()),
+            FetchAtHeightError::Rpc(error) if error.node_state() == NodeState::Syncing => {
+                Self::Remote(error.into())
+            }
+            FetchAtHeightError::Rpc(error) => Self::RemoteFatal(error.into()),
             FetchAtHeightError::Block(error) => error.into(),
             FetchAtHeightError::Cancelled(error) => Self::Cancelled(error),
         }

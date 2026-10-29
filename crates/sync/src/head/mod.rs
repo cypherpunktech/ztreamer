@@ -47,15 +47,28 @@ pub trait CanonicalBlockSource: Send {
     async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
         Ok(self.block(height).await?.map(|block| block.hash))
     }
+
+    /// True when a head attempt that reaches its timeout shows that the source is gone. Then
+    /// [`HeadFollower::follow_head`] stops with an error.
+    ///
+    /// The default is false: the follower marks the tip stale and tries again.
+    fn is_gone_after_attempt_timeout(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum HeadError {
     #[error("Zakura head request failed: {0}")]
     Node(String),
-    /// A request to a remote zakura node failed.
+    /// A request to a remote zakura node failed, and the node is syncing. The follower marks the
+    /// tip stale and tries again.
     #[error("remote Zakura head request failed: {0}")]
     Remote(Box<dyn std::error::Error + Send + Sync>),
+    /// A request to a remote zakura node failed, and the node is gone or refuses the request,
+    /// after the retries of the client. [`HeadFollower::follow_head`] stops with this error.
+    #[error("remote Zakura head request failed: {0}")]
+    RemoteFatal(Box<dyn std::error::Error + Send + Sync>),
     #[error("Zakura head block could not be decoded: {0}")]
     Decode(String),
     #[error("Zakura returned height {actual} for requested height {expected}")]
@@ -77,6 +90,13 @@ pub enum HeadError {
     /// The blocking pool stopped before a blocking task of the poll ran.
     #[error(transparent)]
     Cancelled(#[from] BlockingTaskCancelled),
+}
+
+impl HeadError {
+    /// True when the source cannot recover: [`Self::RemoteFatal`].
+    pub const fn stops_follower(&self) -> bool {
+        matches!(self, Self::RemoteFatal(_))
+    }
 }
 
 impl From<RawBlockError> for HeadError {
@@ -106,6 +126,13 @@ pub enum HeadSyncError {
     NoCommonAncestor,
     #[error("canonical reorg crosses sealed height {height}")]
     DeepReorg { height: u32 },
+}
+
+impl HeadSyncError {
+    /// True when the head source cannot recover ([`HeadError::stops_follower`]).
+    pub const fn stops_follower(&self) -> bool {
+        matches!(self, Self::Head(error) if error.stops_follower())
+    }
 }
 
 /// The canonical chain from a start height, as one [`poll_canonical_head`] call read it.
