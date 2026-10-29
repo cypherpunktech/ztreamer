@@ -3,19 +3,14 @@
 //! JSON-RPC. It starts no embedded node.
 
 use std::{
-    fmt,
-    net::IpAddr,
     ops::ControlFlow,
     path::{Path, PathBuf},
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
 
 use clap::Args;
 use eyre::{Result, WrapErr, eyre};
-use http::Uri;
-use percent_encoding::percent_decode_str;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
@@ -23,8 +18,10 @@ use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_index::index::{BlockId, Index, range_meta::NodeId};
-use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
-use ztreamer_remote::{RemoteBackend, RemoteHeadSource, RemoteTailSource};
+use ztreamer_remote::{
+    Auth, NodeChain, NodeUrl, RemoteBackend, RemoteHeadSource, RemoteTailSource, RpcClient,
+    RpcCode, ZakuraClient,
+};
 
 use crate::{
     DaemonArgs, NodeSources, lifecycle,
@@ -76,7 +73,7 @@ impl RemoteArgs {
         };
         let auth = self.auth(default_cookie)?;
         info!(?auth, "remote zakura credentials");
-        let config = ZakuraClient::config(url.uri.clone()).with_auth(auth);
+        let config = ZakuraClient::config(url.uri().clone()).with_auth(auth);
         let rpc = RpcClient::new(config).wrap_err("configure the --remote-rpc client")?;
         Ok(Some(ZakuraClient::new(rpc)))
     }
@@ -90,7 +87,7 @@ impl RemoteArgs {
         let Some(url) = &self.remote_rpc else {
             return Ok(Auth::None);
         };
-        Ok(match (&self.remote_rpc_cookie, &url.credentials) {
+        Ok(match (&self.remote_rpc_cookie, url.credentials()) {
             (Some(_), Some(_)) => {
                 return Err(eyre!(
                     "use --remote-rpc-cookie or credentials in the --remote-rpc URL, not both"
@@ -103,62 +100,6 @@ impl RemoteArgs {
             }
             (None, None) => Auth::None,
         })
-    }
-}
-
-/// The URL of `--remote-rpc`. The credentials of its userinfo part
-/// (`https://user:password@host:8232`) go into [`Auth::Basic`]. Thus the URL that ztreamerd keeps
-/// and logs has no credentials, and the `Debug` output does not show the password.
-#[derive(Clone, Debug)]
-pub(crate) struct NodeUrl {
-    /// The URL without its userinfo part.
-    uri: Uri,
-    /// [`Auth::Basic`] from the userinfo part, if the URL has one.
-    credentials: Option<Auth>,
-}
-
-impl NodeUrl {
-    /// True when the host is `localhost` or a loopback address.
-    fn is_loopback(&self) -> bool {
-        self.uri.host().is_some_and(|host| {
-            host.eq_ignore_ascii_case("localhost")
-                || host
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .parse::<IpAddr>()
-                    .is_ok_and(|address| address.is_loopback())
-        })
-    }
-}
-
-impl FromStr for NodeUrl {
-    type Err = eyre::Report;
-
-    /// Parses the URL and moves `user:password` from the userinfo part into [`Auth::Basic`]. It
-    /// percent-decodes the user and the password.
-    fn from_str(url: &str) -> Result<Self> {
-        let uri: Uri = url.parse()?;
-        let Some((userinfo, host)) = uri
-            .authority()
-            .and_then(|authority| authority.as_str().rsplit_once('@'))
-            .map(|(userinfo, host)| (userinfo.to_owned(), host.to_owned()))
-        else {
-            return Ok(Self { uri, credentials: None });
-        };
-        let (user, password) = userinfo
-            .split_once(':')
-            .ok_or_else(|| eyre!("the userinfo part of the URL needs user:password"))?;
-        let decode = |part: &str| {
-            percent_decode_str(part)
-                .decode_utf8()
-                .map(String::from)
-                .map_err(|_| eyre!("the userinfo part of the URL is not UTF-8"))
-        };
-        let credentials =
-            Auth::Basic { user: decode(user)?, password: Secret::new(decode(password)?) };
-        let mut parts = uri.into_parts();
-        parts.authority = Some(host.parse()?);
-        Ok(Self { uri: Uri::from_parts(parts)?, credentials: Some(credentials) })
     }
 }
 
@@ -314,41 +255,6 @@ impl RemoteNode {
         }
     }
 }
-
-/// The chain name that a zakura node gives in `getblockchaininfo`. [`Network::try_from`] maps it
-/// to the network of the node.
-#[derive(Clone, Copy, Debug)]
-struct NodeChain<'a>(&'a str);
-
-impl TryFrom<NodeChain<'_>> for Network {
-    type Error = UnknownChain;
-
-    /// The network whose BIP70 name is the chain name: `main` is mainnet, `test` is the default
-    /// testnet.
-    fn try_from(chain: NodeChain<'_>) -> Result<Self, UnknownChain> {
-        [Self::Mainnet, Self::new_default_testnet()]
-            .into_iter()
-            .find(|network| network.bip70_network_name() == chain.0)
-            .ok_or_else(|| UnknownChain(chain.0.to_owned()))
-    }
-}
-
-/// A chain that ztreamerd cannot serve: only mainnet and the default testnet have a
-/// [`Network`] that ztreamerd can make from the chain name.
-#[derive(Debug)]
-pub(crate) struct UnknownChain(String);
-
-impl fmt::Display for UnknownChain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "remote zakura runs chain {:?}, ztreamerd serves only \"main\" and \"test\"",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for UnknownChain {}
 
 /// The durable tip of the index. The remote node must serve the blocks above it before the first
 /// sync.

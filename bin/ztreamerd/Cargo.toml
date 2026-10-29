@@ -16,7 +16,6 @@ getrandom = "0.3"
 http = "1"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = ["http-listener"] }
-percent-encoding = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tracing = "0.1"
