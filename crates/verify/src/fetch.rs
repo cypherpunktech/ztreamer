@@ -31,9 +31,7 @@ use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Code, Streaming, transport::Channel};
 use tracing::{debug, warn};
 use zakura_chain::block;
-use ztreamer_indexer::index::range_meta::{
-    BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError,
-};
+use ztreamer_indexer::manifest_entry::{BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError};
 use ztreamer_protocol::replicate::{
     self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
 };

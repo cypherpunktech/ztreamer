@@ -4,10 +4,9 @@ use serde_json::{Value, json};
 use zakura_chain::{ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{TreeSizes, encode_range},
-    index::{
-        RANGE_SIZE,
-        range_meta::{Frontiers, ManifestEntry, SubtreeRoot},
-    },
+    index::RANGE_SIZE,
+    manifest_entry::{Frontiers, ManifestEntry},
+    pool::SubtreeRoot,
     test_utils::{hash, record},
 };
 use ztreamer_remote::{

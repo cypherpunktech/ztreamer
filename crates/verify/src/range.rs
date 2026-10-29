@@ -32,10 +32,8 @@ use bytes::Bytes;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
-    index::{
-        CheckedRange, RangeCheckError,
-        range_meta::{BlobMismatch, ManifestEntry},
-    },
+    index::{CheckedRange, RangeCheckError},
+    manifest_entry::{BlobMismatch, ManifestEntry},
 };
 
 /// The end of a checked range: what the next range must link to.

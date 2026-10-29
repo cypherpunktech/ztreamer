@@ -25,7 +25,10 @@ use eyre::{Result, WrapErr, bail, ensure};
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zeroize::Zeroizing;
-use ztreamer_indexer::index::{Index, RANGE_SIZE, range_meta::ManifestEntry};
+use ztreamer_indexer::{
+    index::{Index, RANGE_SIZE},
+    manifest_entry::ManifestEntry,
+};
 use ztreamer_verify::{manifest::Manifest, snapshot::SnapshotWriter};
 
 /// Writes the sealed ranges of an index as a snapshot. The index is the one of the global

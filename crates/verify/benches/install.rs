@@ -23,8 +23,9 @@ use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes, encode_range},
     index::{
         BlockId, CheckedRange, Index, RANGE_SIZE,
-        range_meta::{ManifestEntry, RangeMeta, VerifyState},
+        range_meta::{RangeMeta, VerifyState},
     },
+    manifest_entry::ManifestEntry,
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };

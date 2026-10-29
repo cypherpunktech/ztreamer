@@ -6,10 +6,8 @@ use tonic::{
     transport::{Channel, Server},
 };
 use ztreamer_indexer::{
-    index::{
-        RANGE_SIZE,
-        range_meta::{Frontiers, ManifestEntry as Entry, RangeMeta},
-    },
+    index::{RANGE_SIZE, range_meta::RangeMeta},
+    manifest_entry::{Frontiers, ManifestEntry as Entry},
     test_utils::{range_meta_row, sealed_range_blob},
 };
 use ztreamer_protocol::{

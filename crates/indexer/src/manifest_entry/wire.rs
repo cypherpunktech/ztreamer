@@ -7,8 +7,11 @@
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_protocol::replicate;
 
-use super::{BlobDigest, Frontiers, ManifestEntry, NodeBytes, Pool, SubtreeRoot};
-use crate::codec::TreeSizes;
+use super::{BlobDigest, Frontiers, ManifestEntry};
+use crate::{
+    codec::TreeSizes,
+    pool::{NodeBytes, Pool, SubtreeRoot},
+};
 
 /// Why a Replicator `ManifestEntry` does not convert to a [`ManifestEntry`]. Each variant names
 /// the message field.
@@ -45,7 +48,11 @@ impl From<ManifestEntry> for replicate::ManifestEntry {
                 orchard: entry.frontiers.orchard,
                 ironwood: entry.frontiers.ironwood,
             }),
-            subtree_roots: entry.subtree_roots.into_iter().map(SubtreeRoot::into_wire).collect(),
+            subtree_roots: entry
+                .subtree_roots
+                .into_iter()
+                .map(replicate::SubtreeRoot::from)
+                .collect(),
             blob_digest: entry.blob_digest.0.to_vec(),
             blob_len: entry.blob_len,
             epoch_end: entry.epoch_end,
@@ -80,7 +87,7 @@ impl TryFrom<replicate::ManifestEntry> for ManifestEntry {
             subtree_roots: entry
                 .subtree_roots
                 .into_iter()
-                .map(SubtreeRoot::try_from_wire)
+                .map(SubtreeRoot::try_from)
                 .collect::<Result<_, _>>()?,
             blob_digest: BlobDigest(fixed("blob_digest", entry.blob_digest)?),
             blob_len: entry.blob_len,
@@ -89,21 +96,27 @@ impl TryFrom<replicate::ManifestEntry> for ManifestEntry {
     }
 }
 
-impl SubtreeRoot {
-    fn into_wire(self) -> replicate::SubtreeRoot {
-        replicate::SubtreeRoot {
-            pool: replicate::Pool::from(self.root.pool()).into(),
-            index: self.index.0.into(),
-            root: self.root.to_bytes().as_ref().to_vec(),
+impl From<SubtreeRoot> for replicate::SubtreeRoot {
+    fn from(root: SubtreeRoot) -> Self {
+        Self {
+            pool: replicate::Pool::from(root.root.pool()).into(),
+            index: root.index.0.into(),
+            root: root.root.to_bytes().as_ref().to_vec(),
         }
     }
+}
 
-    fn try_from_wire(root: replicate::SubtreeRoot) -> Result<Self, WireError> {
+impl TryFrom<replicate::SubtreeRoot> for SubtreeRoot {
+    type Error = WireError;
+
+    fn try_from(root: replicate::SubtreeRoot) -> Result<Self, WireError> {
         let index =
             u16::try_from(root.index).map_err(|_| WireError::Overflow("subtree_roots.index"))?;
         let bytes =
             NodeBytes::try_from(root.root).map_err(|_| WireError::Length("subtree_roots.root"))?;
-        let node = Pool::try_from_wire(root.pool)?.node(bytes);
+        let pool = replicate::Pool::try_from(root.pool)
+            .map_err(|_| WireError::Enum("subtree_roots.pool", root.pool))?;
+        let node = Pool::try_from(pool)?.node(bytes);
         Ok(Self {
             index: NoteCommitmentSubtreeIndex(index),
             root: node.ok_or(WireError::SubtreeRoot(index))?,
@@ -121,15 +134,15 @@ impl From<Pool> for replicate::Pool {
     }
 }
 
-impl Pool {
-    fn try_from_wire(value: i32) -> Result<Self, WireError> {
-        match replicate::Pool::try_from(value) {
-            Ok(replicate::Pool::Sapling) => Ok(Self::Sapling),
-            Ok(replicate::Pool::Orchard) => Ok(Self::Orchard),
-            Ok(replicate::Pool::Ironwood) => Ok(Self::Ironwood),
-            Ok(replicate::Pool::Unspecified) | Err(_) => {
-                Err(WireError::Enum("subtree_roots.pool", value))
-            }
+impl TryFrom<replicate::Pool> for Pool {
+    type Error = WireError;
+
+    fn try_from(pool: replicate::Pool) -> Result<Self, WireError> {
+        match pool {
+            replicate::Pool::Sapling => Ok(Self::Sapling),
+            replicate::Pool::Orchard => Ok(Self::Orchard),
+            replicate::Pool::Ironwood => Ok(Self::Ironwood),
+            replicate::Pool::Unspecified => Err(WireError::Enum("subtree_roots.pool", pool.into())),
         }
     }
 }

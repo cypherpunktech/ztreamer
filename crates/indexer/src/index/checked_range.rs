@@ -26,10 +26,12 @@ use prost::bytes::Bytes;
 
 use super::{
     BlockId, IndexError,
-    range_meta::{BlobDigest, BlobMismatch, ManifestEntry},
     tables::{RangeChain, SealedRange},
 };
-use crate::codec::{CodecError, CompactBlockRecord};
+use crate::{
+    codec::{CodecError, CompactBlockRecord},
+    manifest_entry::{BlobDigest, BlobMismatch, ManifestEntry},
+};
 
 /// A range blob that passed the checks of an install that do not need the index. The module
 /// docs give the checks.

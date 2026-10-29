@@ -17,9 +17,9 @@ use prost::bytes::Bytes;
 use tokio::sync::{Semaphore, watch};
 use tonic::{Request, Response, Status};
 use zakura_chain::parameters::Network;
-use ztreamer_indexer::index::{
-    Index, IndexError,
-    range_meta::{MANIFEST_VERSION, VerifyState},
+use ztreamer_indexer::{
+    index::{Index, IndexError, range_meta::VerifyState},
+    manifest_entry::MANIFEST_VERSION,
 };
 use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, ManifestEntry, RangeChunk,

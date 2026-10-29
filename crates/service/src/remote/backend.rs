@@ -37,7 +37,7 @@ use zakura_rpc::{
     methods::GetAddressUtxosRequest,
 };
 use zakura_state::HashOrHeight;
-use ztreamer_indexer::index::range_meta::{self, NodeBytes, SubtreeNode};
+use ztreamer_indexer::pool::{self, NodeBytes, SubtreeNode};
 use ztreamer_remote::{RpcError, ZakuraClient, frontier::FromRpc};
 
 use crate::backend::{
@@ -311,9 +311,9 @@ impl RpcTree for orchard::tree::NoteCommitmentTree {
     }
 }
 
-/// A shielded pool: its [`range_meta::Pool`] and its root type.
+/// A shielded pool: its [`pool::Pool`] and its root type.
 trait Pool {
-    const POOL: range_meta::Pool;
+    const POOL: pool::Pool;
     /// The name of the pool in `z_getsubtreesbyindex`.
     const NAME: &'static str = Self::POOL.as_str();
     type Node: Clone + Send + Sync + 'static;
@@ -375,7 +375,7 @@ enum OrchardPool {}
 enum IronwoodPool {}
 
 impl Pool for SaplingPool {
-    const POOL: range_meta::Pool = range_meta::Pool::Sapling;
+    const POOL: pool::Pool = pool::Pool::Sapling;
     type Node = SaplingNode;
 
     fn root_from_node(node: SubtreeNode) -> Option<Self::Node> {
@@ -387,7 +387,7 @@ impl Pool for SaplingPool {
 }
 
 impl Pool for OrchardPool {
-    const POOL: range_meta::Pool = range_meta::Pool::Orchard;
+    const POOL: pool::Pool = pool::Pool::Orchard;
     type Node = orchard::tree::Node;
 
     fn root_from_node(node: SubtreeNode) -> Option<Self::Node> {
@@ -399,7 +399,7 @@ impl Pool for OrchardPool {
 }
 
 impl Pool for IronwoodPool {
-    const POOL: range_meta::Pool = range_meta::Pool::Ironwood;
+    const POOL: pool::Pool = pool::Pool::Ironwood;
     type Node = ironwood::tree::Node;
 
     fn root_from_node(node: SubtreeNode) -> Option<Self::Node> {
