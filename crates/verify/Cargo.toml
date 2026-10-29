@@ -53,7 +53,6 @@ ztreamer-indexer = { path = "../indexer" }
 ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
-ztreamer-service = { path = "../service" }
 
 [dev-dependencies]
 criterion = "0.8"

@@ -10,9 +10,9 @@ use ztreamer_remote::{FetchAtHeightError, ZakuraClient};
 
 /// The canonical head of a remote zakura node, read over JSON-RPC.
 ///
-/// [`CompactService::sync_head`](crate::CompactService::sync_head) and
-/// [`CompactService::follow_head`](crate::CompactService::follow_head) use it as they use the
-/// embedded node. Each [`CanonicalBlockSource::block_hash`] call sends one `getblockhash`
+/// [`HeadFollower::sync_head`](ztreamer_indexer::head::HeadFollower::sync_head) and
+/// [`HeadFollower::follow_head`](ztreamer_indexer::head::HeadFollower::follow_head) use it as
+/// they use the embedded node. Each [`CanonicalBlockSource::block_hash`] call sends one `getblockhash`
 /// request. Each [`CanonicalBlockSource::block`] call sends one `getblock` request with the
 /// height and verbosity 0. The block bytes go into the index without a second serialization.
 ///

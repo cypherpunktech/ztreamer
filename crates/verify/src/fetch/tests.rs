@@ -6,9 +6,9 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Status, transport::Server};
 use zakura_chain::parameters::Network;
+use ztreamer_indexer::head::ServingSnapshot;
 use ztreamer_indexer::{index::RANGE_SIZE, test_utils::sealed_range_blob};
 use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
-use ztreamer_service::ServingSnapshot;
 
 use super::*;
 use crate::{

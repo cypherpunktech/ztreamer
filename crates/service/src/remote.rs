@@ -8,7 +8,7 @@
 //! - [`RemoteTailSource`] gives the blocks from `S` to `B - SEAL_DEPTH` to the
 //!   [`HistoricalPipeline`], which writes them in bulk.
 //! - [`RemoteHeadSource`] gives the blocks from `B - SEAL_DEPTH` to `B` to the head follower
-//!   ([`CompactService::follow_head`]), which replaces them on a reorg.
+//!   ([`HeadFollower::follow_head`]), which replaces them on a reorg.
 //! - [`RemoteBackend`] is the [`StateBackend`] of [`CompactService`]. It answers the requests
 //!   that the index cannot answer, with one call to the node for each:
 //!
@@ -33,7 +33,7 @@
 //! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
 //! [`StateBackend`]: ztreamer_backend::StateBackend
 //! [`CompactService`]: crate::CompactService
-//! [`CompactService::follow_head`]: crate::CompactService::follow_head
+//! [`HeadFollower::follow_head`]: ztreamer_indexer::head::HeadFollower::follow_head
 
 mod backend;
 mod head;

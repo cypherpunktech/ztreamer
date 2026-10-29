@@ -15,6 +15,13 @@ use crate::{
     types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
 
+mod follower;
+mod serving;
+mod telemetry;
+
+pub use follower::{HeadFollower, HeadFollowerConfig, HeadFollowerError};
+pub use serving::{Readiness, RecoveryActive, ServingSnapshot, SnapshotError};
+
 #[derive(Debug, thiserror::Error)]
 pub enum HeadError {
     #[error("Zakura head request failed: {0}")]

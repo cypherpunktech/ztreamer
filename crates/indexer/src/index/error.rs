@@ -2,6 +2,8 @@
 
 use std::io;
 
+use tonic::Status;
+
 use crate::{codec::CodecError, manifest_entry::BlobMismatch};
 
 #[derive(Debug, thiserror::Error)]
@@ -61,4 +63,16 @@ pub enum IndexError {
         /// The value that does not match: the length or the digest.
         mismatch: BlobMismatch,
     },
+}
+
+/// The gRPC status of an index read error: `OUT_OF_RANGE` for a height that the index does not
+/// cover, `UNAVAILABLE` for a generation change, and `INTERNAL` for each other error.
+impl From<IndexError> for Status {
+    fn from(error: IndexError) -> Self {
+        match error {
+            IndexError::Coverage { .. } => Self::out_of_range(error.to_string()),
+            IndexError::Generation { .. } => Self::unavailable(error.to_string()),
+            _ => Self::internal(error.to_string()),
+        }
+    }
 }

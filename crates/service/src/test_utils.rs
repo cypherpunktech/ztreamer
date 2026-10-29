@@ -29,6 +29,7 @@ use ztreamer_backend::{
 };
 use ztreamer_indexer::{
     codec::CompactBlockRecord,
+    head::HeadFollower,
     index::{Index, IndexState},
 };
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
@@ -143,13 +144,15 @@ impl StateBackend for EmptyChain {
     }
 }
 
-/// A [`CompactService`] over a temporary index and an [`EmptyChain`].
+/// A [`CompactService`] over a temporary index and an [`EmptyChain`], and the [`HeadFollower`]
+/// that publishes its snapshots.
 ///
 /// A test keeps the whole value, for example as `ctx`, and reads its fields. It owns the index
 /// directory, so the directory stays until the test ends.
 #[derive(Debug)]
 pub struct EphemeralService {
     pub service: CompactService,
+    pub follower: HeadFollower,
     pub index: Arc<Index>,
     /// The durable index state that the service starts from.
     pub state: IndexState,
@@ -169,9 +172,15 @@ impl EphemeralService {
             [] => index.state().unwrap(),
             records => fixtures::populate(&index, records, seal_through),
         };
-        let service = CompactService::with_backend(Arc::clone(&index), state, "main", EmptyChain)
-            .with_node_version(EmptyChain::node_version());
-        Self { service, index, state, dir }
+        let follower = HeadFollower::new(Arc::clone(&index), state);
+        let service = CompactService::with_backend(
+            Arc::clone(&index),
+            follower.subscribe(),
+            "main",
+            EmptyChain,
+        )
+        .with_node_version(EmptyChain::node_version());
+        Self { service, follower, index, state, dir }
     }
 
     /// A service over an empty index.
@@ -191,7 +200,9 @@ impl EphemeralService {
 #[derive(Debug)]
 pub struct Fixture {
     pub service: CompactService,
-    // Keep the index directory alive until the service has stopped.
+    // Keep the snapshot channel open and the index directory alive until the service has
+    // stopped.
+    _follower: HeadFollower,
     _dir: tempfile::TempDir,
 }
 
@@ -199,10 +210,10 @@ impl Fixture {
     /// Builds the index and service.
     pub async fn new() -> Self {
         let records = fixtures::mixed_records(2_210);
-        let EphemeralService { service, state, dir, .. } =
+        let EphemeralService { service, follower, state, dir, .. } =
             EphemeralService::with_records(&records[..2_200], Some(1_999)).await;
-        service.publish_head(state, records[2_200..].to_vec()).unwrap();
-        Self { service, _dir: dir }
+        follower.publish_head(state, records[2_200..].to_vec()).unwrap();
+        Self { service, _follower: follower, _dir: dir }
     }
 }
 
@@ -298,7 +309,7 @@ pub async fn consume(
 }
 
 #[cfg(test)]
-pub(crate) use ztreamer_indexer::test_utils::{hash, raw_block};
+pub(crate) use ztreamer_indexer::test_utils::hash;
 
 /// An empty block at `height` that chains onto [`hash`] of the previous height.
 #[cfg(test)]

@@ -42,7 +42,7 @@ use ztreamer_indexer::{
 };
 
 use ztreamer_backend::{BackendError, StateBackend, Subtrees};
-use ztreamer_service::ServingSnapshot;
+use ztreamer_indexer::head::ServingSnapshot;
 
 /// The number of filled ranges between two progress lines in the log.
 const LOG_EVERY: u64 = 100;

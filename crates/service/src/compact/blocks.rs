@@ -11,7 +11,7 @@ use ztreamer_indexer::{
 };
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
-use super::{CompactService, RpcStream, ensure_ready, index_status, reorganized};
+use super::{CompactService, RpcStream, ensure_ready, reorganized};
 use crate::project::{PoolSelection, add_transparent_txs, project_block};
 
 impl CompactService {
@@ -190,7 +190,7 @@ impl CompactService {
                     return Some(Err(match error {
                         // Validation saw this height; if the index no longer has it, the chain shrank.
                         IndexError::Coverage { height } if durable => reorganized(height),
-                        other => index_status(other),
+                        other => Status::from(other),
                     }));
                 }
                 if let Some((last_hash, last_previous)) = last

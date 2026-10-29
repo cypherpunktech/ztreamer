@@ -1,16 +1,24 @@
-//! Canonical-head following: reconciling with Zakura's head and recovering deep reorgs.
+//! The head follower: it keeps the index at the canonical head of a node, and publishes a
+//! [`ServingSnapshot`] after each change.
 
-use std::time::{Duration, Instant};
-
-use tokio::sync::watch;
-use ztreamer_indexer::{
-    head::{CanonicalBlockSource, HeadSyncError, recover_deep_reorg},
-    index::IndexState,
-    pipeline::PipelineConfig,
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-use super::CompactService;
-use crate::telemetry::ObservedSource;
+use tokio::sync::watch;
+
+use super::{
+    CanonicalBlockSource, HeadSyncError, recover_deep_reorg,
+    serving::{Readiness, ServingSnapshot, SnapshotError},
+    sync_head_once,
+    telemetry::{HeadMetrics, ObservedSource},
+};
+use crate::{
+    codec::CompactBlockRecord,
+    index::{Index, IndexState},
+    pipeline::PipelineConfig,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeadFollowerConfig {
@@ -35,7 +43,82 @@ pub enum HeadFollowerError {
     Config,
 }
 
-impl CompactService {
+/// Keeps the index at the canonical head of a node, and publishes a [`ServingSnapshot`] after
+/// each change. The wallet service and the Replicator read the snapshots through
+/// [`HeadFollower::subscribe`].
+///
+/// Clones share the index, the snapshot channel and the metrics.
+#[derive(Clone)]
+pub struct HeadFollower {
+    index: Arc<Index>,
+    snapshot: watch::Sender<ServingSnapshot>,
+    metrics: Arc<HeadMetrics>,
+}
+
+impl std::fmt::Debug for HeadFollower {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeadFollower")
+            .field("snapshot", &*self.snapshot.borrow())
+            .finish_non_exhaustive()
+    }
+}
+
+impl HeadFollower {
+    /// A follower over `index` that publishes the snapshot of `state` first.
+    pub fn new(index: Arc<Index>, state: IndexState) -> Self {
+        let (snapshot, _) = watch::channel(state.into());
+        let metrics = Arc::new(HeadMetrics::new());
+        metrics.snapshot(&snapshot.borrow());
+        Self { index, snapshot, metrics }
+    }
+
+    /// Returns a receiver for each serving snapshot that the follower publishes after this call.
+    pub fn subscribe(&self) -> watch::Receiver<ServingSnapshot> {
+        self.snapshot.subscribe()
+    }
+
+    /// Publishes the snapshot of `state` with `volatile_head` above its durable tip.
+    pub fn publish_head(
+        &self,
+        state: IndexState,
+        volatile_head: Vec<CompactBlockRecord>,
+    ) -> Result<(), SnapshotError> {
+        let snapshot = ServingSnapshot::with_head(state, volatile_head)?;
+        self.metrics.snapshot(&snapshot);
+        self.snapshot.send_replace(snapshot);
+        Ok(())
+    }
+
+    /// Stops new chain-data requests while a deep replacement is staged.
+    pub fn begin_recovery(&self) {
+        let mut snapshot = self.snapshot();
+        snapshot.ready = false;
+        snapshot.tip_fresh = false;
+        self.metrics.snapshot(&snapshot);
+        self.snapshot.send_replace(snapshot);
+    }
+
+    /// The readiness of the current snapshot.
+    pub fn readiness(&self) -> Readiness {
+        self.snapshot().readiness()
+    }
+
+    /// Records a failed attempt of the head source. The tip stays fresh while the last success
+    /// is younger than `freshness_timeout`.
+    pub fn mark_source_failure(&self, error: String, freshness_timeout: Duration) {
+        let mut snapshot = self.snapshot();
+        snapshot.tip_fresh =
+            snapshot.last_source_success.is_some_and(|last| last.elapsed() < freshness_timeout);
+        snapshot.source_error = Some(error.into());
+        self.metrics.snapshot(&snapshot);
+        self.snapshot.send_replace(snapshot);
+    }
+
+    /// The current snapshot.
+    pub fn snapshot(&self) -> ServingSnapshot {
+        self.snapshot.borrow().clone()
+    }
+
     /// Reconciles one head view and fails closed when it detects a deep reorg.
     pub async fn sync_head(
         &self,
@@ -50,13 +133,8 @@ impl CompactService {
             observed: None,
             metrics: &self.metrics,
         };
-        let result = ztreamer_indexer::head::sync_head_once(
-            &self.index,
-            &mut observed,
-            &snapshot.volatile_head,
-            config,
-        )
-        .await;
+        let result =
+            sync_head_once(&self.index, &mut observed, &snapshot.volatile_head, config).await;
         if matches!(result, Err(HeadSyncError::DeepReorg { .. })) {
             self.begin_recovery();
         }
@@ -149,9 +227,11 @@ impl CompactService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ztreamer_indexer::{head::HeadError, types::RawIndexBlock};
-
-    use crate::test_utils::{EphemeralService, raw_block};
+    use crate::{
+        head::HeadError,
+        test_utils::{open_index, raw_block},
+        types::RawIndexBlock,
+    };
 
     struct HeadSource(Vec<RawIndexBlock>);
 
@@ -164,34 +244,35 @@ mod tests {
 
     #[tokio::test]
     async fn follower_polls_until_shutdown() {
-        let ctx = EphemeralService::empty().await;
+        let dir = tempfile::tempdir().unwrap();
+        let index = Arc::new(open_index(dir.path()));
+        let head = HeadFollower::new(Arc::clone(&index), index.state().unwrap());
         let (shutdown, receiver) = watch::channel(false);
         let follower = {
-            let service = ctx.service.clone();
+            let head = head.clone();
             tokio::spawn(async move {
-                service
-                    .follow_head(
-                        HeadSource((0..=12).map(raw_block).collect()),
-                        PipelineConfig::default(),
-                        HeadFollowerConfig {
-                            poll_interval: Duration::from_millis(1),
-                            attempt_timeout: Duration::from_millis(100),
-                            freshness_timeout: Duration::from_millis(100),
-                        },
-                        receiver,
-                    )
-                    .await
+                head.follow_head(
+                    HeadSource((0..=12).map(raw_block).collect()),
+                    PipelineConfig::default(),
+                    HeadFollowerConfig {
+                        poll_interval: Duration::from_millis(1),
+                        attempt_timeout: Duration::from_millis(100),
+                        freshness_timeout: Duration::from_millis(100),
+                    },
+                    receiver,
+                )
+                .await
             })
         };
 
         tokio::time::timeout(Duration::from_secs(1), async {
-            while !ctx.service.readiness().tip {
+            while !head.readiness().tip {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
         .await
         .unwrap();
-        assert_eq!(ctx.service.snapshot().visible_tip.unwrap().height, 12);
+        assert_eq!(head.snapshot().visible_tip.unwrap().height, 12);
         shutdown.send(true).unwrap();
         follower.await.unwrap().unwrap();
     }

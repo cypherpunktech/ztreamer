@@ -10,6 +10,7 @@ use tokio_stream::StreamExt as _;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
 use ztreamer_indexer::{
+    head::HeadFollower,
     index::{Index, IndexState},
     ingest::OrderedBuilder,
     parser::parse_block,
@@ -64,7 +65,9 @@ fn get_block_range(c: &mut Criterion) {
         Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", block::Hash([9; 32])).unwrap(),
     );
     let state = index_through(&index, TIP);
-    let service = CompactService::with_backend(index, state, "main", support::EmptyChain);
+    let follower = HeadFollower::new(Arc::clone(&index), state);
+    let service =
+        CompactService::with_backend(index, follower.subscribe(), "main", support::EmptyChain);
 
     let mut group = c.benchmark_group("get_block_range");
     for blocks in [100, 200, 600, 1_000, 2_000] {

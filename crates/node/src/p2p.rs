@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn forwards_streaming_compact_ranges() {
         let ctx = EphemeralService::empty().await;
-        ctx.service
+        ctx.follower
             .publish_head(
                 IndexState::default(),
                 vec![
