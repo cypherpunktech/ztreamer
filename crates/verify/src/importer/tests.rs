@@ -10,7 +10,7 @@ use ztreamer_indexer::{
     index::range_meta::{
         Attested, MAX_RANGES, ManifestEntry, Pool, PoolRoots, SubtreeNode, VerifyState,
     },
-    test_utils::raw_block,
+    test_utils::{range_meta_row, raw_block, sealed_range_blob},
     types::RawIndexBlock,
 };
 
@@ -104,7 +104,7 @@ impl Import {
 
     /// The blob at `start` with a wrong tree size at its record 500.
     fn blob_with_wrong_tree_size(&self, start: u32) -> Vec<u8> {
-        let blob = self.source.index.read_sealed_range_bytes(start).unwrap().unwrap();
+        let blob = sealed_range_blob(&self.source.index, start);
         let decoder = RangeDecoder::new(&blob).unwrap();
         let mut records: Vec<_> =
             (0..RANGE_SIZE as usize).map(|at| decoder.record(at).unwrap()).collect();
@@ -122,7 +122,7 @@ impl Import {
 
     fn fake_attestor(&self, held_roots: Option<HeldTreeRoots>) -> Arc<FakeAttestor> {
         let answers = self.snapshot.manifest.entries().iter().map(|entry| {
-            let meta = self.source.index.range_meta(entry.start_height).unwrap().unwrap();
+            let meta = range_meta_row(&self.source.index, entry.start_height);
             (entry.end_height, meta.attested.unwrap())
         });
         let (release_signal, answered_heights) = (Notify::new(), Mutex::default());
@@ -174,8 +174,8 @@ impl Import {
     fn assert_target_has_source_blobs(&self) {
         let sealed = self.snapshot.manifest.sealed_through();
         for start in (0..=sealed / RANGE_SIZE).map(|range| range * RANGE_SIZE) {
-            let blob = self.target.read_sealed_range_bytes(start).unwrap();
-            assert_eq!(blob, self.source.index.read_sealed_range_bytes(start).unwrap());
+            let blob = self.target.latest().unwrap().sealed_range(start).unwrap();
+            assert_eq!(blob, self.source.index.latest().unwrap().sealed_range(start).unwrap());
         }
         let state = self.target.state().unwrap();
         assert_eq!(
@@ -201,7 +201,7 @@ async fn an_import_installs_the_same_ranges_and_verifies_them() {
     };
     assert_eq!(report, expected);
     import.assert_target_has_source_blobs();
-    let meta = import.target.range_meta(12_000).unwrap().unwrap();
+    let meta = range_meta_row(&import.target, 12_000);
     assert_eq!(meta.state, VerifyState::Verified);
     assert_eq!(meta.entry, import.snapshot.manifest.entries()[12]);
     assert_eq!(meta.verified_by.unwrap().url, "http://node.test");
@@ -219,12 +219,12 @@ async fn imported_rows_keep_the_epoch_end_of_the_rule() {
 
     assert!(import.snapshot.manifest.entries()[24].epoch_end);
     for start in (0..RANGES).map(|range| range * RANGE_SIZE) {
-        let imported = import.target.range_meta(start).unwrap().unwrap().entry;
-        let source = import.source.index.range_meta(start).unwrap().unwrap().entry;
+        let imported = range_meta_row(&import.target, start).entry;
+        let source = range_meta_row(&import.source.index, start).entry;
         assert_eq!(imported, source, "range {start}");
     }
-    assert!(import.target.range_meta(19_000).unwrap().unwrap().entry.epoch_end);
-    assert!(!import.target.range_meta(24_000).unwrap().unwrap().entry.epoch_end);
+    assert!(range_meta_row(&import.target, 19_000).entry.epoch_end);
+    assert!(!range_meta_row(&import.target, 24_000).entry.epoch_end);
 }
 
 #[tokio::test]
@@ -325,7 +325,7 @@ async fn a_stopped_import_keeps_a_prefix_and_a_restart_fetches_only_the_rest() {
     let report = task.await.unwrap().unwrap();
     assert_eq!((report.epochs, report.ranges, report.stopped), (1, 10, true));
     assert_eq!(report.verified_through, Some(9_999));
-    assert_eq!(import.target.range_meta(10_000).unwrap(), None);
+    assert_eq!(import.target.latest().unwrap().range_meta(10_000).unwrap(), None);
     let requests_before_restart = import.blob_requests();
     assert!(requests_before_restart >= 10);
     let report = import.run().await.unwrap();
@@ -349,7 +349,7 @@ async fn a_mutated_blob_stops_the_import_at_its_epoch() {
     );
     let state = import.target.state().unwrap();
     assert_eq!((state.sealed_through(), state.verified_through()), (Some(9_999), Some(9_999)));
-    assert_eq!(import.target.range_meta(10_000).unwrap(), None);
+    assert_eq!(import.target.latest().unwrap().range_meta(10_000).unwrap(), None);
 }
 
 /// A blob with a wrong digest stops the import. The index keeps the verified prefix before

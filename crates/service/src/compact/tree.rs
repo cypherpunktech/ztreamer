@@ -48,7 +48,10 @@ impl CompactService {
             for (root_hash, height) in roots {
                 let block = match snapshot.volatile(height) {
                     Some(block) => block.clone(),
-                    None => match index.read_block(snapshot.generation, height) {
+                    None => match index
+                        .snapshot(snapshot.generation)
+                        .and_then(|index_snapshot| index_snapshot.block(height))
+                    {
                         Ok(block) => block,
                         Err(error) => {
                             let _ = sender.blocking_send(Err(index_status(error)));

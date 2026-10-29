@@ -6,7 +6,7 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Status, transport::Server};
 use zakura_chain::parameters::Network;
-use ztreamer_indexer::index::RANGE_SIZE;
+use ztreamer_indexer::{index::RANGE_SIZE, test_utils::sealed_range_blob};
 use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
 use ztreamer_service::ServingSnapshot;
 
@@ -85,7 +85,7 @@ impl Http {
     }
 
     fn blob(&self, start: u32) -> Vec<u8> {
-        self.source.index.read_sealed_range_bytes(start).unwrap().unwrap()
+        sealed_range_blob(&self.source.index, start)
     }
 }
 
@@ -286,7 +286,7 @@ async fn peer_manifest_closes_the_last_epoch_at_the_last_range_and_blobs_resume(
     // The rule closes no epoch at range 11. The manifest closes it there, as an export does.
     assert_eq!(manifest.entries(), source.entries());
     let entry = &manifest.entries()[2];
-    let blob = source.index.read_sealed_range_bytes(2_000).unwrap().unwrap();
+    let blob = sealed_range_blob(&source.index, 2_000);
     let mut tail = Vec::new();
     let mut chunks = peer.fetch_blob(entry, 100).await.unwrap();
     while let Some(chunk) = chunks.next().await {
@@ -316,7 +316,11 @@ impl Peer {
         let entries = self.source.entries();
         let blobs = future::try_join_all(entries[..10].iter().map(|e| self.fetcher.blob(e)));
         for (entry, blob) in entries.iter().zip(blobs.await.unwrap()) {
-            let expected = self.source.index.read_sealed_range_bytes(entry.start_height);
+            let expected = self
+                .source
+                .index
+                .latest()
+                .and_then(|snapshot| snapshot.sealed_range(entry.start_height));
             assert_eq!(blob, expected.unwrap().unwrap());
         }
     }
@@ -366,7 +370,7 @@ async fn a_cut_peer_stream_resumes_when_the_peer_releases_its_place() {
 
     let blob = peer.fetcher.blob(entry).await.unwrap();
 
-    assert_eq!(blob, peer.source.index.read_sealed_range_bytes(2_000).unwrap().unwrap());
+    assert_eq!(blob, sealed_range_blob(&peer.source.index, 2_000));
     let half = blob.len() as u64 / 2;
     assert_eq!(peer.server.requests(), [(2_000, 0), (2_000, half)]);
     assert!(peer.server.refusals() > 0);

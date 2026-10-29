@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_indexer::{
     index::range_meta::{Frontiers, RangeMeta, SubtreeNode, SubtreeRoot, VerifyState},
-    test_utils::{populate, record},
+    test_utils::{populate, range_meta_row, record, sealed_range_blob},
 };
 use ztreamer_verify::snapshot::{Latest, RangePath, SignatureFile};
 
@@ -27,7 +27,7 @@ fn indexed(dir: &TempDir, ranges: u32, rows: &[(u32, bool)]) -> (Index, Vec<Mani
     let entries = rows
         .iter()
         .map(|&(start, epoch_end)| {
-            let blob = index.read_sealed_range_bytes(start).unwrap().unwrap();
+            let blob = sealed_range_blob(&index, start);
             let range = &records[start as usize..][..RANGE_SIZE as usize];
             let entry = ManifestEntry {
                 frontiers: Frontiers {
@@ -105,7 +105,7 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
         let name = format!("{start}-{}.bin", hex::encode(&entry.blob_digest.0[..4]));
         assert_eq!(RangePath::from(entry).as_str(), format!("ranges/{name}"));
         let file = fs::read(out.path().join("ranges").join(name)).unwrap();
-        assert_eq!(file, index.read_sealed_range_bytes(start).unwrap().unwrap());
+        assert_eq!(file, sealed_range_blob(&index, start));
     }
 
     let bytes = fs::read(out.path().join(manifest_path)).unwrap();
@@ -153,7 +153,7 @@ fn a_second_export_writes_no_range_file_again() {
 
     assert_eq!((report.ranges, report.written), (3, 1));
     assert_eq!(fs::read(&same_length.0).unwrap(), same_length.1);
-    assert_eq!(fs::read(&short.0).unwrap(), index.read_sealed_range_bytes(1_000).unwrap().unwrap());
+    assert_eq!(fs::read(&short.0).unwrap(), sealed_range_blob(&index, 1_000));
     assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
     assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
     // Two manifests, each with its signature.
@@ -227,7 +227,7 @@ fn export_closes_the_last_epoch_at_the_last_range() {
     assert_eq!(manifest.sealed_through(), 11_999);
     let epochs: Vec<_> = manifest.epochs().map(|epoch| epoch.end_height()).collect();
     assert_eq!(epochs, [9_999, 11_999]);
-    assert!(!index.range_meta(11_000).unwrap().unwrap().entry.epoch_end);
+    assert!(!range_meta_row(&index, 11_000).entry.epoch_end);
 }
 
 #[test]

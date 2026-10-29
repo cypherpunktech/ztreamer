@@ -276,14 +276,14 @@ impl CompactService {
         let lookup = if request.hash.is_empty() {
             let height = u32::try_from(request.height)
                 .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
-            tokio::task::spawn_blocking(move || index.read_block_as(generation, height).map(Some))
+            tokio::task::spawn_blocking(move || index.snapshot(generation)?.block(height).map(Some))
         } else {
             let hash = request
                 .hash
                 .try_into()
                 .map(block::Hash)
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            tokio::task::spawn_blocking(move || index.read_block_by_hash_as(generation, hash))
+            tokio::task::spawn_blocking(move || index.snapshot(generation)?.block_by_hash(hash))
         };
         lookup
             .await

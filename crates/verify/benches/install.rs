@@ -88,11 +88,15 @@ impl BenchRange {
 
     /// The range at `start` of `source`, with its row and the end of the row before it.
     fn read_from(source: &Index, start: u32) -> Self {
-        let blob = source.read_sealed_range_bytes(start).unwrap().expect("no range at the start");
+        let blob =
+            source.latest().unwrap().sealed_range(start).unwrap().expect("no range at the start");
         let blob = Bytes::from(blob);
-        let meta = source.range_meta(start).unwrap().expect("the range has no row");
+        let meta =
+            source.latest().unwrap().range_meta(start).unwrap().expect("the range has no row");
         let previous = start.checked_sub(RANGE_SIZE).map_or(RangeLink::GENESIS, |before| {
-            RangeLink::from(&source.range_meta(before).unwrap().expect("no row before").entry)
+            RangeLink::from(
+                &source.latest().unwrap().range_meta(before).unwrap().expect("no row before").entry,
+            )
         });
         Self { blob, meta, previous }
     }

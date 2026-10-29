@@ -10,7 +10,7 @@ use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 use ztreamer_indexer::{
     codec::CompactBlockRecord,
     index::{RANGE_SIZE, SEAL_DEPTH, range_meta::VerifyState},
-    test_utils::grow_chain,
+    test_utils::{grow_chain, range_meta_row},
     types::RawIndexBlock,
 };
 use ztreamer_protocol::{
@@ -232,7 +232,7 @@ async fn a_fresh_replica_imports_three_epochs_then_follows_the_chain() {
     assert_eq!(latest.hash, snapshot.blocks.last().unwrap().hash().0);
     let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
     assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
-    assert_eq!(index.range_meta(12_000).unwrap().unwrap().state, VerifyState::Verified);
+    assert_eq!(range_meta_row(&index, 12_000).state, VerifyState::Verified);
 }
 
 /// The tail seals two ranges after the import. The filler writes their rows from the node of
@@ -258,8 +258,8 @@ async fn a_replica_fills_the_rows_of_the_ranges_that_the_tail_seals() {
     assert_eq!(peer.sealed_through(), TAIL_SEALED);
     {
         let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
-        let imported = index.range_meta(20_000).unwrap().unwrap();
-        let filled = index.range_meta(TAIL_SEALED + 1 - RANGE_SIZE).unwrap().unwrap();
+        let imported = range_meta_row(&index, 20_000);
+        let filled = range_meta_row(&index, TAIL_SEALED + 1 - RANGE_SIZE);
         assert!(!imported.entry.epoch_end);
         assert_eq!(filled.state, VerifyState::Verified);
         assert_eq!(filled.verified_by, imported.verified_by);

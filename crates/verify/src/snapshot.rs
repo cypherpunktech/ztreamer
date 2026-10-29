@@ -274,7 +274,8 @@ impl SnapshotWriter {
             }
             let start = entry.start_height;
             let blob = index
-                .read_sealed_range_bytes(start)?
+                .latest()?
+                .sealed_range(start)?
                 .ok_or(SnapshotWriteError::MissingRange(start))?;
             self.put_range(entry, &blob)?;
             Ok::<_, SnapshotWriteError>(written + 1)

@@ -351,7 +351,7 @@ impl Importer {
             return Ok(Frontiers::default());
         };
         let start = sealed + 1 - RANGE_SIZE;
-        self.blocking(move |index| index.range_meta(start))
+        self.blocking(move |index| index.latest()?.range_meta(start))
             .await?
             .map(|meta| meta.entry.frontiers)
             .ok_or(ImportError::MissingRow { start })
