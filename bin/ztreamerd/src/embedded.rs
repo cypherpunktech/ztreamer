@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::info;
 use zakurad::{components::metrics, config::ZakuradConfig};
-use ztreamer_node::{self as node, InProcessBackend};
+use ztreamer_embedded::{self as node, InProcessBackend};
 use ztreamer_p2p::P2pCompactService;
 
 use crate::{DaemonArgs, NodeSources, lifecycle, run_application};

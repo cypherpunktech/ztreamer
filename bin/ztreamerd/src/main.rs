@@ -25,8 +25,8 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
+use ztreamer_embedded as node;
 use ztreamer_index::index::{Index, IndexState, range_meta::NodeId};
-use ztreamer_node as node;
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,

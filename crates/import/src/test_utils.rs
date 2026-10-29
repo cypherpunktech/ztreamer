@@ -41,11 +41,11 @@ use ztreamer_chain::{
     test_utils::raw_block,
     types::RawIndexBlock,
 };
+use ztreamer_embedded::{InProcessBackend, NodeClient};
 use ztreamer_index::{
     index::{Index, IndexState},
     test_utils::{populate, range_meta_row, sealed_range_blob},
 };
-use ztreamer_node::{InProcessBackend, NodeClient};
 use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
     replicator_server::{Replicator, ReplicatorServer},

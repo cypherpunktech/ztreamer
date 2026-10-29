@@ -4781,6 +4781,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-embedded"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tower",
+ "zakura",
+ "zakura-chain",
+ "zakura-node-services",
+ "zakura-sapling-crypto",
+ "zakura-state",
+ "zakura-test",
+ "ztreamer-backend",
+ "ztreamer-chain",
+ "ztreamer-index",
+ "ztreamer-protocol",
+ "ztreamer-service",
+ "ztreamer-sync",
+]
+
+[[package]]
 name = "ztreamer-import"
 version = "0.1.0"
 dependencies = [
@@ -4813,8 +4837,8 @@ dependencies = [
  "zakura-test",
  "ztreamer-blocking",
  "ztreamer-chain",
+ "ztreamer-embedded",
  "ztreamer-index",
- "ztreamer-node",
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-replicator",
@@ -4863,30 +4887,6 @@ dependencies = [
  "tokio",
  "tracing",
  "webpki-roots",
-]
-
-[[package]]
-name = "ztreamer-node"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tonic",
- "tower",
- "zakura",
- "zakura-chain",
- "zakura-node-services",
- "zakura-sapling-crypto",
- "zakura-state",
- "zakura-test",
- "ztreamer-backend",
- "ztreamer-chain",
- "ztreamer-index",
- "ztreamer-protocol",
- "ztreamer-service",
- "ztreamer-sync",
 ]
 
 [[package]]
@@ -5072,9 +5072,9 @@ dependencies = [
  "zeroize",
  "ztreamer-backend",
  "ztreamer-chain",
+ "ztreamer-embedded",
  "ztreamer-import",
  "ztreamer-index",
- "ztreamer-node",
  "ztreamer-p2p",
  "ztreamer-protocol",
  "ztreamer-remote",
