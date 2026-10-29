@@ -28,6 +28,7 @@ mod address;
 mod blocks;
 mod head;
 mod mempool;
+mod range_cursor;
 mod tree;
 
 pub use head::{HeadFollowerConfig, HeadFollowerError};

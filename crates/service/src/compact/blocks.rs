@@ -5,13 +5,10 @@ use std::{sync::Arc, time::Instant};
 use tokio_stream::StreamExt;
 use tonic::Status;
 use zakura_chain::block;
-use ztreamer_indexer::{
-    codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock},
-    index::IndexError,
-};
+use ztreamer_indexer::codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock};
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
-use super::{CompactService, RpcStream, ensure_ready, index_status, reorganized};
+use super::{CompactService, RpcStream, ensure_ready, range_cursor::RangeCursor, reorganized};
 use crate::project::{PoolSelection, add_transparent_txs, project_block};
 
 impl CompactService {
@@ -136,84 +133,12 @@ impl CompactService {
         let permit = Arc::clone(&self.range_streams).acquire_owned().await;
         self.metrics.admission.record(admission_started.elapsed().as_secs_f64());
         let permit = permit.map_err(|_| Status::unavailable("range stream pool is closed"))?;
-        let index = Arc::clone(&self.index);
-        let ascending = start <= end;
-        let durable_tip = snapshot.durable_tip.map(|tip| tip.height);
-        let mut cursor = Some(start);
         // Bound active streams so large ranges do not all compete for throughput.
         // The permit lasts until the response stream is dropped, including transport
         // backpressure. Each stream buffers one chunk; its LMDB transaction ends
         // with its index snapshot, before yielding to the transport.
-        let mut records = Vec::<T>::new().into_iter();
-        // (hash, previous_hash) of the last record sent; every chunk must chain onto it.
-        let mut last: Option<(block::Hash, block::Hash)> = None;
-        Ok(Box::pin(tokio_stream::iter(std::iter::from_fn(move || {
-            loop {
-                let _ = &permit;
-                if let Some(record) = records.next() {
-                    last = Some((record.hash(), record.previous_hash()));
-                    return Some(Ok(project(record)));
-                }
-                let height = cursor?;
-                let mut chunk_end = if ascending {
-                    height.saturating_add(63).min(end)
-                } else {
-                    height.saturating_sub(63).max(end)
-                };
-                let durable = durable_tip.is_some_and(|tip| height <= tip);
-                if let Some(tip) = durable_tip {
-                    if ascending && durable {
-                        chunk_end = chunk_end.min(tip);
-                    } else if !ascending && !durable {
-                        chunk_end = chunk_end.max(tip.saturating_add(1));
-                    }
-                }
-                let mut chunk = Vec::with_capacity(64);
-                let result = if durable {
-                    index.latest().and_then(|index_snapshot| {
-                        index_snapshot.read_blocks(height, chunk_end, |record| {
-                            chunk.push(record);
-                            true
-                        })
-                    })
-                } else {
-                    (0..=height.abs_diff(chunk_end)).try_for_each(|offset| {
-                        let height = if ascending { height + offset } else { height - offset };
-                        chunk.push(T::from_record(
-                            snapshot.volatile(height).ok_or(IndexError::Coverage { height })?,
-                        ));
-                        Ok(())
-                    })
-                };
-                if let Err(error) = result {
-                    cursor = None;
-                    return Some(Err(match error {
-                        // Validation saw this height; if the index no longer has it, the chain shrank.
-                        IndexError::Coverage { height } if durable => reorganized(height),
-                        other => index_status(other),
-                    }));
-                }
-                if let Some((last_hash, last_previous)) = last
-                    && let Some(first) = chunk.first()
-                {
-                    let continuous = if ascending {
-                        first.previous_hash() == last_hash
-                    } else {
-                        last_previous == first.hash()
-                    };
-                    if !continuous {
-                        cursor = None;
-                        return Some(Err(reorganized(first.height())));
-                    }
-                }
-                cursor = (chunk_end != end).then_some(if ascending {
-                    chunk_end + 1
-                } else {
-                    chunk_end - 1
-                });
-                records = chunk.into_iter();
-            }
-        }))))
+        let cursor = RangeCursor::new(Arc::clone(&self.index), snapshot, start, end, permit);
+        Ok(Box::pin(tokio_stream::iter(cursor.map(move |record| record.map(&project)))))
     }
 }
 
