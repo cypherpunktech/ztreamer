@@ -4760,6 +4760,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-blocking"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "ztreamer-indexer"
 version = "0.1.0"
 dependencies = [
@@ -4778,6 +4786,7 @@ dependencies = [
  "zakura-chain",
  "zakura-sapling-crypto",
  "zakura-test",
+ "ztreamer-blocking",
  "ztreamer-indexer",
  "ztreamer-protocol",
 ]
@@ -4878,6 +4887,7 @@ dependencies = [
  "zakura-state",
  "zakura-test",
  "ztreamer-backend",
+ "ztreamer-blocking",
  "ztreamer-indexer",
  "ztreamer-jsonrpc",
  "ztreamer-remote",
@@ -4947,6 +4957,7 @@ dependencies = [
  "zakura-state",
  "zakura-test",
  "ztreamer-backend",
+ "ztreamer-blocking",
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",

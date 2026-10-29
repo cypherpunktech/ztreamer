@@ -45,6 +45,7 @@ zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
 zcash_primitives.workspace = true
+ztreamer-blocking = { path = "../blocking" }
 ztreamer-backend = { path = "../backend" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-jsonrpc = { path = "../jsonrpc" }

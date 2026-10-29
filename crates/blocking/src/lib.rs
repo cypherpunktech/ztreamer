@@ -10,6 +10,8 @@
 //! stops, a worker can still poll a task after the pool stopped. If that task starts a
 //! `BlockingTask`, its join gives [`BlockingTaskCancelled`].
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use std::panic;
 
 use tokio::task::JoinHandle;
@@ -17,7 +19,7 @@ use tokio::task::JoinHandle;
 /// A closure that runs on the Tokio blocking thread pool.
 ///
 /// ```
-/// use ztreamer_indexer::blocking::{BlockingTask, BlockingTaskCancelled};
+/// use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
 ///
 /// # async fn run() -> Result<(), BlockingTaskCancelled> {
 /// let sum = BlockingTask::spawn(|| (1..=10).sum::<u32>()).join().await?;

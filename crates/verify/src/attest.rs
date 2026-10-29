@@ -24,8 +24,8 @@ use tokio::sync::OnceCell;
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
+use ztreamer_blocking::BlockingTaskCancelled;
 use ztreamer_indexer::{
-    blocking::BlockingTaskCancelled,
     codec::CodecError,
     parser::CompactParseError,
     pool::{NodeBytes, Pool, PoolRoots, SubtreeNode},

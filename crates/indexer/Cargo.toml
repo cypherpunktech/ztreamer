@@ -24,6 +24,7 @@ tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
 zakura-test = { workspace = true, optional = true }
+ztreamer-blocking = { path = "../blocking" }
 ztreamer-protocol = { path = "../protocol" }
 
 [dev-dependencies]

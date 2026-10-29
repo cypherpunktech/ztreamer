@@ -5,8 +5,9 @@ use zakura_chain::{
     parameters::{GENESIS_PREVIOUS_BLOCK_HASH, constants::MAX_BLOCK_REORG_HEIGHT},
 };
 
+use ztreamer_blocking::BlockingTaskCancelled;
+
 use crate::{
-    blocking::BlockingTaskCancelled,
     codec::CompactBlockRecord,
     index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
     ingest::{IngestError, OrderedBuilder},
