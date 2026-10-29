@@ -1,5 +1,6 @@
-use std::{fs, future, net::SocketAddr, path::Path, time::Duration};
+use std::{future, net::SocketAddr, path::Path, time::Duration};
 
+use chrono::Utc;
 use clap::Parser;
 use ed25519_dalek::SigningKey;
 use serde_json::json;
@@ -25,12 +26,13 @@ use ztreamer_protocol::{
     replicate::{ListRangesRequest, replicator_client::ReplicatorClient},
 };
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
+use ztreamer_replicator::{SnapshotExport, snapshot_writer::SnapshotWriter};
 
 use super::*;
 use crate::{
-    Cli, Command, DaemonArgs,
+    DaemonArgs,
     remote::RemoteNode,
-    test_utils::{free_addr, latest_block_at, node_with_chain_name},
+    test_utils::{TestCli, free_addr, latest_block_at, node_with_chain_name},
 };
 
 /// The ranges of the snapshot: three epochs, the last with one range.
@@ -60,7 +62,7 @@ impl Snapshot {
     }
 
     /// Fills an index with the blocks of a chain with its tip at `tip`, seals it through
-    /// [`SEALED`], fills its `range_meta` rows, and exports it with `ztreamerd export-snapshot`.
+    /// [`SEALED`], fills its `range_meta` rows, and exports it.
     async fn with_tip(tip: u32) -> Self {
         let mut blocks = Vec::new();
         grow_chain(&mut blocks, tip, 0);
@@ -72,21 +74,16 @@ impl Snapshot {
         Self { blocks, server, _dir: dir }
     }
 
-    /// Exports the index in `index` with `ztreamerd export-snapshot` to `dir/snapshot`, signed
+    /// Exports the mainnet index in `index` with [`SnapshotExport`] to `dir/snapshot`, signed
     /// with [`SEED`].
     async fn export(index: &Path, dir: &Path) {
-        let key = dir.join("key");
-        fs::write(&key, SEED).unwrap();
-        let out = dir.join("snapshot");
-        let [key, index, out] = [key.as_path(), index, &out].map(|p| p.to_str().unwrap());
-        let flags = ["--index-map-size", "1073741824", "--signing-key", key, "--index-dir", index];
-        let flags = ["ztreamerd", "export-snapshot", "--out", out].into_iter().chain(flags);
-        let Cli { command: Some(Command::ExportSnapshot(export)), daemon } = Cli::parse_from(flags)
-        else {
-            panic!("export-snapshot parses");
+        let (index, out) = (index.to_owned(), dir.join("snapshot"));
+        let export = move || {
+            let index = Index::open_existing(&index, 1 << 30).unwrap();
+            let writer = SnapshotWriter::new(out, SigningKey::from_bytes(&SEED));
+            SnapshotExport::run(&index, &Network::Mainnet, Utc::now(), &writer).unwrap();
         };
-        let export = move || export.run(&daemon.open_existing_index()?);
-        tokio::task::spawn_blocking(export).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(export).await.unwrap();
     }
 
     /// The height of the tip of the chain.
@@ -141,7 +138,7 @@ fn cli(dir: &TempDir, url: &str, snapshot: &Snapshot, extra: &[&str]) -> DaemonA
     let flags = ["--index-dir", dir, "--index-map-size", "1073741824", "--remote-rpc", url];
     let base = snapshot.server.base.to_string();
     let flags = flags.into_iter().chain(["--replicate-from", &base]);
-    Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
+    TestCli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
 }
 
 /// The daemon of `cli` until `signal`, with the snapshot key of `seed` in place of the built-in
@@ -335,7 +332,7 @@ async fn each_refusal_stops_the_replica_before_a_range_fetch() {
 fn replicate_from_takes_one_snapshot_or_one_peer() {
     let parse = |flags: &[&str]| {
         let remote = ["ztreamerd", "--remote-rpc", "http://127.0.0.1:8232"];
-        Cli::try_parse_from(remote.iter().chain(flags)).map(|cli| cli.daemon)
+        TestCli::try_parse_from(remote.iter().chain(flags)).map(|cli| cli.daemon)
     };
     assert!(parse(&["--replicate-from", "peer"]).is_err());
     assert!(parse(&["--replicate-from", "peer:9068/path"]).is_err());

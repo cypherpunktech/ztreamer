@@ -1,17 +1,27 @@
-//! Test fixtures for the daemon tests of the remote node and of the replica: a free local
-//! address, a poll of `GetLatestBlock`, and a mock node with another chain name.
+//! Test fixtures for the daemon tests: a parser of the daemon flags, a free local address, a poll
+//! of `GetLatestBlock`, and a mock node with another chain name.
 
 use std::{
     net::{SocketAddr, TcpListener},
     time::Duration,
 };
 
+use clap::Parser;
 use serde_json::json;
 use tokio::time::timeout;
 use ztreamer_protocol::proto::{
     BlockId, ChainSpec, compact_tx_streamer_client::CompactTxStreamerClient,
 };
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
+
+use crate::DaemonArgs;
+
+/// The daemon flags as a command, as `ztreamerd` parses them with no subcommand.
+#[derive(Debug, Parser)]
+pub(crate) struct TestCli {
+    #[command(flatten)]
+    pub(crate) daemon: DaemonArgs,
+}
 
 /// A local address with no listener.
 pub(crate) fn free_addr() -> SocketAddr {

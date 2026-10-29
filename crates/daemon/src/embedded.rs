@@ -12,7 +12,11 @@ use zakurad::config::ZakuradConfig;
 use ztreamer_embedded::{self as node, InProcessBackend};
 use ztreamer_p2p::P2pCompactService;
 
-use crate::{DaemonArgs, NodeSources, lifecycle, run_application};
+use crate::{
+    DaemonArgs,
+    application::{NodeSources, run_application},
+    lifecycle,
+};
 
 /// An embedded Zakura node, from its configuration.
 #[derive(Debug)]

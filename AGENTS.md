@@ -2,7 +2,8 @@
 
 Zcash indexer and light-wallet server with an embedded or remote Zakura node.
 Cargo workspace: `bin/ztreamerd` plus
-`crates/{backend,blocking,chain,embedded,import,index,jsonrpc,p2p,protocol,remote,replicator,service,snapshot,sync}`.
+`crates/{backend,blocking,chain,daemon,embedded,import,index,jsonrpc,p2p,protocol,remote,replicator,service,snapshot,sync}`.
+`bin/ztreamerd` holds only the command line. `ztreamer-daemon` runs the daemon.
 Building needs `protoc` on the path.
 
 ## Commands
@@ -48,7 +49,7 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 - No glob imports outside `mod tests`. Group imports from the same crate.
 - Private by default, `pub(crate)` for internal, `pub` for API only.
   Never `pub(super)`.
-- `thiserror` in library crates, `eyre` in binaries, never `anyhow`.
+- `thiserror` in library crates, `eyre` in `ztreamerd` and `ztreamer-daemon`, never `anyhow`.
 - Builders for structs with more than four fields or several fields of the
   same type.
 - Small, focused functions and types. No `TODO`s for core logic.
@@ -85,7 +86,7 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
   nothing reads.
 - A type of metric handles takes its handles when it is made. A test can then catch the
   samples of worker threads with a local recorder.
-- `ztreamerd` starts the Prometheus endpoint (`--metrics-listen`) in both modes.
+- `ztreamer-daemon` starts the Prometheus endpoint (`--metrics-listen`) in both modes.
 
 ### Async
 
