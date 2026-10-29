@@ -3,84 +3,13 @@ use zakura_chain::{subtree::NoteCommitmentSubtreeIndex, transaction};
 use ztreamer_indexer::{
     codec::encode_range,
     index::RANGE_SIZE,
+    manifest_entry::ManifestEntry,
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
 
 use super::*;
-
-fn sapling(count: u32) -> TreeSizes {
-    TreeSizes { sapling: count, ..TreeSizes::default() }
-}
-
-/// The note commitments that `epoch` adds, over all three pools.
-fn commitments(epoch: Epoch<'_>) -> u64 {
-    let total = |entry: &ManifestEntry| entry.end_tree_sizes.total();
-    total(epoch.entries().last().unwrap()) - epoch.previous().map_or(0, total)
-}
-
-fn lengths(entries: &[ManifestEntry]) -> Vec<usize> {
-    Epochs::new(entries).map(|epoch| epoch.entries().len()).collect()
-}
-
-#[test]
-fn an_epoch_closes_at_ten_ranges() {
-    let entries = synthetic_entries(&[sapling(1_000); 25]);
-    let epochs: Vec<_> = Epochs::new(&entries).collect();
-
-    assert_eq!(lengths(&entries), [10, 10, 5]);
-    assert_eq!(epochs[0].end_height(), 9_999);
-    assert_eq!(commitments(epochs[0]), 10_000);
-    assert_eq!(epochs[2].entries()[0].start_height, 20_000);
-    assert_eq!(epochs[2].end_height(), 24_999);
-}
-
-#[test]
-fn an_epoch_closes_when_commitments_reach_the_cap() {
-    // 400,000 per range: the third range brings the epoch to 1,200,000.
-    assert_eq!(lengths(&synthetic_entries(&[sapling(400_000); 7])), [3, 3, 1]);
-
-    // The cap is reached exactly at the second range.
-    let entries = synthetic_entries(&[sapling(999_999), sapling(1), sapling(5)]);
-    assert_eq!(lengths(&entries), [2, 1]);
-    assert_eq!(commitments(Epochs::new(&entries).next().unwrap()), MAX_COMMITMENTS);
-
-    // A heavy range closes the epoch that it joins.
-    let entries = synthetic_entries(&[sapling(10), sapling(1_060_000), sapling(10)]);
-    assert_eq!(lengths(&entries), [2, 1]);
-}
-
-#[test]
-fn only_a_short_last_epoch_is_not_closed_by_the_rule() {
-    let closed = |entries: &[ManifestEntry]| -> Vec<bool> {
-        Epochs::new(entries).map(|epoch| epoch.closed_by_rule()).collect()
-    };
-
-    // Ten ranges close by count. The last 5 ranges close only at the end of the entries.
-    assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 25])), [true, true, false]);
-    assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 20])), [true, true]);
-    // 1,200,000 commitments close by the cap. The last range adds 400,000 only.
-    assert_eq!(closed(&synthetic_entries(&[sapling(400_000); 7])), [true, true, false]);
-    // A last epoch that reaches the cap closes by the rule.
-    assert_eq!(closed(&synthetic_entries(&[sapling(10), sapling(1_060_000)])), [true]);
-}
-
-#[test]
-fn commitments_count_all_three_pools() {
-    let add = TreeSizes { sapling: 200_000, orchard: 200_000, ironwood: 100_000 };
-    let entries = synthetic_entries(&[add; 4]);
-
-    assert_eq!(lengths(&entries), [2, 2]);
-    assert_eq!(commitments(Epochs::new(&entries).nth(1).unwrap()), 1_000_000);
-}
-
-#[test]
-fn no_entries_give_no_epochs() {
-    let mut epochs = Epochs::new(&[]);
-
-    assert_eq!(epochs.next(), None);
-    assert_eq!(epochs.next(), None);
-}
+use crate::epoch::{Epochs, synthetic_entries};
 
 /// The Sapling tree size before the epoch under test: six commitments short of the end of
 /// subtree 15.
@@ -237,7 +166,7 @@ fn verify_forged(edit: impl FnOnce(&mut [CompactBlockRecord])) -> Result<EpochPr
         forged.frontiers = honest.frontiers.clone();
         forged.subtree_roots = honest.subtree_roots.clone();
     }
-    Epochs::new(&forged.entries).nth(1).unwrap().verify(&forged.blobs, &forged.start)
+    EpochProof::rebuild(&Epochs::new(&forged.entries).nth(1).unwrap(), &forged.blobs, &forged.start)
 }
 
 fn assert_rejected(result: Result<EpochProof, Reject>, check: Check, height: u32) {
@@ -251,7 +180,7 @@ fn an_epoch_rebuilds_to_the_manifest_frontiers() {
     assert_eq!(epochs.len(), 2);
     assert_eq!(epochs[1].previous(), Some(&fixture.entries[0]));
 
-    let proof = epochs[1].verify(&fixture.blobs, &fixture.start).unwrap();
+    let proof = EpochProof::rebuild(&epochs[1], &fixture.blobs, &fixture.start).unwrap();
 
     assert_eq!(proof.end_frontiers, fixture.entries[2].frontiers);
     assert_eq!(proof.end_tree_sizes, fixture.entries[2].end_tree_sizes);
@@ -309,7 +238,7 @@ fn a_wrong_start_frontier_is_rejected() {
     let fixture = fixture(1, blocks());
     let epoch = Epochs::new(&fixture.entries).nth(1).unwrap();
     let verify = |sapling: Vec<u8>| {
-        epoch.verify(&fixture.blobs, &Frontiers { sapling, ..fixture.start.clone() })
+        EpochProof::rebuild(&epoch, &fixture.blobs, &Frontiers { sapling, ..fixture.start.clone() })
     };
 
     // Other nodes at the same tree size: the first range end does not match.
@@ -324,8 +253,11 @@ fn wrong_subtree_roots_are_rejected() {
     let mut fixture = fixture(1, blocks());
     fixture.entries[2].subtree_roots.clear();
 
-    let result =
-        Epochs::new(&fixture.entries).nth(1).unwrap().verify(&fixture.blobs, &fixture.start);
+    let result = EpochProof::rebuild(
+        &Epochs::new(&fixture.entries).nth(1).unwrap(),
+        &fixture.blobs,
+        &fixture.start,
+    );
 
     assert_rejected(result, Check::SubtreeRoots, 2_999);
 }
@@ -337,12 +269,12 @@ fn a_wrong_blob_count_is_refused() {
     let mut blobs = fixture.blobs.clone();
 
     assert_eq!(
-        epoch.verify(&blobs[..1], &fixture.start),
+        EpochProof::rebuild(&epoch, &blobs[..1], &fixture.start),
         Err(Reject::BlobCount { entries: 2, blobs: 1 })
     );
     blobs.push(blobs[0].clone());
     assert_eq!(
-        epoch.verify(&blobs, &fixture.start),
+        EpochProof::rebuild(&epoch, &blobs, &fixture.start),
         Err(Reject::BlobCount { entries: 2, blobs: 3 })
     );
 }
@@ -359,7 +291,7 @@ fn a_pool_that_becomes_inactive_is_rejected() {
     };
     assert!(fixture.entries[1].frontiers.ironwood.is_empty());
 
-    let result = epoch.verify(&fixture.blobs, &start);
+    let result = EpochProof::rebuild(&epoch, &fixture.blobs, &start);
 
     assert_rejected(result, Check::Frontier, 1_999);
 }

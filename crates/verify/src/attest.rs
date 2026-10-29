@@ -1,14 +1,18 @@
 //! Attestation: the node confirms what an epoch rebuilt.
 //!
-//! [`Epoch::verify`](crate::epoch::Epoch::verify) proves that the ranges of an epoch agree with
-//! the manifest. [`Epoch::attest`] then asks the node about the epoch: the block hash at the end
-//! of each range, the three tree roots at the end of the epoch, once, and the roots of the
-//! subtrees that the epoch completed, with one call per pool. When all answers agree, it returns
-//! one [`Attested`] record per range, which the importer keeps in `range_meta`.
+//! [`EpochProof::rebuild`] proves that the ranges of an epoch agree with the manifest.
+//! [`EpochProof::attest`] then asks an [`Attestor`] about the epoch: the block hash at the end of
+//! each range, the three tree roots at the end of the epoch, once, and the roots of the subtrees
+//! that the epoch completed, with one call per pool. When all answers agree, it returns one
+//! [`Attested`] record per range, which the importer keeps in `range_meta`.
 //!
 //! [`JsonRpcAttestor`] asks a zakura node over JSON-RPC. `z_gettreestate` takes 0.2 to 2.6 s and
 //! the node does not cache it, so the attestor keeps the tree roots that it gave: a retry of an
 //! epoch makes no new `z_gettreestate` call. The other two calls take less than a millisecond.
+//!
+//! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
+//! [`EpochProof::attest`]: crate::proof::EpochProof::attest
+//! [`Attested`]: ztreamer_indexer::index::range_meta::Attested
 
 use std::{
     collections::BTreeMap,
@@ -23,7 +27,6 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     blocking::BlockingTaskCancelled,
     codec::CodecError,
-    index::range_meta::Attested,
     parser::CompactParseError,
     pool::{NodeBytes, Pool, PoolRoots, SubtreeNode},
     types::{BlockAtHeightError, RawBlockError},
@@ -33,10 +36,7 @@ use ztreamer_remote::{
     frontier::{FromRpc, RpcDecodeError},
 };
 
-use crate::{
-    epoch::{Epoch, EpochProof, Trees},
-    range::{Check, Reject},
-};
+use crate::range::Reject;
 
 /// The most `z_gettreestate` answers that a [`JsonRpcAttestor`] keeps.
 pub const CACHE_CAPACITY: usize = 1024;
@@ -122,8 +122,8 @@ impl From<FetchAtHeightError> for NodeError {
     }
 }
 
-/// Why [`Epoch::attest`] or [`Epoch::sample`](crate::epoch::Epoch::sample) did not accept an
-/// epoch.
+/// Why [`EpochProof::attest`](crate::proof::EpochProof::attest) or
+/// [`SamplePlan::sample`](crate::sample::SamplePlan::sample) did not accept an epoch.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochError {
     /// A range of the epoch is wrong, or a blob must be fetched again.
@@ -145,9 +145,10 @@ pub enum EpochError {
 /// # Implementation
 ///
 /// Give the answers of the best chain. Return a [`NodeError`] when there is no answer, not a
-/// default value: [`Epoch::attest`] rejects a range on an answer that does not agree. A root is
-/// `None` when the pool is not active at the height. An implementation may cache its answers,
-/// because the answers at a height below the tip do not change.
+/// default value: [`EpochProof::attest`](crate::proof::EpochProof::attest) rejects a range on an
+/// answer that does not agree. A root is `None` when the pool is not active at the height. An
+/// implementation may cache its answers, because the answers at a height below the tip do not
+/// change.
 #[async_trait]
 pub trait Attestor: Send + Sync {
     /// The hash of the best-chain block at `height`.
@@ -165,123 +166,6 @@ pub trait Attestor: Send + Sync {
         start: NoteCommitmentSubtreeIndex,
         count: u16,
     ) -> Result<Vec<SubtreeNode>, NodeError>;
-}
-
-impl Epoch<'_> {
-    /// Compares `proof`, the result of [`Epoch::verify`], with the answers of `attestor`, and
-    /// returns one [`Attested`] record per entry, in order.
-    ///
-    /// The method compares the end hash of each entry with the node. It compares the three
-    /// roots of `proof` at [`Epoch::end_height`] with [`EpochProof::matches_roots`]. It compares
-    /// the root of each subtree that the epoch completed, with one [`Attestor::subtree_roots`]
-    /// call per pool. A wrong subtree root rejects at the end height of the entry that lists it.
-    ///
-    /// The record of an entry holds the end hash of the node, the subtrees that the entry
-    /// completed, and the roots at its end. The last entry has the roots of the node. An entry
-    /// before it has the rebuilt roots of its frontiers: the node attests them through the end
-    /// roots, because the rebuild appends the leaves of the epoch to these trees. If the node
-    /// gives no root for a pool at the end, the pool is not active before the end. Then the root
-    /// of that pool is `None` in each record. In the epoch where a pool becomes active, an entry
-    /// before the activation height has the root of the empty tree, not `None`. The frontier of
-    /// the entry cannot show the difference.
-    ///
-    /// ```
-    /// use ztreamer_indexer::{index::range_meta::Attested, manifest_entry::Frontiers};
-    /// use ztreamer_verify::{
-    ///     attest::{Attestor, EpochError},
-    ///     epoch::Epoch,
-    /// };
-    ///
-    /// # async fn run(
-    /// #     epoch: Epoch<'_>,
-    /// #     blobs: Vec<bytes::Bytes>,
-    /// #     start: Frontiers,
-    /// #     node: &dyn Attestor,
-    /// # ) -> Result<Vec<Attested>, EpochError> {
-    /// let proof = epoch.verify(&blobs, &start)?;
-    /// epoch.attest(&proof, node).await
-    /// # }
-    /// ```
-    pub async fn attest(
-        &self,
-        proof: &EpochProof,
-        attestor: &dyn Attestor,
-    ) -> Result<Vec<Attested>, EpochError> {
-        for entry in self.entries() {
-            let height = entry.end_height;
-            let hash = attestor
-                .block_hash(height)
-                .await
-                .map_err(|source| EpochError::Node { height, source })?;
-            if hash != entry.end_hash {
-                return Err(Check::AttestedHash.at(height).into());
-            }
-        }
-        let end = self.end_height();
-        let roots = attestor
-            .tree_roots(end)
-            .await
-            .map_err(|source| EpochError::Node { height: end, source })?;
-        if !proof.matches_roots(&roots) {
-            return Err(Check::AttestedRoots.at(end).into());
-        }
-        self.attest_subtrees(proof, attestor).await?;
-        self.entries()
-            .iter()
-            .map(|entry| {
-                let roots = if entry.end_height == end {
-                    roots
-                } else {
-                    // `Epoch::verify` checked that the frontiers are the rebuilt trees, thus
-                    // they parse.
-                    let rebuilt = Trees::try_from(&entry.frontiers)
-                        .map_err(|_| Check::Frontier.at(entry.end_height))?
-                        .roots();
-                    PoolRoots {
-                        sapling: roots.sapling.and(rebuilt.sapling),
-                        orchard: roots.orchard.and(rebuilt.orchard),
-                        ironwood: roots.ironwood.and(rebuilt.ironwood),
-                    }
-                };
-                let subtree_roots = entry.subtree_roots.clone();
-                Ok(Attested { end_hash: entry.end_hash, roots, subtree_roots })
-            })
-            .collect()
-    }
-
-    /// Compares each subtree root of `proof` with the node, with one call per pool.
-    async fn attest_subtrees(
-        &self,
-        proof: &EpochProof,
-        attestor: &dyn Attestor,
-    ) -> Result<(), EpochError> {
-        let end = self.end_height();
-        for pool in Pool::ALL {
-            let completed: Vec<_> =
-                proof.completed.iter().filter(|root| root.root.pool() == pool).collect();
-            let indices = completed.iter().map(|root| root.index.0);
-            let (Some(start), Some(last)) = (indices.clone().min(), indices.max()) else {
-                continue;
-            };
-            let answers = attestor
-                .subtree_roots(
-                    pool,
-                    NoteCommitmentSubtreeIndex(start),
-                    (last - start).saturating_add(1),
-                )
-                .await
-                .map_err(|source| EpochError::Node { height: end, source })?;
-            let wrong = completed.into_iter().find(|completed| {
-                answers.get(usize::from(completed.index.0 - start)) != Some(&completed.root)
-            });
-            if let Some(wrong) = wrong {
-                let entry = self.entries().iter().find(|entry| entry.subtree_roots.contains(wrong));
-                let height = entry.map_or(end, |entry| entry.end_height);
-                return Err(Check::AttestedSubtree.at(height).into());
-            }
-        }
-        Ok(())
-    }
 }
 
 /// An [`Attestor`] that asks a zakura node over JSON-RPC, and keeps the tree roots.

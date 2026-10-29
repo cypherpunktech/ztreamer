@@ -17,7 +17,7 @@ use ztreamer_indexer::{
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
-use ztreamer_verify::epoch::Epochs;
+use ztreamer_verify::{epoch::Epochs, proof::EpochProof};
 
 /// Sapling commitments per block: 1,060,000 in the range.
 const OUTPUTS_PER_BLOCK: u32 = 1_060;
@@ -74,12 +74,14 @@ fn bench_peak_range(c: &mut Criterion) {
     let epoch = Epochs::new(&entries).next().unwrap();
     let blobs = [Bytes::from(blob)];
     let start = Frontiers::default();
-    assert_eq!(epoch.verify(&blobs, &start).unwrap().completed.len(), 16);
+    assert_eq!(EpochProof::rebuild(&epoch, &blobs, &start).unwrap().completed.len(), 16);
 
     let mut group = c.benchmark_group("epoch_verify");
     group.sample_size(10);
     group.bench_function("peak_range_1_060_000_sapling", |b| {
-        b.iter(|| black_box(&epoch).verify(black_box(&blobs), black_box(&start)).unwrap())
+        b.iter(|| {
+            EpochProof::rebuild(black_box(&epoch), black_box(&blobs), black_box(&start)).unwrap()
+        })
     });
     group.finish();
 }

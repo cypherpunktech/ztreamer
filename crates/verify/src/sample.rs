@@ -1,10 +1,11 @@
 //! Sampling: the node gives full blocks, and the replica compares their records with the ranges.
 //!
-//! [`Epoch::verify`](crate::epoch::Epoch::verify) and [`Epoch::attest`](crate::epoch::Epoch::attest)
-//! prove the hash chain and the note commitment trees. They do not prove the fields that no root
-//! commits to, for example the ciphertexts. [`Epoch::sample`] picks some heights of each range,
-//! asks the node for the full block at each height, parses it with the parser of the indexer, and
-//! compares the record byte for byte with the record in the blob.
+//! [`EpochProof::rebuild`](crate::proof::EpochProof::rebuild) and
+//! [`EpochProof::attest`](crate::proof::EpochProof::attest) prove the hash chain and the note
+//! commitment trees. They do not prove the fields that no root commits to, for example the
+//! ciphertexts. [`SamplePlan::sample`] picks some heights of each range, asks the node for the
+//! full block at each height, parses it with the parser of the indexer, and compares the record
+//! byte for byte with the record in the blob.
 
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
@@ -32,7 +33,7 @@ pub trait Sampler: Send + Sync {
     async fn full_block(&self, height: u32) -> Result<RawIndexBlock, NodeError>;
 }
 
-/// How [`Epoch::sample`] picks the heights to compare.
+/// How [`SamplePlan::sample`] picks the heights to compare.
 ///
 /// The seed must be random and secret for each replica. A snapshot source that knows the seed
 /// knows the sampled heights, and can change the records at all other heights.
@@ -61,10 +62,9 @@ impl SamplePlan {
         offsets.sort_unstable();
         offsets
     }
-}
 
-impl Epoch<'_> {
-    /// Compares the records at the heights that `plan` picks with the full blocks of `sampler`.
+    /// Compares the records of `epoch` at the heights that the plan picks with the full blocks of
+    /// `sampler`.
     ///
     /// `blobs` holds one blob per entry, in order; another count is [`Reject::BlobCount`]. The
     /// method skips the heights for which the sampler has no block. It parses each full block
@@ -72,8 +72,9 @@ impl Epoch<'_> {
     /// record with the record in the blob. It returns the compared heights in ascending order,
     /// for `sampled_heights` in `range_meta`.
     ///
-    /// Run it after [`Epoch::verify`] on a Tokio runtime. It does not check the blob digests,
-    /// and it parses and encodes the blocks on the blocking thread pool of the runtime.
+    /// Run it after [`EpochProof::rebuild`](crate::proof::EpochProof::rebuild) on a Tokio
+    /// runtime. It does not check the blob digests, and it parses and encodes the blocks on the
+    /// blocking thread pool of the runtime.
     ///
     /// ```
     /// use ztreamer_verify::{
@@ -88,31 +89,31 @@ impl Epoch<'_> {
     /// #     node: &dyn Sampler,
     /// #     seed: u64,
     /// # ) -> Result<Vec<u32>, EpochError> {
-    /// epoch.sample(&blobs, node, SamplePlan { per_range: 5, seed }).await
+    /// SamplePlan { per_range: 5, seed }.sample(&epoch, &blobs, node).await
     /// # }
     /// ```
     pub async fn sample(
-        &self,
+        self,
+        epoch: &Epoch<'_>,
         blobs: &[impl AsRef<[u8]>],
         sampler: &dyn Sampler,
-        plan: SamplePlan,
     ) -> Result<Vec<u32>, EpochError> {
-        if blobs.len() != self.entries().len() {
-            let (entries, blobs) = (self.entries().len(), blobs.len());
+        if blobs.len() != epoch.entries().len() {
+            let (entries, blobs) = (epoch.entries().len(), blobs.len());
             return Err(Reject::BlobCount { entries, blobs }.into());
         }
         let mut sampled = Vec::new();
-        for (entry, blob) in self.entries().iter().zip(blobs) {
+        for (entry, blob) in epoch.entries().iter().zip(blobs) {
             let start = entry.start_height;
             let decoder = RangeDecoder::new(blob.as_ref()).map_err(|_| Check::Decode.at(start))?;
-            for offset in plan.offsets(start) {
+            for offset in self.offsets(start) {
                 let height = start.saturating_add(offset);
                 let record =
                     decoder.record(offset as usize).map_err(|_| Check::Decode.at(height))?;
                 let node = |source| EpochError::Node { height, source };
                 let block = sampler.full_block(height).await.map_err(node)?;
                 let same = BlockingTask::spawn(move || -> Result<bool, NodeError> {
-                    // `Epoch::verify` checked that each record adds its own commitments. Thus
+                    // `EpochProof::rebuild` checked that each record adds its own commitments. Thus
                     // the tree sizes before the block are the end sizes minus the additions.
                     let Some(before) = record.end_tree_sizes.checked_sub(record.additions()) else {
                         return Ok(false);
@@ -247,7 +248,7 @@ mod tests {
         let entries = [ManifestEntry::from_records_and_blob(records, &blob)];
         let sampler = FakeSampler { blocks: blocks() };
         let plan = SamplePlan { per_range, seed };
-        Epochs::new(&entries).next().unwrap().sample(&[blob], &sampler, plan).await
+        plan.sample(&Epochs::new(&entries).next().unwrap(), &[blob], &sampler).await
     }
 
     #[tokio::test]
@@ -295,7 +296,7 @@ mod tests {
         let plan = SamplePlan { per_range: 5, seed: 7 };
 
         let result =
-            Epochs::new(&entries).next().unwrap().sample(&[] as &[Vec<u8>], &sampler, plan).await;
+            plan.sample(&Epochs::new(&entries).next().unwrap(), &[] as &[Vec<u8>], &sampler).await;
 
         assert!(
             matches!(result, Err(EpochError::Reject(Reject::BlobCount { entries: 1, blobs: 0 }))),

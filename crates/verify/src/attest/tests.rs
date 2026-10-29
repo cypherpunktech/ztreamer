@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use zakura_chain::{ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{TreeSizes, encode_range},
-    index::RANGE_SIZE,
+    index::{RANGE_SIZE, range_meta::Attested},
     manifest_entry::{Frontiers, ManifestEntry},
     pool::SubtreeRoot,
     test_utils::{hash, record},
@@ -15,7 +15,11 @@ use ztreamer_remote::{
 };
 
 use super::*;
-use crate::epoch::{Epochs, synthetic_entries};
+use crate::{
+    epoch::{Epochs, synthetic_entries},
+    proof::EpochProof,
+    range::Check,
+};
 
 const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 
@@ -96,7 +100,7 @@ async fn attest(attestor: &FakeAttestor) -> Result<Vec<Attested>, EpochError> {
         roots: empty_tree_roots(),
         completed: vec![completed],
     };
-    Epochs::new(&entries).next().unwrap().attest(&proof, attestor).await
+    proof.attest(&Epochs::new(&entries).next().unwrap(), attestor).await
 }
 
 fn assert_rejected(result: Result<Vec<Attested>, EpochError>, check: Check, height: u32) {
@@ -325,9 +329,9 @@ async fn attest_first_epoch(treestate: Value) -> Result<Vec<Attested>, EpochErro
     let (entries, blobs) = first_epoch();
     let epoch = Epochs::new(&entries).next().unwrap();
     assert_eq!(epoch.end_height(), 9_999);
-    let proof = epoch.verify(&blobs, &Frontiers::default()).unwrap();
+    let proof = EpochProof::rebuild(&epoch, &blobs, &Frontiers::default()).unwrap();
     let (_node, attestor) = json_rpc_attestor(treestate).await;
-    epoch.attest(&proof, &attestor).await
+    proof.attest(&epoch, &attestor).await
 }
 
 /// The `z_gettreestate` answer of zakura at 9,999 on mainnet. No pool is active.

@@ -21,8 +21,9 @@ use ztreamer_indexer::{
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
 use crate::{
-    epoch::{Epoch, EpochProof, Epochs},
+    epoch::{Epoch, Epochs},
     manifest::Manifest,
+    proof::EpochProof,
 };
 
 /// The blob fetches of one epoch that run at the same time: all the blobs of the epoch. The
@@ -48,7 +49,7 @@ pub(crate) struct EpochImport {
     first_epoch: usize,
     /// The start frontiers of the first epoch.
     first_start_frontiers: Frontiers,
-    /// One permit for each run of [`Epoch::verify`]: `import_workers` permits.
+    /// One permit for each run of [`EpochProof::rebuild`]: `import_workers` permits.
     verify_permits: Semaphore,
 }
 
@@ -131,7 +132,7 @@ impl EpochImport {
         Ok(stream::iter(fetches).buffered(BLOB_FETCHES_PER_EPOCH).try_collect().await?)
     }
 
-    /// Runs [`Epoch::verify`] for the epoch at `at` on the blocking thread pool, with one of
+    /// Runs [`EpochProof::rebuild`] for the epoch at `at` on the blocking thread pool, with one of
     /// the `import_workers` permits.
     async fn verify_on_blocking_pool(
         self: &Arc<Self>,
@@ -146,7 +147,7 @@ impl EpochImport {
             .await
     }
 
-    /// Runs [`Epoch::verify`] for the epoch at `at`, and gives the checked range of each blob.
+    /// Runs [`EpochProof::rebuild`] for the epoch at `at`, and gives the checked range of each blob.
     /// Call it on the blocking thread pool.
     fn verify_blobs(
         &self,
@@ -154,18 +155,19 @@ impl EpochImport {
         blobs: Vec<Bytes>,
     ) -> Result<(Vec<CheckedRange>, EpochProof), ImportError> {
         let epoch = self.manifest_epoch(at);
-        // `Epoch::verify` of the epoch before rebuilt the frontiers of the entry before.
+        // `EpochProof::rebuild` of the epoch before rebuilt the frontiers of the entry before.
         let start = epoch
             .previous()
             .filter(|_| at != self.first_epoch)
             .map_or(&self.first_start_frontiers, |previous| &previous.frontiers);
-        let (proof, ranges) = epoch.verify_ranges(&blobs, start).map_err(|reject| {
-            ImportError::Epoch { epoch: epoch.end_height(), source: reject.into() }
-        })?;
+        let (proof, ranges) =
+            EpochProof::rebuild_ranges(&epoch, &blobs, start).map_err(|reject| {
+                ImportError::Epoch { epoch: epoch.end_height(), source: reject.into() }
+            })?;
         Ok((ranges, proof))
     }
 
-    /// Runs [`Epoch::attest`] and [`Epoch::sample`] for the epoch at `at` at the same time,
+    /// Runs [`EpochProof::attest`] and [`SamplePlan::sample`] for the epoch at `at` at the same time,
     /// and makes the [`VerifyState::Verified`] rows.
     async fn attest_and_sample(
         &self,
@@ -175,8 +177,8 @@ impl EpochImport {
     ) -> Result<VerifiedRows, ImportError> {
         let epoch = self.manifest_epoch(at);
         let node = &self.importer.node;
-        let attest = epoch.attest(&proof, &*node.attestor);
-        let sample = epoch.sample(&ranges, &*node.sampler, self.importer.config.verify_sample);
+        let attest = proof.attest(&epoch, &*node.attestor);
+        let sample = self.importer.config.verify_sample.sample(&epoch, &ranges, &*node.sampler);
         let (attested, sampled) = tokio::join!(attest, sample);
         let in_epoch = |source| ImportError::from_epoch_error(epoch.end_height(), source);
         let (attested, sampled) = (attested.map_err(in_epoch)?, sampled.map_err(in_epoch)?);
@@ -210,7 +212,7 @@ impl EpochImport {
     }
 
     /// Installs each checked range of an epoch with its row. The install does only the checks
-    /// that need the index: [`Epoch::verify`] checked the blobs. Returns the index state after
+    /// that need the index: [`EpochProof::rebuild`] checked the blobs. Returns the index state after
     /// the last range.
     pub(crate) async fn install_rows(&self, rows: VerifiedRows) -> Result<IndexState, ImportError> {
         let state = self
