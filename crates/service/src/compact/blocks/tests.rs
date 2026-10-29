@@ -3,9 +3,8 @@ use std::{sync::Arc, time::Duration};
 
 use tokio::sync::watch;
 use tonic::Request;
-use ztreamer_indexer::{
-    codec::CompactBlockRecord, head::Readiness, index::BlockId, ingest::OrderedBuilder,
-};
+use ztreamer_chain::codec::CompactBlockRecord;
+use ztreamer_indexer::{head::Readiness, index::BlockId, ingest::OrderedBuilder};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamer;
 
 use crate::{

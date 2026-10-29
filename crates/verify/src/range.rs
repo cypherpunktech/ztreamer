@@ -23,15 +23,15 @@
 //! [`Index::install_checked_range`]. Thus the serial install does not calculate the digest or
 //! decode the blob again.
 //!
-//! [`RANGE_SIZE`]: ztreamer_indexer::index::RANGE_SIZE
+//! [`RANGE_SIZE`]: ztreamer_chain::codec::RANGE_SIZE
 //! [`Index::install_checked_range`]: ztreamer_indexer::index::Index::install_checked_range
 
 use std::fmt;
 
 use bytes::Bytes;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
+use ztreamer_chain::codec::{CompactBlockRecord, TreeSizes};
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, TreeSizes},
     index::{CheckedRange, RangeCheckError},
     manifest_entry::{BlobMismatch, ManifestEntry},
 };
@@ -240,9 +240,8 @@ impl fmt::Debug for RangeBlob<'_> {
 
 #[cfg(test)]
 mod tests {
-    use ztreamer_indexer::{
-        codec::{RANGE_ENVELOPE_BYTES, encode_range, encode_range_from_bytes},
-        index::RANGE_SIZE,
+    use ztreamer_chain::{
+        codec::{RANGE_ENVELOPE_BYTES, RANGE_SIZE, encode_range, encode_range_from_bytes},
         test_utils::{encode_with_unshielded_transaction, hash, mixed_records},
     };
 

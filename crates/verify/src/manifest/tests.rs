@@ -1,6 +1,7 @@
 use serde_json::Value;
 use zakura_chain::{ironwood, orchard};
-use ztreamer_indexer::{pool::SubtreeNode, test_utils::hash};
+use ztreamer_chain::test_utils::hash;
+use ztreamer_indexer::pool::SubtreeNode;
 
 use super::*;
 use crate::epoch::synthetic_entries;

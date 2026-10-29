@@ -1,10 +1,10 @@
 //! The embedded [`CanonicalBlockSource`]: the best chain of the in-process Zakura node.
 
 use zakura_chain::block;
+use ztreamer_chain::types::RawIndexBlock;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
-    types::RawIndexBlock,
 };
 
 use crate::NodeClient;

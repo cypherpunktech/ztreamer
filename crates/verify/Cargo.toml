@@ -50,6 +50,7 @@ zakura-rpc.workspace = true
 zakura-state.workspace = true
 ztreamer-blocking = { path = "../blocking" }
 ztreamer-backend = { path = "../backend" }
+ztreamer-chain = { path = "../chain" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
@@ -64,6 +65,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thread", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 zakura-test.workspace = true
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
 ztreamer-node = { path = "../node" }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }

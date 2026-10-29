@@ -9,7 +9,7 @@ workspace = true
 
 [features]
 # Shared test and benchmark fixtures in `ztreamer_indexer::test_utils`.
-test-utils = ["dep:zakura-test"]
+test-utils = ["ztreamer-chain/test-utils"]
 
 [dependencies]
 blake3.workspace = true
@@ -23,8 +23,8 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
-zakura-test = { workspace = true, optional = true }
 ztreamer-blocking = { path = "../blocking" }
+ztreamer-chain = { path = "../chain" }
 ztreamer-protocol = { path = "../protocol" }
 
 [dev-dependencies]
@@ -33,16 +33,9 @@ criterion = "0.8"
 metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 tempfile = "3"
 zakura-test.workspace = true
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 # Enables `test_utils` for this crate's benches.
 ztreamer-indexer = { path = ".", features = ["test-utils"] }
-
-[[bench]]
-name = "parser"
-harness = false
-
-[[bench]]
-name = "codec"
-harness = false
 
 [[bench]]
 name = "index"

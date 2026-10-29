@@ -1,22 +1,14 @@
-//! Compact block parsing, historical ingestion, LMDB storage, and canonical-head reconciliation.
+//! Historical ingestion, LMDB storage, and canonical-head reconciliation of compact blocks.
 
 // Public items are not fully documented yet. Remove this once every `pub` item has a doc comment.
 #![allow(missing_docs)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-pub mod codec;
 pub mod head;
 pub mod index;
 pub mod ingest;
 pub mod manifest_entry;
-pub mod parser;
 pub mod pipeline;
 pub mod pool;
-mod protobuf;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
-pub mod types;
-
-pub type Digest = [u8; 32];
-pub type EphemeralKey = [u8; 32];
-pub type Ciphertext = [u8; 52];

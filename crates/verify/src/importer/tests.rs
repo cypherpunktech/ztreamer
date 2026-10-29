@@ -5,13 +5,16 @@ use ed25519_dalek::SigningKey;
 use tempfile::TempDir;
 use tokio::sync::Notify;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
-use ztreamer_indexer::{
+use ztreamer_chain::{
     codec::{RangeDecoder, encode_range},
+    test_utils::raw_block,
+    types::RawIndexBlock,
+};
+use ztreamer_indexer::{
     index::range_meta::{Attested, VerifyState},
     manifest_entry::{MAX_RANGES, ManifestEntry},
     pool::{Pool, PoolRoots, SubtreeNode},
-    test_utils::{range_meta_row, raw_block, sealed_range_blob},
-    types::RawIndexBlock,
+    test_utils::{range_meta_row, sealed_range_blob},
 };
 
 use super::*;

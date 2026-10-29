@@ -1,5 +1,6 @@
 use crate::index::BlockId;
-use crate::test_utils::{hash, open_index, raw_block};
+use crate::test_utils::open_index;
+use ztreamer_chain::test_utils::{hash, raw_block};
 
 use super::*;
 use zakura_chain::transaction;

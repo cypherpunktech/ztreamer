@@ -1,13 +1,12 @@
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
 
-use ztreamer_indexer::test_utils::{self as fixtures, record};
+use ztreamer_chain::test_utils::{mixed_records, record};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
-use ztreamer_indexer::{
-    codec::{CompactBlockRecord, decode_range_record, encode_range},
-    index::RANGE_SIZE,
+use ztreamer_chain::{
+    codec::{CompactBlockRecord, RANGE_SIZE, decode_range_record, encode_range},
     parser::parse_block,
     types::{CompactTransaction, RawIndexBlock},
 };
@@ -21,7 +20,7 @@ fn block_codec(c: &mut Criterion) {
     let records = [
         ("empty", record(0, Vec::new())),
         ("shielded", record(0, shielded_transactions())),
-        ("mixed-heavy-v1", fixtures::mixed_records(10).pop().unwrap()),
+        ("mixed-heavy-v1", mixed_records(10).pop().unwrap()),
     ];
 
     let mut group = c.benchmark_group("encode");
@@ -63,7 +62,7 @@ fn range_codec(c: &mut Criterion) {
 }
 
 fn mixed_range_codec(c: &mut Criterion) {
-    let records = fixtures::mixed_records(RANGE_SIZE);
+    let records = mixed_records(RANGE_SIZE);
     let encoded = encode_range(&records).unwrap();
     for index in [0, 500, 999] {
         assert_eq!(decode_range_record(&encoded, index).unwrap(), records[index]);

@@ -8,11 +8,13 @@ use zakura_chain::{
 use ztreamer_blocking::BlockingTaskCancelled;
 
 use crate::{
-    codec::CompactBlockRecord,
     index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
     ingest::{IngestError, OrderedBuilder},
-    parser::{CompactParseError, parse_block},
     pipeline::PipelineConfig,
+};
+use ztreamer_chain::{
+    codec::CompactBlockRecord,
+    parser::{CompactParseError, parse_block},
     types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
 

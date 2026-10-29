@@ -17,7 +17,7 @@ use super::{
     BlockId, IndexError, IndexState, RANGE_SIZE, RangeCheckError, metadata::Metadata,
     range_meta::RangeMetaTable,
 };
-use crate::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes};
+use ztreamer_chain::codec::{CodecError, CompactBlockRecord, RangeDecoder, StoredBlock, TreeSizes};
 
 type HeightDb = Database<U32<BigEndian>, Bytes>;
 type HeightIter<'txn> = RoIter<'txn, U32<BigEndian>, Bytes>;
@@ -388,10 +388,8 @@ impl HashIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        codec::encode_range,
-        test_utils::{open_index, record},
-    };
+    use crate::test_utils::open_index;
+    use ztreamer_chain::{codec::encode_range, test_utils::record};
 
     #[test]
     fn range_start_rounds_down_to_the_range() {

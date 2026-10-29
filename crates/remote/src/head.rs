@@ -2,10 +2,10 @@
 
 use crate::{FetchAtHeightError, ZakuraClient};
 use zakura_chain::block;
+use ztreamer_chain::types::RawIndexBlock;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadError},
     index::BlockId,
-    types::RawIndexBlock,
 };
 
 /// The canonical head of a remote zakura node, read over JSON-RPC.

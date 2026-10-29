@@ -9,13 +9,14 @@ use std::hint::black_box;
 use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use zakura_chain::sapling;
-use ztreamer_indexer::{
-    codec::{TreeSizes, encode_range},
-    index::RANGE_SIZE,
-    manifest_entry::{Frontiers, ManifestEntry},
-    pool::{SubtreeNode, SubtreeRoot},
+use ztreamer_chain::{
+    codec::{RANGE_SIZE, TreeSizes, encode_range},
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
+};
+use ztreamer_indexer::{
+    manifest_entry::{Frontiers, ManifestEntry},
+    pool::{SubtreeNode, SubtreeRoot},
 };
 use ztreamer_verify::{epoch::Epochs, proof::EpochProof};
 

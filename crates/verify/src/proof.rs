@@ -10,12 +10,14 @@
 use bytes::Bytes;
 use pasta_curves::{group::ff::PrimeField, pallas};
 use zakura_chain::{ironwood, orchard, sapling, subtree::NoteCommitmentSubtreeIndex};
-use ztreamer_indexer::{
+use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
+    types::CompactShieldedAction,
+};
+use ztreamer_indexer::{
     index::{CheckedRange, range_meta::Attested},
     manifest_entry::Frontiers,
     pool::{Pool, PoolRoots, SubtreeNode, SubtreeRoot},
-    types::CompactShieldedAction,
 };
 use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
 

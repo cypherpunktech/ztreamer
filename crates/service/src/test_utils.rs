@@ -27,15 +27,13 @@ use zakura_chain::{
 use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
+use ztreamer_chain::codec::CompactBlockRecord;
 use ztreamer_indexer::{
-    codec::CompactBlockRecord,
     head::HeadFollower,
     index::{Index, IndexState},
 };
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
-
-pub use ztreamer_indexer::test_utils as fixtures;
 
 /// A gRPC client for the CompactTxStreamer service.
 pub type Client = CompactTxStreamerClient<Channel>;
@@ -170,7 +168,7 @@ impl EphemeralService {
         );
         let state = match records {
             [] => index.state().unwrap(),
-            records => fixtures::populate(&index, records, seal_through),
+            records => ztreamer_indexer::test_utils::populate(&index, records, seal_through),
         };
         let follower = HeadFollower::new(Arc::clone(&index), state);
         let service = CompactService::with_backend(
@@ -190,8 +188,9 @@ impl EphemeralService {
 
     /// A service over empty blocks from 0 to `tip`, sealed through `tip`.
     pub async fn sealed_through(tip: u32) -> Self {
-        let records: Vec<_> =
-            (0..=tip).map(|height| fixtures::record(height, Vec::new())).collect();
+        let records: Vec<_> = (0..=tip)
+            .map(|height| ztreamer_chain::test_utils::record(height, Vec::new()))
+            .collect();
         Self::with_records(&records, Some(tip)).await
     }
 }
@@ -209,7 +208,7 @@ pub struct Fixture {
 impl Fixture {
     /// Builds the index and service.
     pub async fn new() -> Self {
-        let records = fixtures::mixed_records(2_210);
+        let records = ztreamer_chain::test_utils::mixed_records(2_210);
         let EphemeralService { service, follower, state, dir, .. } =
             EphemeralService::with_records(&records[..2_200], Some(1_999)).await;
         follower.publish_head(state, records[2_200..].to_vec()).unwrap();
@@ -309,22 +308,22 @@ pub async fn consume(
 }
 
 #[cfg(test)]
-pub(crate) use ztreamer_indexer::test_utils::hash;
+pub(crate) use ztreamer_chain::test_utils::hash;
 
 /// An empty block at `height` that chains onto [`hash`] of the previous height.
 #[cfg(test)]
-pub(crate) fn parsed(height: u32) -> ztreamer_indexer::types::ParsedCompactBlock {
-    fixtures::parsed(fixtures::record(height, Vec::new()))
+pub(crate) fn parsed(height: u32) -> ztreamer_chain::types::ParsedCompactBlock {
+    ztreamer_chain::test_utils::parsed(ztreamer_chain::test_utils::record(height, Vec::new()))
 }
 
 #[cfg(test)]
-pub(crate) fn record(height: u32) -> ztreamer_indexer::codec::CompactBlockRecord {
-    ztreamer_indexer::codec::CompactBlockRecord {
+pub(crate) fn record(height: u32) -> ztreamer_chain::codec::CompactBlockRecord {
+    ztreamer_chain::codec::CompactBlockRecord {
         height,
         hash: hash(height),
         previous_hash: hash(height - 1),
         time: height,
         transactions: Vec::new(),
-        end_tree_sizes: ztreamer_indexer::codec::TreeSizes::default(),
+        end_tree_sizes: ztreamer_chain::codec::TreeSizes::default(),
     }
 }

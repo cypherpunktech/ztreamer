@@ -1,10 +1,13 @@
 use super::*;
 use crate::{
-    codec::{CodecError, ProtobufBlockRecord, StoredBlock, decode_range_record, encode_range},
     index::range_meta::{VerifyState, full_meta},
     ingest::OrderedBuilder,
     manifest_entry::{BlobDigest, BlobMismatch},
-    test_utils::{hash, open_index, parsed, record},
+    test_utils::open_index,
+};
+use ztreamer_chain::{
+    codec::{CodecError, ProtobufBlockRecord, StoredBlock, decode_range_record, encode_range},
+    test_utils::{hash, parsed, record},
 };
 
 /// An index environment as a build before the `range_meta` table left it: four named
@@ -917,7 +920,7 @@ fn aborted_range_pack_keeps_every_mutable_row() {
             .unwrap()
         })
         .collect::<Vec<_>>();
-    let encoded = crate::codec::encode_range(&records).unwrap();
+    let encoded = ztreamer_chain::codec::encode_range(&records).unwrap();
     index.tables.sealed_ranges.put(&mut txn, 0, encoded.as_slice()).unwrap();
     for height in 0..RANGE_SIZE / 2 {
         index.tables.mutable_blocks.delete(&mut txn, height).unwrap();

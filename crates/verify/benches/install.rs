@@ -19,15 +19,17 @@ use bytes::Bytes;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use tempfile::TempDir;
 use zakura_chain::block;
+use ztreamer_chain::{
+    codec::{CompactBlockRecord, RANGE_SIZE, TreeSizes, encode_range},
+    test_utils::{hash, record},
+    types::{CompactSaplingOutput, CompactTransaction},
+};
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, TreeSizes, encode_range},
     index::{
-        BlockId, CheckedRange, Index, RANGE_SIZE,
+        BlockId, CheckedRange, Index,
         range_meta::{RangeMeta, VerifyState},
     },
     manifest_entry::ManifestEntry,
-    test_utils::{hash, record},
-    types::{CompactSaplingOutput, CompactTransaction},
 };
 use ztreamer_verify::range::{RangeBlob, RangeLink};
 

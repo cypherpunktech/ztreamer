@@ -1,0 +1,34 @@
+[package]
+name = "ztreamer-chain"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "The compact block model of ztreamer: types, parser and byte codecs"
+
+[lints]
+workspace = true
+
+[features]
+# Shared test and benchmark fixtures in `ztreamer_chain::test_utils`.
+test-utils = ["dep:zakura-test"]
+
+[dependencies]
+prost = "0.14.4"
+thiserror = "2"
+zakura-chain.workspace = true
+zakura-test = { workspace = true, optional = true }
+ztreamer-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+criterion = "0.8"
+zakura-test.workspace = true
+# Enables `test_utils` for this crate's benches.
+ztreamer-chain = { path = ".", features = ["test-utils"] }
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "codec"
+harness = false

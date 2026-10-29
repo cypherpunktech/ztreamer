@@ -7,10 +7,10 @@ use crate::{
 use serde_json::json;
 use tokio::sync::watch;
 use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
+use ztreamer_chain::test_utils::grow_chain;
 use ztreamer_indexer::{
     head::{HeadFollower, HeadFollowerConfig},
     pipeline::PipelineConfig,
-    test_utils::grow_chain,
 };
 
 use super::*;

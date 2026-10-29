@@ -10,8 +10,10 @@
 use async_trait::async_trait;
 use rand::{SeedableRng, rngs::StdRng, seq::index};
 use ztreamer_blocking::BlockingTask;
-use ztreamer_indexer::{
-    codec::RangeDecoder, index::RANGE_SIZE, parser::parse_block, types::RawIndexBlock,
+use ztreamer_chain::{
+    codec::{RANGE_SIZE, RangeDecoder},
+    parser::parse_block,
+    types::RawIndexBlock,
 };
 use ztreamer_remote::ZakuraClient;
 
@@ -178,11 +180,11 @@ mod tests {
     use serde_json::json;
     use zakura_chain::block;
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
-    use ztreamer_indexer::{
+    use ztreamer_chain::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},
-        manifest_entry::ManifestEntry,
         test_utils::{hash, raw_block},
     };
+    use ztreamer_indexer::manifest_entry::ManifestEntry;
     use ztreamer_remote::{
         RpcClient,
         test_utils::{MockNode, Reply},

@@ -5,8 +5,9 @@ use tonic::{
     Code,
     transport::{Channel, Server},
 };
+use ztreamer_chain::codec::RANGE_SIZE;
 use ztreamer_indexer::{
-    index::{RANGE_SIZE, range_meta::RangeMeta},
+    index::range_meta::RangeMeta,
     manifest_entry::{Frontiers, ManifestEntry as Entry},
     test_utils::{range_meta_row, sealed_range_blob},
 };
@@ -15,10 +16,7 @@ use ztreamer_protocol::{
     replicate::{replicator_client::ReplicatorClient, replicator_server::ReplicatorServer},
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
-use ztreamer_service::{
-    CompactService,
-    test_utils::{EmptyChain, fixtures},
-};
+use ztreamer_service::{CompactService, test_utils::EmptyChain};
 
 /// Five sealed ranges. Ranges 0, 1,000 and 2,000 have rows, range 3,000 has none, and the
 /// row of range 4,000 is rejected.
@@ -36,8 +34,8 @@ impl Fixture {
         let index = Arc::new(
             Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", network.genesis_hash()).unwrap(),
         );
-        let records = fixtures::mixed_records(5_010);
-        let state = fixtures::populate(&index, &records, Some(4_999));
+        let records = ztreamer_chain::test_utils::mixed_records(5_010);
+        let state = ztreamer_indexer::test_utils::populate(&index, &records, Some(4_999));
         for (start, state) in [
             (0, VerifyState::Verified),
             (1_000, VerifyState::Verified),

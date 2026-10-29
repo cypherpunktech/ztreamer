@@ -7,7 +7,7 @@ use zakura_chain::{
     serialization::{BytesInDisplayOrder as _, ZcashDeserialize as _},
     transaction,
 };
-use ztreamer_indexer::{
+use ztreamer_chain::{
     parser::parse_transaction,
     types::{CompactShieldedAction, CompactTransaction},
 };

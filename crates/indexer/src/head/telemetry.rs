@@ -7,7 +7,8 @@ use metrics::{Gauge, Histogram};
 use zakura_chain::block;
 
 use super::{CanonicalBlockSource, HeadError, ServingSnapshot};
-use crate::{index::BlockId, types::RawIndexBlock};
+use crate::index::BlockId;
+use ztreamer_chain::types::RawIndexBlock;
 
 pub(crate) struct HeadMetrics {
     visible: Gauge,

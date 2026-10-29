@@ -9,13 +9,15 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tokio_stream::StreamExt as _;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use zakura_test::vectors::BLOCK_MAINNET_1687121_BYTES;
+use ztreamer_chain::{
+    parser::parse_block,
+    test_utils::hash,
+    types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
+};
 use ztreamer_indexer::{
     head::HeadFollower,
     index::{Index, IndexState},
     ingest::OrderedBuilder,
-    parser::parse_block,
-    test_utils::hash,
-    types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 use ztreamer_protocol::proto;
 use ztreamer_service::CompactService;

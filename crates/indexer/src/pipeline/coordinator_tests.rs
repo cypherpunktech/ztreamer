@@ -6,13 +6,13 @@ use std::sync::{
 };
 
 use super::*;
-use crate::{
+use crate::ingest::OrderedBuilder;
+use zakura_chain::{parameters::GENESIS_PREVIOUS_BLOCK_HASH, transaction};
+use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
-    ingest::OrderedBuilder,
     test_utils::hash,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
-use zakura_chain::{parameters::GENESIS_PREVIOUS_BLOCK_HASH, transaction};
 
 struct Fixture {
     count: u32,
@@ -251,7 +251,10 @@ fn sync_until_stable_repeats_until_the_tip_holds_still_or_stops() {
 /// push.
 fn tight(workers: usize) -> PipelineConfig {
     let config = config(workers);
-    PipelineConfig { max_pending_bytes: crate::codec::MAX_RECORD_BYTES + 4 * 1024, ..config }
+    PipelineConfig {
+        max_pending_bytes: ztreamer_chain::codec::MAX_RECORD_BYTES + 4 * 1024,
+        ..config
+    }
 }
 
 /// Stops the test process if the pass does not complete in 30 seconds.
@@ -564,9 +567,9 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
     use crate::{
         head::{CanonicalBlockSource, HeadError, sync_head_once},
         index::BlockId,
-        types::RawIndexBlock,
     };
     use zakura_chain::transaction;
+    use ztreamer_chain::types::RawIndexBlock;
 
     // The live source is asked only for the historical anchor and new empty blocks.
     struct Live {

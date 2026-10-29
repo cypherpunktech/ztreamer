@@ -6,12 +6,16 @@ use prost::{Message, bytes::Bytes};
 use zakura_chain::block;
 use ztreamer_protocol::{EncodedCompactBlock, compact_bytes, proto};
 
-use crate::{index::RANGE_SIZE, types::CompactTransaction};
+use crate::types::CompactTransaction;
+
+/// The number of blocks in a sealed range.
+pub const RANGE_SIZE: u32 = 1_000;
 
 pub(crate) const BLOCK_FORMAT_VERSION: u8 = 1;
 /// The format version of the packed range blobs that the index writes.
 pub const RANGE_FORMAT_VERSION: u8 = 1;
-pub(crate) const MAX_RECORD_BYTES: usize = 2_000_000;
+/// The largest encoded compact block record.
+pub const MAX_RECORD_BYTES: usize = 2_000_000;
 
 const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();
 
@@ -223,7 +227,7 @@ impl CompactBlockRecord {
 
     /// Checks the rules that a stored record must obey and that the protobuf decode does not
     /// check: each compact transaction must contain shielded data, as emitted by the parser.
-    pub(crate) fn check(&self) -> Result<(), CodecError> {
+    pub fn check(&self) -> Result<(), CodecError> {
         if self.transactions.iter().any(|tx| {
             tx.sapling_spends.is_empty()
                 && tx.sapling_outputs.is_empty()
@@ -251,9 +255,8 @@ impl CompactBlockRecord {
         block.encode(bytes).map_err(|_| CodecError::Length)
     }
 
-    pub(crate) fn encoded_size_bound(
-        transactions: &[CompactTransaction],
-    ) -> Result<usize, CodecError> {
+    /// An upper bound of the encoded size of a record with `transactions`.
+    pub fn encoded_size_bound(transactions: &[CompactTransaction]) -> Result<usize, CodecError> {
         // Conservative protobuf sizes, including tags/lengths and maximum varints.
         // u128 keeps count arithmetic safe before enforcing the record limit.
         let size = 192
@@ -296,7 +299,7 @@ fn protobuf_envelope(bytes: &[u8]) -> Result<(u32, block::Hash, block::Hash, &[u
     let height = reader.u32()?;
     let hash = block::Hash(reader.array()?);
     let previous_hash = block::Hash(reader.array()?);
-    let len = reader.len()?;
+    let len = reader.count()?;
     let payload = reader.take(len)?;
     reader.finish().map_err(|_| CodecError::InvalidRecord)?;
     Ok((height, hash, previous_hash, payload))
@@ -488,14 +491,15 @@ impl<'a> RangeDecoder<'a> {
         self.record_as(index)
     }
 
-    pub(crate) fn record_as<T: StoredBlock>(&self, index: usize) -> Result<T, CodecError> {
+    /// The record at `index` of the range, as `T`.
+    pub fn record_as<T: StoredBlock>(&self, index: usize) -> Result<T, CodecError> {
         if index >= RANGE_SIZE as usize {
             return Err(CodecError::RangeIndex);
         }
         let envelope =
             self.body.get(self.offset(index)..self.offset(index + 1)).ok_or(CodecError::Length)?;
         let mut envelope = Reader::new(envelope);
-        let record_len = envelope.len()?;
+        let record_len = envelope.count()?;
         let record = T::decode(envelope.take(record_len)?)?;
         envelope.finish()?;
         if self.start.checked_add(index as u32) != Some(record.height())
@@ -538,17 +542,20 @@ fn set_u32(bytes: &mut [u8], offset: usize, value: usize) -> Result<(), CodecErr
     Ok(())
 }
 
-pub(crate) fn put_count(bytes: &mut Vec<u8>, count: usize) {
+/// Writes `count` as a big-endian `u32`.
+pub fn put_count(bytes: &mut Vec<u8>, count: usize) {
     let count = u32::try_from(count).expect("range metadata lists are far below u32::MAX items");
     bytes.extend_from_slice(&count.to_be_bytes());
 }
 
-pub(crate) fn put_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
+/// Writes the length of `value` with [`put_count`], then `value`.
+pub fn put_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
     put_count(bytes, value.len());
     bytes.extend_from_slice(value);
 }
 
-pub(crate) fn take_bool(reader: &mut Reader<'_>) -> Result<bool, CodecError> {
+/// Reads a flag byte: 0 or 1. Another value is [`CodecError::InvalidRecord`].
+pub fn take_bool(reader: &mut Reader<'_>) -> Result<bool, CodecError> {
     match reader.u8()? {
         0 => Ok(false),
         1 => Ok(true),
@@ -558,13 +565,14 @@ pub(crate) fn take_bool(reader: &mut Reader<'_>) -> Result<bool, CodecError> {
 
 /// A cursor over an encoded value. Every read is bounds-checked; a short value is
 /// [`CodecError::Truncated`].
-pub(crate) struct Reader<'a> {
+#[derive(Debug)]
+pub struct Reader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
 impl<'a> Reader<'a> {
-    pub(crate) const fn new(bytes: &'a [u8]) -> Self {
+    pub const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
@@ -572,44 +580,45 @@ impl<'a> Reader<'a> {
         self.bytes.len() - self.offset
     }
 
-    pub(crate) fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
+    pub fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
         let end = self.offset.checked_add(len).ok_or(CodecError::Length)?;
         let value = self.bytes.get(self.offset..end).ok_or(CodecError::Truncated)?;
         self.offset = end;
         Ok(value)
     }
 
-    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
+    pub fn array<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
         Ok(self.take(N)?.try_into().expect("length was checked"))
     }
 
-    pub(crate) fn u8(&mut self) -> Result<u8, CodecError> {
+    pub fn u8(&mut self) -> Result<u8, CodecError> {
         Ok(self.array::<1>()?[0])
     }
 
-    pub(crate) fn u16(&mut self) -> Result<u16, CodecError> {
+    pub fn u16(&mut self) -> Result<u16, CodecError> {
         Ok(u16::from_be_bytes(self.array()?))
     }
 
-    pub(crate) fn u32(&mut self) -> Result<u32, CodecError> {
+    pub fn u32(&mut self) -> Result<u32, CodecError> {
         Ok(u32::from_be_bytes(self.array()?))
     }
 
-    pub(crate) fn u64(&mut self) -> Result<u64, CodecError> {
+    pub fn u64(&mut self) -> Result<u64, CodecError> {
         Ok(u64::from_be_bytes(self.array()?))
     }
 
-    pub(crate) fn len(&mut self) -> Result<usize, CodecError> {
+    /// Reads a count or a length that [`put_count`] wrote: a big-endian `u32`.
+    pub fn count(&mut self) -> Result<usize, CodecError> {
         Ok(self.u32()? as usize)
     }
 
     /// Reads a `u32` length and that many bytes.
-    pub(crate) fn bytes(&mut self) -> Result<&'a [u8], CodecError> {
-        let len = self.len()?;
+    pub fn bytes(&mut self) -> Result<&'a [u8], CodecError> {
+        let len = self.count()?;
         self.take(len)
     }
 
-    pub(crate) const fn finish(self) -> Result<(), CodecError> {
+    pub const fn finish(self) -> Result<(), CodecError> {
         if self.remaining() == 0 { Ok(()) } else { Err(CodecError::TrailingBytes) }
     }
 }

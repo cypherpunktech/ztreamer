@@ -1,12 +1,11 @@
 use incrementalmerkletree::{Position, frontier::Frontier};
 use zakura_chain::{subtree::NoteCommitmentSubtreeIndex, transaction};
-use ztreamer_indexer::{
-    codec::encode_range,
-    index::RANGE_SIZE,
-    manifest_entry::ManifestEntry,
+use ztreamer_chain::{
+    codec::{RANGE_SIZE, encode_range},
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
+use ztreamer_indexer::manifest_entry::ManifestEntry;
 
 use super::*;
 use crate::epoch::{Epochs, synthetic_entries};

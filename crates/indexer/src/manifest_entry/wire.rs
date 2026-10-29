@@ -8,10 +8,8 @@ use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_protocol::replicate;
 
 use super::{BlobDigest, Frontiers, ManifestEntry};
-use crate::{
-    codec::TreeSizes,
-    pool::{NodeBytes, Pool, SubtreeRoot},
-};
+use crate::pool::{NodeBytes, Pool, SubtreeRoot};
+use ztreamer_chain::codec::TreeSizes;
 
 /// Why a Replicator `ManifestEntry` does not convert to a [`ManifestEntry`]. Each variant names
 /// the message field.
