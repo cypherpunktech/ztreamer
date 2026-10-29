@@ -14,7 +14,7 @@ use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
 use super::*;
 use crate::{
     Cli,
-    test_support::{free_addr, node_with_chain_name},
+    test_utils::{free_addr, node_with_chain_name},
 };
 
 /// A `--replicate-from` source that no server serves. The tests here stop before the import

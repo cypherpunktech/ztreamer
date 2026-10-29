@@ -27,7 +27,7 @@ use super::*;
 use crate::{
     Cli, Command, DaemonArgs,
     remote::RemoteNode,
-    test_support::{free_addr, latest_block_at, node_with_chain_name},
+    test_utils::{free_addr, latest_block_at, node_with_chain_name},
 };
 
 /// The ranges of the snapshot: three epochs, the last with one range.
