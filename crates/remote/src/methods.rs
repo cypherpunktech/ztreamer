@@ -19,11 +19,10 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 
-use ztreamer_indexer::{
-    blocking::BlockingTask,
-    types::{BlockAtHeightError, FetchAtHeightError, RawIndexBlock},
-};
+use ztreamer_indexer::{blocking::BlockingTask, types::RawIndexBlock};
 use ztreamer_jsonrpc::{Retries, RpcClient, RpcConfig, RpcError};
+
+use crate::FetchAtHeightError;
 
 /// A zakura JSON-RPC method that [`ZakuraClient`] calls.
 ///
@@ -171,11 +170,7 @@ impl ZakuraClient {
     /// The best-chain block at `height` from one `getblock` call with verbosity 0. It decodes
     /// the block on the blocking thread pool, with [`RawIndexBlock::from_bytes_at_height`].
     pub async fn block_at_height(&self, height: u32) -> Result<RawIndexBlock, FetchAtHeightError> {
-        let bytes = self
-            .get_block_raw(HashOrHeight::Height(block::Height(height)))
-            .await
-            .map_err(BlockAtHeightError::from)?
-            .0;
+        let bytes = self.get_block_raw(HashOrHeight::Height(block::Height(height))).await?.0;
         Ok(BlockingTask::spawn(move || RawIndexBlock::from_bytes_at_height(bytes, height))
             .join()
             .await??)

@@ -18,7 +18,6 @@ use flow_control::{ReadAheadReceiver, ReadAheadSender};
 use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
-use ztreamer_jsonrpc::RpcError;
 
 use crate::{
     index::{Index, IndexError, IndexState},
@@ -132,7 +131,7 @@ pub enum PipelineError {
     },
     /// A request to a remote zakura node failed.
     #[error("remote Zakura request failed: {0}")]
-    Remote(#[from] RpcError),
+    Remote(Box<dyn std::error::Error + Send + Sync>),
     #[error("Zakura source size overflowed at height {height}")]
     SourceSize { height: u32 },
     #[error("Zakura source changed during historical ingestion")]
@@ -150,7 +149,6 @@ pub enum PipelineError {
 impl From<BlockAtHeightError> for PipelineError {
     fn from(error: BlockAtHeightError) -> Self {
         match error {
-            BlockAtHeightError::Rpc(error) => Self::Remote(error),
             BlockAtHeightError::Decode { height, source } => Self::BlockDecode { height, source },
             BlockAtHeightError::Height { expected, actual } => {
                 Self::SourceGap { expected, actual: Some(actual) }

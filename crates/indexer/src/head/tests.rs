@@ -388,14 +388,3 @@ fn branch_hash(height: u32) -> block::Hash {
     hash.0[31] = 1;
     hash
 }
-
-#[test]
-fn a_fetch_error_keeps_its_cause_in_the_head_error() {
-    use crate::blocking::BlockingTaskCancelled;
-
-    let cancelled = HeadError::from(FetchAtHeightError::Cancelled(BlockingTaskCancelled));
-    assert!(matches!(cancelled, HeadError::Cancelled(BlockingTaskCancelled)));
-    let height = BlockAtHeightError::Height { expected: 3, actual: 4 };
-    let height = HeadError::from(FetchAtHeightError::Block(height));
-    assert!(matches!(height, HeadError::Height { expected: 3, actual: 4 }));
-}

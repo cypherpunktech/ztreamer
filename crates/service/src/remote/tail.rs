@@ -91,7 +91,11 @@ impl RemoteTailSource {
 impl HistoricalSource for RemoteTailSource {
     /// The best height minus [`SEAL_DEPTH`], or genesis on a shorter chain.
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
-        Ok(Some(self.runtime.block_on(self.tail_tip())?))
+        Ok(Some(
+            self.runtime
+                .block_on(self.tail_tip())
+                .map_err(|error| PipelineError::Remote(error.into()))?,
+        ))
     }
 
     /// The hash from `getblockhash`. `None` when the node has no block at `height`.
@@ -99,7 +103,7 @@ impl HistoricalSource for RemoteTailSource {
         match self.runtime.block_on(self.node.get_block_hash(Height(height))) {
             Ok(hash) => Ok(Some(hash.hash())),
             Err(error) if error.is_block_not_found() => Ok(None),
-            Err(error) => Err(error.into()),
+            Err(error) => Err(PipelineError::Remote(error.into())),
         }
     }
 
@@ -218,14 +222,16 @@ impl<'a> BlockRequests<'a> {
             Ok(Err(error)) if error.is_block_not_found() => {
                 Err(PipelineError::SourceGap { expected: height, actual: None })
             }
-            Ok(Err(error)) => Err(error.into()),
+            Ok(Err(error)) => Err(PipelineError::Remote(error.into())),
             Err(error) if error.is_panic() => panic::resume_unwind(error.into_panic()),
             // The runtime shut down and dropped the request.
-            Err(error) => Err(RpcError::Transport {
-                method: Method::GetBlock.name().to_owned(),
-                source: Box::new(error),
-            }
-            .into()),
+            Err(error) => Err(PipelineError::Remote(
+                RpcError::Transport {
+                    method: Method::GetBlock.name().to_owned(),
+                    source: Box::new(error),
+                }
+                .into(),
+            )),
         }
     }
 }

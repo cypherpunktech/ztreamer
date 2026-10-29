@@ -4768,7 +4768,6 @@ dependencies = [
  "zakura-sapling-crypto",
  "zakura-test",
  "ztreamer-indexer",
- "ztreamer-jsonrpc",
  "ztreamer-protocol",
 ]
 
