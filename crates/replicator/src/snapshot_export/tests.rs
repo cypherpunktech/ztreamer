@@ -1,91 +1,35 @@
 use std::fs;
 
+use chrono::DateTime;
+use ed25519_dalek::SigningKey;
 use serde_json::Value;
 use tempfile::TempDir;
-use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_chain::test_utils::record;
-use ztreamer_index::{
-    index::range_meta::{RangeMeta, VerifyState},
-    test_utils::{populate, range_meta_row, sealed_range_blob},
-};
+use ztreamer_index::test_utils::{populate, range_meta_row, sealed_range_blob};
 use ztreamer_snapshot::layout::{Latest, RangePath, SignatureFile};
-use ztreamer_snapshot::{
-    manifest_entry::Frontiers,
-    pool::{SubtreeNode, SubtreeRoot},
-};
 
 use super::*;
+use crate::test_utils::index_with_rows;
 
 /// 2026-10-26T00:00:00Z.
 const NOW: i64 = 1_792_972_800;
 
-/// An index with `ranges` sealed ranges and a `range_meta` row for each `(start, epoch_end)`
-/// in `rows`. Returns the index and the entries of the rows.
-fn indexed(dir: &TempDir, ranges: u32, rows: &[(u32, bool)]) -> (Index, Vec<ManifestEntry>) {
-    let network = Network::Mainnet;
-    let index =
-        Index::open(dir.path(), 512 * 1024 * 1024, &network.to_string(), network.genesis_hash())
-            .unwrap();
-    let records: Vec<_> =
-        (0..ranges * RANGE_SIZE + 10).map(|height| record(height, Vec::new())).collect();
-    populate(&index, &records, Some(ranges * RANGE_SIZE - 1));
-    let entries = rows
-        .iter()
-        .map(|&(start, epoch_end)| {
-            let blob = sealed_range_blob(&index, start);
-            let range = &records[start as usize..][..RANGE_SIZE as usize];
-            let entry = ManifestEntry {
-                frontiers: Frontiers {
-                    sapling: vec![0x01, 0xab, 0x00],
-                    orchard: Vec::new(),
-                    ironwood: Vec::new(),
-                },
-                subtree_roots: vec![SubtreeRoot {
-                    index: NoteCommitmentSubtreeIndex(1),
-                    root: SubtreeNode::Orchard(orchard::tree::Node::try_from([2; 32]).unwrap()),
-                }],
-                epoch_end,
-                ..ManifestEntry::from_records_and_blob(range, &blob)
-            };
-            let meta = RangeMeta {
-                entry: entry.clone(),
-                state: VerifyState::Verified,
-                verified_by: None,
-                verified_at: None,
-                attested: None,
-                sampled_heights: Vec::new(),
-            };
-            index.put_range_meta(start, &meta).unwrap();
-            entry
-        })
-        .collect();
-    (index, entries)
-}
-
-fn export(index: &Index, out: &TempDir, days: i64) -> ExportReport {
-    let now = DateTime::from_timestamp(NOW + days * 86_400, 0).unwrap();
-    ExportReport::export(index, &Network::Mainnet, now, &writer(out)).unwrap()
-}
-
-fn writer(out: &TempDir) -> SnapshotWriter {
-    SnapshotWriter::new(out.path(), signer().0)
-}
-
-/// Writes the test key to a key file in `dir`.
-fn key_file(dir: &Path) -> PathBuf {
-    let path = dir.join("key");
-    fs::write(&path, [7; 32]).unwrap();
-    path
-}
-
-fn signer() -> Signer {
-    let dir = tempfile::tempdir().unwrap();
-    Signer::from_file(&key_file(dir.path())).unwrap()
-}
-
 /// The rows that the filler writes for three ranges with no commitments: no range closes an
 /// epoch.
 const ALL_ROWS: [(u32, bool); 3] = [(0, false), (1_000, false), (2_000, false)];
+
+fn export(index: &Index, out: &TempDir, days: i64) -> SnapshotExport {
+    let now = DateTime::from_timestamp(NOW + days * 86_400, 0).unwrap();
+    SnapshotExport::run(index, &Network::Mainnet, now, &writer(out)).unwrap()
+}
+
+fn signing_key() -> SigningKey {
+    SigningKey::from_bytes(&[7; 32])
+}
+
+fn writer(out: &TempDir) -> SnapshotWriter {
+    SnapshotWriter::new(out.path(), signing_key())
+}
 
 /// `entries` with `epoch_end` on the last entry, as the export writes them.
 fn closed(mut entries: Vec<ManifestEntry>) -> Vec<ManifestEntry> {
@@ -96,14 +40,19 @@ fn closed(mut entries: Vec<ManifestEntry>) -> Vec<ManifestEntry> {
 #[test]
 fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
+    let (index, entries) = index_with_rows(dir.path(), 3, &ALL_ROWS);
 
     let report = export(&index, &out, 0);
 
     let manifest_path = "manifests/2026-10-26T000000Z.json";
     assert_eq!(
         report,
-        ExportReport { manifest: manifest_path.to_owned(), ranges: 3, written: 3, missing_rows: 0 }
+        SnapshotExport {
+            manifest: manifest_path.to_owned(),
+            ranges: 3,
+            written: 3,
+            missing_rows: 0
+        }
     );
     for entry in &entries {
         let start = entry.start_height;
@@ -141,7 +90,7 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
 #[test]
 fn a_second_export_writes_no_range_file_again() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, entries) = indexed(&dir, 3, &ALL_ROWS);
+    let (index, entries) = index_with_rows(dir.path(), 3, &ALL_ROWS);
     export(&index, &out, 0);
     // The export does not read a file with the name and the length of its entry. A file
     // with another length is written again.
@@ -166,15 +115,15 @@ fn a_second_export_writes_no_range_file_again() {
 
     // An export in the same second does not replace the manifest.
     let now = DateTime::from_timestamp(NOW + 86_400, 0).unwrap();
-    let error = ExportReport::export(&index, &Network::Mainnet, now, &writer(&out)).unwrap_err();
+    let error = SnapshotExport::run(&index, &Network::Mainnet, now, &writer(&out)).unwrap_err();
     assert!(error.to_string().contains("never replaced"), "{error}");
 }
 
 #[test]
 fn signatures_verify_with_the_signing_key() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, _) = indexed(&dir, 3, &ALL_ROWS);
-    let key = signer().0.verifying_key();
+    let (index, _) = index_with_rows(dir.path(), 3, &ALL_ROWS);
+    let key = signing_key().verifying_key();
 
     let report = export(&index, &out, 0);
 
@@ -191,20 +140,9 @@ fn signatures_verify_with_the_signing_key() {
 }
 
 #[test]
-fn a_key_file_that_is_not_a_32_byte_seed_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("key");
-    fs::write(&path, [7; 31]).unwrap();
-
-    let error = Signer::from_file(&path).unwrap_err();
-
-    assert!(error.to_string().contains("has 31 bytes"), "{error}");
-}
-
-#[test]
 fn export_stops_at_the_first_range_without_a_row() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, entries) = indexed(&dir, 3, &[(0, false), (2_000, false)]);
+    let (index, entries) = index_with_rows(dir.path(), 3, &[(0, false), (2_000, false)]);
 
     let report = export(&index, &out, 0);
 
@@ -221,7 +159,7 @@ fn export_stops_at_the_first_range_without_a_row() {
 fn export_closes_the_last_epoch_at_the_last_range() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let rows: Vec<_> = (0..12).map(|range| (range * RANGE_SIZE, range == 9)).collect();
-    let (index, entries) = indexed(&dir, 12, &rows);
+    let (index, entries) = index_with_rows(dir.path(), 12, &rows);
 
     let report = export(&index, &out, 0);
 
@@ -238,10 +176,10 @@ fn export_closes_the_last_epoch_at_the_last_range() {
 #[test]
 fn an_index_without_a_row_at_genesis_is_refused() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, _) = indexed(&dir, 3, &[(1_000, false)]);
+    let (index, _) = index_with_rows(dir.path(), 3, &[(1_000, false)]);
     let now = DateTime::from_timestamp(NOW, 0).unwrap();
 
-    let error = ExportReport::export(&index, &Network::Mainnet, now, &writer(&out)).unwrap_err();
+    let error = SnapshotExport::run(&index, &Network::Mainnet, now, &writer(&out)).unwrap_err();
 
     assert!(error.to_string().contains("no range_meta row"), "{error}");
     assert!(!out.path().join("latest.json").exists());
@@ -257,36 +195,7 @@ fn an_index_with_no_sealed_range_is_refused() {
     populate(&index, &records, None);
     let now = DateTime::from_timestamp(NOW, 0).unwrap();
 
-    let error = ExportReport::export(&index, &network, now, &writer(&out)).unwrap_err();
+    let error = SnapshotExport::run(&index, &network, now, &writer(&out)).unwrap_err();
 
     assert!(error.to_string().contains("no sealed range"), "{error}");
-}
-
-#[test]
-fn the_export_reads_the_chain_from_the_index() {
-    let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, _) = indexed(&dir, 3, &ALL_ROWS);
-    let args = ExportArgs { out: out.path().to_owned(), signing_key: key_file(dir.path()) };
-
-    args.run(&index).unwrap();
-
-    let json: Value =
-        serde_json::from_slice(&fs::read(out.path().join(Latest::PATH)).unwrap()).unwrap();
-    let manifest =
-        fs::read_to_string(out.path().join(json["latest"]["manifest"].as_str().unwrap()));
-    let manifest = Manifest::from_json(&manifest.unwrap()).unwrap();
-    assert_eq!(manifest.network(), "Mainnet");
-    assert_eq!(manifest.genesis_hash(), Network::Mainnet.genesis_hash());
-}
-
-#[test]
-fn an_export_without_a_readable_key_writes_nothing() {
-    let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (index, _) = indexed(&dir, 3, &ALL_ROWS);
-    let args = ExportArgs { out: out.path().to_owned(), signing_key: dir.path().join("missing") };
-
-    let error = args.run(&index).unwrap_err();
-
-    assert!(error.to_string().contains("read signing key"), "{error}");
-    assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
 }

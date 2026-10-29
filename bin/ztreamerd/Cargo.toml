@@ -26,7 +26,6 @@ zakura-rpc.workspace = true
 zakurad = { workspace = true, features = ["indexer"] }
 zeroize = "1"
 ztreamer-backend = { path = "../../crates/backend" }
-ztreamer-chain = { path = "../../crates/chain" }
 ztreamer-embedded = { path = "../../crates/embedded" }
 ztreamer-import = { path = "../../crates/import" }
 ztreamer-index = { path = "../../crates/index" }
@@ -51,4 +50,5 @@ ztreamer-chain = { path = "../../crates/chain", features = ["test-utils"] }
 ztreamer-import = { path = "../../crates/import", features = ["test-utils"] }
 ztreamer-index = { path = "../../crates/index", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }
+ztreamer-replicator = { path = "../../crates/replicator", features = ["test-utils"] }
 ztreamer-snapshot = { path = "../../crates/snapshot", features = ["test-utils"] }
