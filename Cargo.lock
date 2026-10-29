@@ -4807,7 +4807,6 @@ dependencies = [
 name = "ztreamer-node"
 version = "0.1.0"
 dependencies = [
- "prost",
  "tempfile",
  "thiserror",
  "tokio",
@@ -4816,12 +4815,26 @@ dependencies = [
  "tower",
  "zakura",
  "zakura-chain",
- "zakura-network",
  "zakura-node-services",
  "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
  "ztreamer-backend",
+ "ztreamer-indexer",
+ "ztreamer-protocol",
+ "ztreamer-service",
+]
+
+[[package]]
+name = "ztreamer-p2p"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "zakura-chain",
+ "zakura-network",
  "ztreamer-indexer",
  "ztreamer-protocol",
  "ztreamer-service",
@@ -4970,6 +4983,7 @@ dependencies = [
  "ztreamer-backend",
  "ztreamer-indexer",
  "ztreamer-node",
+ "ztreamer-p2p",
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",

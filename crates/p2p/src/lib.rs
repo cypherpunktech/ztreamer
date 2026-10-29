@@ -1,5 +1,7 @@
 //! Zakura custom-service transport for [`ztreamer_service::CompactService`].
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex, OnceLock},
