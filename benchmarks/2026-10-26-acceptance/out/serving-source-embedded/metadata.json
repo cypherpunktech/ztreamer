@@ -1,0 +1,60 @@
+{
+  "arguments": [
+    "/home/evalir/sandblast-bench/accept-7.4/target/release/examples/serving-suite",
+    "--endpoint",
+    "http://127.0.0.1:29067",
+    "--label",
+    "source-embedded",
+    "--output",
+    "/home/evalir/sandblast-bench/accept-7.4/out/serving-source-embedded",
+    "--suites",
+    "ranges,concurrency,sync",
+    "--range-sizes",
+    "1000,10000,100000",
+    "--range-requests",
+    "200",
+    "--range-request-counts",
+    "100000=20",
+    "--clients",
+    "1,8",
+    "--seconds",
+    "10"
+  ],
+  "concurrency_model": "one outstanding request per connected client; sustained duration plus in-flight completion",
+  "end_block_hash": "7563e3fa4008b515a48be7fa207aaaef5a9f3f0496c4bef1a8b54c0000000000",
+  "end_height": 3531614,
+  "endpoint": "http://127.0.0.1:29067",
+  "fixtures": {},
+  "height_generator": "splitmix64-v1",
+  "label": "source-embedded",
+  "latency_cases": [
+    "GetLightdInfo",
+    "GetLatestBlock",
+    "GetBlock",
+    "GetTreeState",
+    "GetLatestTreeState",
+    "GetSubtreeRoots/sapling",
+    "GetSubtreeRoots/orchard",
+    "GetMempoolTx"
+  ],
+  "latency_model": "connected channel; configured warmups; complete response including protobuf decode; no cache reset",
+  "observed_tip": 3531614,
+  "observed_tip_hash": "7563e3fa4008b515a48be7fa207aaaef5a9f3f0496c4bef1a8b54c0000000000",
+  "omitted_fixture_cases": {
+    "addresses": true,
+    "transactions": true
+  },
+  "percentiles": "nearest-rank, successful requests only; empty streams have no first-message latency",
+  "schema_version": 1,
+  "seed": 20260829,
+  "server": {
+    "backend_build": "v1.5.1+gaf944f5194ef",
+    "chain": "main",
+    "git_commit": "",
+    "version": "0.1.0"
+  },
+  "start_height": 419200,
+  "started_unix": 1793046197,
+  "sync_model": "sequential compact-block download; fixed bounds; no trial decryption; no cache reset",
+  "throughput": "successful protobuf payload only, excluding transport framing; null if scenario failed"
+}

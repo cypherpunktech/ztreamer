@@ -1,0 +1,21 @@
+diff --git a/crates/verify/src/epoch.rs b/crates/verify/src/epoch.rs
+index a69614b..181b88e 100644
+--- a/crates/verify/src/epoch.rs
++++ b/crates/verify/src/epoch.rs
+@@ -252,10 +252,13 @@ impl Trees {
+     /// The roots of the trees. A root is `None` when the frontier of its pool is empty, because
+     /// the node gives no root for a pool that is not active.
+     pub(crate) fn roots(&self, frontiers: &Frontiers) -> PoolRoots {
++        // BENCHMARK-ONLY PATCH: the filler writes an inactive pool as a serialized empty
++        // frontier (`000000`), not as empty bytes. Treat an empty tree as no root.
++        let _ = frontiers;
+         PoolRoots {
+-            sapling: (!frontiers.sapling.is_empty()).then(|| self.sapling.root()),
+-            orchard: (!frontiers.orchard.is_empty()).then(|| self.orchard.root()),
+-            ironwood: (!frontiers.ironwood.is_empty()).then(|| self.ironwood.root()),
++            sapling: (self.sapling.count() > 0).then(|| self.sapling.root()),
++            orchard: (self.orchard.count() > 0).then(|| self.orchard.root()),
++            ironwood: (self.ironwood.count() > 0).then(|| self.ironwood.root()),
+         }
+     }
+ }

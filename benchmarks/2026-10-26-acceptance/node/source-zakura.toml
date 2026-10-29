@@ -1,0 +1,23 @@
+# Source S for the 7.4 acceptance run: embedded zakura v1.5.1 on the hard-linked snapshot of the
+# ztreamer.service state. No peers, thus the tip stays at the snapshot tip.
+[network]
+network = "Mainnet"
+listen_addr = "127.0.0.1:28233"
+initial_mainnet_peers = []
+cache_dir = false
+
+[state]
+cache_dir = "/srv/accept-7.4/cache"
+ephemeral = false
+storage_mode = "archive"
+
+[sync]
+parallel_cpu_threads = 8
+
+[rpc]
+listen_addr = "127.0.0.1:28232"
+enable_cookie_auth = true
+cookie_dir = "/srv/accept-7.4/cookie"
+
+[tracing]
+use_color = false
