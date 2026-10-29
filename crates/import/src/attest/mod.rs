@@ -16,11 +16,14 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 use async_trait::async_trait;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
@@ -31,7 +34,7 @@ use ztreamer_chain::{
     types::{BlockAtHeightError, RawBlockError},
 };
 use ztreamer_remote::{
-    FetchAtHeightError, RpcError, ZakuraClient,
+    FetchAtHeightError, NodeSyncWait, NodeWaitError, RpcError, ZakuraClient,
     frontier::{FromRpc, RpcDecodeError},
 };
 use ztreamer_snapshot::pool::{NodeBytes, Pool, PoolRoots, SubtreeNode};
@@ -52,6 +55,15 @@ pub const CACHE_CAPACITY: usize = 1024;
 /// change.
 #[async_trait]
 pub trait Attestor: Send + Sync {
+    /// Returns when the source has the best-chain block at `height`. A source that syncs has
+    /// no answer above its tip, thus the importer calls this before it asks about an epoch.
+    ///
+    /// The default returns at once: the source has each height that it is asked about.
+    async fn wait_for_height(&self, height: u32) -> Result<(), NodeError> {
+        let _ = height;
+        Ok(())
+    }
+
     /// The hash of the best-chain block at `height`.
     async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError>;
 
@@ -75,6 +87,9 @@ pub enum NodeError {
     /// The call to the node failed.
     #[error(transparent)]
     Rpc(#[from] RpcError),
+    /// The node did not reach the height: it is gone, it refuses the call, or it does not sync.
+    #[error(transparent)]
+    Wait(#[from] NodeWaitError),
     /// The node answered for another height.
     #[error("node answered for height {actual}, not {expected}")]
     Height {
@@ -170,6 +185,10 @@ pub enum EpochError {
 
 /// An [`Attestor`] that asks a zakura node over JSON-RPC, and keeps the tree roots.
 ///
+/// [`Attestor::wait_for_height`] waits with a [`NodeSyncWait`] while the node is below the
+/// height. One wait runs at a time, and the attestor keeps the highest height that the node
+/// gave: a call for a height at or below it makes no node call.
+///
 /// It keeps up to [`CACHE_CAPACITY`] `z_gettreestate` answers. When the map is full, it drops
 /// the answer for the lowest height. Calls for one height at the same time make one
 /// `z_gettreestate` call.
@@ -189,6 +208,12 @@ pub enum EpochError {
 #[derive(Debug)]
 pub struct JsonRpcAttestor {
     node: ZakuraClient,
+    /// The wait for a node below the height of a call.
+    sync: NodeSyncWait,
+    /// The highest best height that the node gave. Zero before the first wait.
+    reached: AtomicU32,
+    /// Held by the one wait that runs.
+    sync_turn: AsyncMutex<()>,
     /// The tree roots by height. A cell is empty until a call for its height succeeds. The map
     /// drops its lowest height when it is full.
     roots: Mutex<BTreeMap<u32, Arc<OnceCell<PoolRoots>>>>,
@@ -196,8 +221,14 @@ pub struct JsonRpcAttestor {
 
 impl JsonRpcAttestor {
     /// An attestor with no answers yet.
-    pub const fn new(node: ZakuraClient) -> Self {
-        Self { node, roots: Mutex::new(BTreeMap::new()) }
+    pub fn new(node: ZakuraClient) -> Self {
+        Self {
+            sync: NodeSyncWait::new(node.clone()),
+            node,
+            reached: AtomicU32::new(0),
+            sync_turn: AsyncMutex::new(()),
+            roots: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// The map of the tree roots. The map is valid after a panic, because no change leaves it
@@ -257,6 +288,20 @@ impl JsonRpcAttestor {
 
 #[async_trait]
 impl Attestor for JsonRpcAttestor {
+    async fn wait_for_height(&self, height: u32) -> Result<(), NodeError> {
+        if self.reached.load(Ordering::Acquire) >= height {
+            return Ok(());
+        }
+        let _turn = self.sync_turn.lock().await;
+        // The wait before this one can have seen the height.
+        if self.reached.load(Ordering::Acquire) >= height {
+            return Ok(());
+        }
+        let info = self.sync.wait_for_height(height).await?;
+        self.reached.fetch_max(info.blocks().0, Ordering::AcqRel);
+        Ok(())
+    }
+
     async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError> {
         Ok(self.node.get_block_hash(block::Height(height)).await?.hash())
     }

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Mutex, time::Duration};
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
 use tempfile::TempDir;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_chain::{
     codec::{RangeDecoder, encode_range},
@@ -41,6 +41,8 @@ struct FakeAttestor {
     release_signal: Notify,
     /// The heights of the answered `tree_roots` calls, in order.
     answered_heights: Mutex<Vec<u32>>,
+    /// The best height of the node. [`Attestor::wait_for_height`] waits for it.
+    node_tip: watch::Sender<u32>,
 }
 
 impl FakeAttestor {
@@ -51,6 +53,12 @@ impl FakeAttestor {
 
 #[async_trait]
 impl Attestor for FakeAttestor {
+    async fn wait_for_height(&self, height: u32) -> Result<(), NodeError> {
+        let mut tip = self.node_tip.subscribe();
+        tip.wait_for(|&tip| tip >= height).await.expect("the attestor keeps the sender");
+        Ok(())
+    }
+
     async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError> {
         Ok(self.answer(height)?.end_hash)
     }
@@ -136,6 +144,7 @@ impl Import {
             held_roots,
             release_signal,
             answered_heights,
+            node_tip: watch::Sender::new(u32::MAX),
         })
     }
 
@@ -216,6 +225,34 @@ async fn an_import_installs_the_same_ranges_and_verifies_them() {
 
 /// The manifest closes its last epoch at 24,999, but the epoch rule does not: that epoch has
 /// 5 ranges. Each row keeps the entry of the source row, with the flag of the rule.
+/// The node syncs: it is at the end of the first epoch. The import installs that epoch, and
+/// asks about no other epoch until the node reaches it.
+#[tokio::test]
+async fn an_import_waits_for_a_syncing_node_to_reach_each_epoch_end() {
+    let import = Import::new(RANGES).await;
+    let attestor = import.fake_attestor(None);
+    attestor.node_tip.send_replace(9_999);
+    let (_stop, shutdown) = watch::channel(false);
+    let importer = import.importer(Arc::clone(&attestor), Network::Mainnet);
+    let run = tokio::spawn(importer.run(shutdown));
+
+    let sealed = async {
+        while import.target.state().unwrap().sealed_through() != Some(9_999) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), sealed).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(*attestor.answered_heights.lock().unwrap(), [9_999]);
+    assert!(!run.is_finished());
+
+    attestor.node_tip.send_replace(24_999);
+    let report = run.await.unwrap().unwrap();
+
+    assert_eq!((report.epochs, report.ranges), (3, 25));
+    import.assert_target_has_source_blobs();
+}
+
 #[tokio::test]
 async fn imported_rows_keep_the_epoch_end_of_the_rule() {
     let import = Import::new(RANGES).await;

@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use bytes::Bytes;
 use pasta_curves::pallas;
 use serde_json::{Value, json};
@@ -371,4 +373,52 @@ fn a_fetch_error_keeps_its_cause_in_the_node_error() {
     let height = BlockAtHeightError::Height { expected: 3, actual: 4 };
     let height = NodeError::from(FetchAtHeightError::Block(height));
     assert!(matches!(height, NodeError::Height { expected: 3, actual: 4 }));
+}
+
+/// A mock node that answers `getblockchaininfo` with the best height in `tip`, and has more
+/// headers.
+async fn syncing_node(tip: Arc<AtomicU32>) -> MockNode {
+    MockNode::start(move |_, seen| {
+        assert_eq!(seen.body["method"], "getblockchaininfo");
+        let blocks = tip.load(Ordering::SeqCst);
+        let mut info =
+            serde_json::to_value(zakura_rpc::client::GetBlockchainInfoResponse::default()).unwrap();
+        info["blocks"] = json!(blocks);
+        info["headers"] = json!(blocks + 5_000);
+        Reply::Result(info)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn json_rpc_attestor_waits_for_a_syncing_node_to_reach_the_height() {
+    let tip = Arc::new(AtomicU32::new(1_000));
+    let node = syncing_node(Arc::clone(&tip)).await;
+    let attestor = JsonRpcAttestor::new(ZakuraClient::new(RpcClient::new(node.config()).unwrap()));
+    let sync = async {
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+        tip.store(3_000, Ordering::SeqCst);
+    };
+
+    let (reached, ()) = tokio::join!(attestor.wait_for_height(2_999), sync);
+
+    reached.unwrap();
+    let calls = node.seen().len();
+    assert!(calls >= 2, "the attestor asked again while the node was behind: {calls}");
+    // The attestor keeps the height of the node: a lower height makes no call.
+    attestor.wait_for_height(2_000).await.unwrap();
+    assert_eq!(node.seen().len(), calls);
+}
+
+#[tokio::test]
+async fn json_rpc_attestor_stops_on_a_gone_node() {
+    let node = MockNode::start(|_, _| Reply::Close).await;
+    let attestor = JsonRpcAttestor::new(ZakuraClient::new(RpcClient::new(node.config()).unwrap()));
+
+    let error = attestor.wait_for_height(2_999).await.unwrap_err();
+
+    assert!(
+        matches!(&error, NodeError::Wait(NodeWaitError::Node { state, .. }) if *state == ztreamer_remote::NodeState::Gone),
+        "{error}"
+    );
 }
