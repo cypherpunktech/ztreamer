@@ -8,7 +8,7 @@ use tonic::Status;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready, index_status};
+use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready};
 
 impl CompactService {
     /// Answers `GetTreeState`.
@@ -54,7 +54,7 @@ impl CompactService {
                     {
                         Ok(block) => block,
                         Err(error) => {
-                            let _ = sender.blocking_send(Err(index_status(error)));
+                            let _ = sender.blocking_send(Err(Status::from(error)));
                             return;
                         }
                     },
@@ -138,7 +138,7 @@ mod tests {
     #[tokio::test]
     async fn subtree_stream_resolves_volatile_completion_blocks() {
         let ctx = EphemeralService::sealed_through(1_005).await;
-        ctx.service.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
+        ctx.follower.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
 
         let mut stream =
             ctx.service.subtree_stream(vec![(vec![7; 32], 1_007)], ctx.service.snapshot());

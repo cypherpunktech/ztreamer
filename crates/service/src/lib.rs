@@ -15,9 +15,6 @@ pub mod remote;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use compact::{
-    CompactService, HeadFollowerConfig, HeadFollowerError, NodeVersion, Readiness, RpcStream,
-    ServingSnapshot, SnapshotError, index_status,
-};
+pub use compact::{CompactService, NodeVersion};
 
 mod telemetry;

@@ -1,13 +1,8 @@
-//! Transport-independent requests, serving snapshots, readiness, and canonical-head following.
+//! Transport-independent requests over the serving snapshot of the head follower.
 
-use std::{
-    pin::Pin,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 
 use tokio::sync::{Semaphore, watch};
-use tokio_stream::Stream;
 use tonic::Status;
 use zakura_chain::{
     block,
@@ -22,52 +17,17 @@ use crate::telemetry::ServiceMetrics;
 
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, StoredBlock},
-    index::{BlockId, Index, IndexError, IndexState},
+    head::ServingSnapshot,
+    index::Index,
 };
-use ztreamer_protocol::proto;
+use ztreamer_protocol::{RpcStream, proto};
 
 mod address;
 mod blocks;
-mod head;
 mod mempool;
 mod tree;
 
-pub use head::{HeadFollowerConfig, HeadFollowerError};
-
-/// A stream of gRPC answers.
-pub type RpcStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 const MAX_RANGE_STREAMS: usize = 16;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ServingSnapshot {
-    pub generation: u64,
-    pub durable_tip: Option<BlockId>,
-    pub visible_tip: Option<BlockId>,
-    pub volatile_head: Arc<[CompactBlockRecord]>,
-    pub ready: bool,
-    pub tip_fresh: bool,
-    pub last_source_success: Option<Instant>,
-    pub source_error: Option<Arc<str>>,
-}
-
-impl From<IndexState> for ServingSnapshot {
-    fn from(state: IndexState) -> Self {
-        Self {
-            generation: state.generation(),
-            durable_tip: state.durable_tip(),
-            visible_tip: state.durable_tip(),
-            volatile_head: Arc::default(),
-            ready: true,
-            tip_fresh: false,
-            last_source_success: None,
-            source_error: None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("volatile head does not connect to the durable index")]
-pub struct SnapshotError;
 
 /// The node version that `GetLightdInfo` reports.
 ///
@@ -80,65 +40,11 @@ pub struct NodeVersion {
     pub subversion: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Readiness {
-    pub historical: bool,
-    pub tip: bool,
-    pub recovering: bool,
-    pub source_error: Option<Arc<str>>,
-}
-
-impl ServingSnapshot {
-    /// Returns the generation of the snapshot. Returns `UNAVAILABLE` while deep reorg recovery
-    /// runs.
-    pub fn ready_generation(&self) -> Result<u64, Status> {
-        ensure_ready(self).map(|()| self.generation)
-    }
-
-    fn with_head(
-        state: IndexState,
-        volatile_head: Vec<CompactBlockRecord>,
-    ) -> Result<Self, SnapshotError> {
-        let mut expected_height = state.durable_tip().map_or(0, |tip| tip.height.saturating_add(1));
-        let mut previous_hash = state.durable_tip().map(|tip| tip.hash);
-        for block in &volatile_head {
-            if block.height != expected_height
-                || previous_hash.is_some_and(|hash| block.previous_hash != hash)
-            {
-                return Err(SnapshotError);
-            }
-            expected_height = expected_height.checked_add(1).ok_or(SnapshotError)?;
-            previous_hash = Some(block.hash);
-        }
-        let visible_tip = volatile_head
-            .last()
-            .map(|block| BlockId::new(block.height, block.hash))
-            .or(state.durable_tip());
-        Ok(Self {
-            generation: state.generation(),
-            durable_tip: state.durable_tip(),
-            visible_tip,
-            volatile_head: volatile_head.into(),
-            ready: true,
-            tip_fresh: true,
-            last_source_success: Some(Instant::now()),
-            source_error: None,
-        })
-    }
-
-    fn volatile(&self, height: u32) -> Option<&CompactBlockRecord> {
-        self.volatile_head
-            .binary_search_by_key(&height, |block| block.height)
-            .ok()
-            .map(|index| &self.volatile_head[index])
-    }
-}
-
 /// Restricted CompactTxStreamer service over the compact index.
 #[derive(Clone)]
 pub struct CompactService {
     index: Arc<Index>,
-    snapshot: watch::Sender<ServingSnapshot>,
+    snapshots: watch::Receiver<ServingSnapshot>,
     chain_name: Arc<str>,
     backend: Arc<dyn StateBackend>,
     node_version: Arc<NodeVersion>,
@@ -157,20 +63,19 @@ impl std::fmt::Debug for CompactService {
 }
 
 impl CompactService {
-    /// Serves chain state and node requests through any [`StateBackend`].
+    /// Serves chain state and node requests through any [`StateBackend`], at the generation of
+    /// the newest snapshot in `snapshots`.
     pub fn with_backend(
         index: Arc<Index>,
-        state: IndexState,
+        snapshots: watch::Receiver<ServingSnapshot>,
         chain_name: impl Into<Arc<str>>,
         backend: impl StateBackend,
     ) -> Self {
         let chain_name = chain_name.into();
-        let (snapshot, _) = watch::channel(state.into());
         let metrics = Arc::new(ServiceMetrics::new());
-        metrics.snapshot(&snapshot.borrow());
         Self {
             index,
-            snapshot,
+            snapshots,
             chain_name,
             backend: Arc::new(backend),
             node_version: Arc::default(),
@@ -191,57 +96,20 @@ impl CompactService {
         self
     }
 
-    /// Returns a receiver for each serving snapshot that the service publishes after this call.
-    pub fn subscribe(&self) -> watch::Receiver<ServingSnapshot> {
-        self.snapshot.subscribe()
-    }
-
     /// Returns the backend that answers the chain state requests and the node requests.
     pub fn backend(&self) -> Arc<dyn StateBackend> {
         Arc::clone(&self.backend)
     }
 
-    pub fn publish_head(
-        &self,
-        state: IndexState,
-        volatile_head: Vec<CompactBlockRecord>,
-    ) -> Result<(), SnapshotError> {
-        let snapshot = ServingSnapshot::with_head(state, volatile_head)?;
-        self.metrics.snapshot(&snapshot);
-        self.snapshot.send_replace(snapshot);
-        Ok(())
-    }
-
-    /// Stops new chain-data requests while a deep replacement is staged.
-    pub fn begin_recovery(&self) {
-        let mut snapshot = self.snapshot();
-        snapshot.ready = false;
-        snapshot.tip_fresh = false;
-        self.metrics.snapshot(&snapshot);
-        self.snapshot.send_replace(snapshot);
-    }
-
-    pub fn readiness(&self) -> Readiness {
-        let snapshot = self.snapshot();
-        Readiness {
-            historical: snapshot.durable_tip.is_some(),
-            tip: snapshot.ready && snapshot.tip_fresh,
-            recovering: !snapshot.ready,
-            source_error: snapshot.source_error,
-        }
-    }
-
-    fn mark_source_failure(&self, error: String, freshness_timeout: Duration) {
-        let mut snapshot = self.snapshot();
-        snapshot.tip_fresh =
-            snapshot.last_source_success.is_some_and(|last| last.elapsed() < freshness_timeout);
-        snapshot.source_error = Some(error.into());
-        self.metrics.snapshot(&snapshot);
-        self.snapshot.send_replace(snapshot);
+    /// A receiver for each serving snapshot that the head follower publishes after this call.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<ServingSnapshot> {
+        let mut snapshots = self.snapshots.clone();
+        snapshots.mark_unchanged();
+        snapshots
     }
 
     pub(crate) fn snapshot(&self) -> ServingSnapshot {
-        self.snapshot.borrow().clone()
+        self.snapshots.borrow().clone()
     }
 
     async fn record(&self, request: proto::BlockId) -> Result<CompactBlockRecord, Status> {
@@ -290,7 +158,7 @@ impl CompactService {
         lookup
             .await
             .map_err(|error| Status::unavailable(format!("LMDB reader failed: {error}")))?
-            .map_err(index_status)?
+            .map_err(Status::from)?
             .ok_or_else(|| Status::not_found("block is not in the indexed canonical chain"))
     }
 
@@ -410,16 +278,6 @@ fn reorganized(height: u32) -> Status {
     Status::unavailable(format!(
         "chain reorganized while streaming at height {height}; restart from a fresh tip"
     ))
-}
-
-/// The gRPC status of an index read error: `OUT_OF_RANGE` for a height that the index does not
-/// cover, `UNAVAILABLE` for a generation change, and `INTERNAL` for each other error.
-pub fn index_status(error: IndexError) -> Status {
-    match error {
-        IndexError::Coverage { .. } => Status::out_of_range(error.to_string()),
-        IndexError::Generation { .. } => Status::unavailable(error.to_string()),
-        _ => Status::internal(error.to_string()),
-    }
 }
 
 #[cfg(test)]

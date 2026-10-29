@@ -1,19 +1,23 @@
 use super::*;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
+use tokio::sync::watch;
 use tonic::Request;
-use ztreamer_indexer::{codec::CompactBlockRecord, index::BlockId, ingest::OrderedBuilder};
+use ztreamer_indexer::{
+    codec::CompactBlockRecord, head::Readiness, index::BlockId, ingest::OrderedBuilder,
+};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamer;
 
 use crate::{
-    compact::{MAX_RANGE_STREAMS, Readiness},
-    test_utils::{EphemeralService, hash, parsed, range, record},
+    compact::MAX_RANGE_STREAMS,
+    test_utils::{EmptyChain, EphemeralService, hash, parsed, range, record},
 };
 
 #[tokio::test]
 async fn streams_cross_range_descending_and_fetches_transparent_data() {
     let ctx = EphemeralService::sealed_through(1_005).await;
     assert_eq!(
-        ctx.service.readiness(),
+        ctx.follower.readiness(),
         Readiness { historical: true, tip: false, recovering: false, source_error: None }
     );
     let descending = range(1_002, 998);
@@ -25,8 +29,8 @@ async fn streams_cross_range_descending_and_fetches_transparent_data() {
     }
     assert_eq!(heights, [1_002, 1_001, 1_000, 999, 998]);
 
-    ctx.service.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
-    assert!(ctx.service.readiness().tip);
+    ctx.follower.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
+    assert!(ctx.follower.readiness().tip);
     let mut stream =
         ctx.service.get_block_range(Request::new(range(1_004, 1_007))).await.unwrap().into_inner();
     let mut heights = Vec::new();
@@ -42,7 +46,7 @@ async fn streams_cross_range_descending_and_fetches_transparent_data() {
         .await
         .unwrap()
         .into_inner();
-    ctx.service.begin_recovery();
+    ctx.follower.begin_recovery();
     assert_eq!(
         ctx.service.get_block_range(Request::new(recovery_range)).await.err().unwrap().code(),
         tonic::Code::Unavailable
@@ -52,9 +56,9 @@ async fn streams_cross_range_descending_and_fetches_transparent_data() {
         heights.push(block.unwrap().into_decoded().unwrap().height);
     }
     assert_eq!(heights, [1_004, 1_005, 1_006, 1_007]);
-    ctx.service.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
-    ctx.service.mark_source_failure("offline".to_owned(), Duration::ZERO);
-    assert!(!ctx.service.readiness().tip);
+    ctx.follower.publish_head(ctx.state, vec![record(1_006), record(1_007)]).unwrap();
+    ctx.follower.mark_source_failure("offline".to_owned(), Duration::ZERO);
+    assert!(!ctx.follower.readiness().tip);
     assert_eq!(
         ctx.service
             .get_latest_block(Request::new(proto::ChainSpec::default()))
@@ -140,10 +144,15 @@ async fn streams_cross_range_descending_and_fetches_transparent_data() {
         tonic::Code::Unavailable
     );
 
-    ctx.service.snapshot.send_modify(|snapshot| {
+    // A service on its own snapshot channel, so that the test can set any visible tip.
+    let (snapshots, receiver) = watch::channel(ctx.follower.snapshot());
+    let service =
+        CompactService::with_backend(Arc::clone(&ctx.index), receiver, "main", EmptyChain)
+            .with_node_version(EmptyChain::node_version());
+    snapshots.send_modify(|snapshot| {
         snapshot.visible_tip = Some(BlockId::new(3_464_754, block::Hash([0; 32])));
     });
-    let info = ctx.service.lightd_info();
+    let info = service.lightd_info();
     assert_eq!(info.sapling_activation_height, 419_200);
     assert_eq!(info.consensus_branch_id, "37a5165b");
     assert_eq!(info.block_height, 3_464_754);
@@ -268,7 +277,7 @@ async fn range_stream_refuses_a_reorg_it_cannot_chain_onto() {
 #[tokio::test]
 async fn descending_range_from_the_volatile_head_survives_an_advance() {
     let ctx = EphemeralService::sealed_through(200).await;
-    ctx.service.publish_head(ctx.state, vec![record(201), record(202)]).unwrap();
+    ctx.follower.publish_head(ctx.state, vec![record(201), record(202)]).unwrap();
 
     // The first chunk is volatile, the rest is durable and read after an advance.
     let mut stream = ctx

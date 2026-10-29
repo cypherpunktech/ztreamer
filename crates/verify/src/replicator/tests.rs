@@ -71,7 +71,7 @@ impl Fixture {
     async fn serve(&self) -> String {
         let compact = CompactService::with_backend(
             Arc::clone(&self.index),
-            self.index.state().unwrap(),
+            self.snapshots.subscribe(),
             "main",
             EmptyChain,
         );

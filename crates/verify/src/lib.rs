@@ -10,8 +10,8 @@
 //! ranges of an index to replicas over gRPC. [`RangeMetaFiller`] writes the `range_meta` row of
 //! each sealed range from the answers of a node.
 //!
-//! This crate depends on `ztreamer-indexer` and `ztreamer-service`. Neither depends on this
-//! crate. The indexer has no serde.
+//! This crate depends on `ztreamer-indexer` and `ztreamer-backend`, not on the wallet service.
+//! Neither depends on this crate. The indexer has no serde.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 

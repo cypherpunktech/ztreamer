@@ -18,15 +18,17 @@ use tokio::sync::{Semaphore, watch};
 use tonic::{Request, Response, Status};
 use zakura_chain::parameters::Network;
 use ztreamer_indexer::{
+    head::ServingSnapshot,
     index::{Index, IndexError, range_meta::VerifyState},
     manifest_entry::MANIFEST_VERSION,
 };
-use ztreamer_protocol::replicate::{
-    Empty, ExportInfo, GetRangeRequest, ListRangesRequest, ManifestEntry, RangeChunk,
-    replicator_server::Replicator,
+use ztreamer_protocol::{
+    RpcStream,
+    replicate::{
+        Empty, ExportInfo, GetRangeRequest, ListRangesRequest, ManifestEntry, RangeChunk,
+        replicator_server::Replicator,
+    },
 };
-
-use ztreamer_service::{RpcStream, ServingSnapshot, index_status};
 
 /// The largest `data` of one [`RangeChunk`].
 pub(crate) const CHUNK_BYTES: usize = 1 << 20;
@@ -72,7 +74,10 @@ impl ReplicatorService {
 
     /// The generation of the current serving snapshot. Refuses while deep reorg recovery runs.
     fn generation(&self) -> Result<u64, Status> {
-        self.snapshots.borrow().ready_generation()
+        self.snapshots
+            .borrow()
+            .ready_generation()
+            .map_err(|error| Status::unavailable(error.to_string()))
     }
 
     /// Runs `read` against the index on a blocking thread.
@@ -84,7 +89,7 @@ impl ReplicatorService {
         tokio::task::spawn_blocking(move || read(&index))
             .await
             .map_err(|error| Status::internal(format!("index read task failed: {error}")))?
-            .map_err(index_status)
+            .map_err(Status::from)
     }
 }
 

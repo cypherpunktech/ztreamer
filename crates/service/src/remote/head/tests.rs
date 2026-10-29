@@ -3,14 +3,18 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::watch;
 use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
-use ztreamer_indexer::{pipeline::PipelineConfig, test_utils::grow_chain};
+use ztreamer_indexer::{
+    head::{HeadFollower, HeadFollowerConfig},
+    pipeline::PipelineConfig,
+    test_utils::grow_chain,
+};
 use ztreamer_remote::{
     RpcClient, RpcCode,
     test_utils::{MockChain, MockNode, Reply},
 };
 
 use super::*;
-use crate::{CompactService, HeadFollowerConfig, test_utils::EphemeralService};
+use crate::test_utils::EphemeralService;
 
 /// A mock node that serves `chain`, and a source over it.
 async fn node(chain: &MockChain) -> (MockNode, RemoteHeadSource) {
@@ -29,8 +33,8 @@ fn chain(tip: u32) -> Vec<Block> {
     chain
 }
 
-fn visible_tip(service: &CompactService) -> Option<BlockId> {
-    service.snapshot().visible_tip
+fn visible_tip(follower: &HeadFollower) -> Option<BlockId> {
+    follower.snapshot().visible_tip
 }
 
 fn id(block: &Block) -> BlockId {
@@ -101,21 +105,21 @@ async fn sync_head_reaches_a_moving_tip_and_replaces_a_reorged_head() {
     let chain = MockChain::new(&blocks);
     let (_mock, mut source) = node(&chain).await;
 
-    ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-    assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[20])));
+    ctx.follower.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+    assert_eq!(visible_tip(&ctx.follower), Some(id(&blocks[20])));
 
     grow_chain(&mut blocks, 25, 0);
     chain.set_blocks(&blocks);
-    let state = ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-    assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[25])));
+    let state = ctx.follower.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+    assert_eq!(visible_tip(&ctx.follower), Some(id(&blocks[25])));
     assert_eq!(state.durable_tip().unwrap().height, 15);
 
     // A reorg above the durable tip replaces only the volatile head.
     let mut fork = blocks[..=21].to_vec();
     grow_chain(&mut fork, 26, 1);
     chain.set_blocks(&fork);
-    let next = ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
-    let snapshot = ctx.service.snapshot();
+    let next = ctx.follower.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+    let snapshot = ctx.follower.snapshot();
     assert_eq!(snapshot.visible_tip, Some(id(&fork[26])));
     assert_eq!(next.durable_tip().unwrap().height, 16);
     assert!(
@@ -136,9 +140,9 @@ async fn follow_head_reaches_a_moving_tip() {
     let (_mock, source) = node(&chain).await;
     let (shutdown, receiver) = watch::channel(false);
     let follower = tokio::spawn({
-        let service = ctx.service.clone();
+        let follower = ctx.follower.clone();
         async move {
-            service
+            follower
                 .follow_head(
                     source,
                     PipelineConfig::default(),
@@ -153,9 +157,9 @@ async fn follow_head_reaches_a_moving_tip() {
         }
     });
     let reaches = |tip: BlockId| {
-        let service = ctx.service.clone();
+        let follower = ctx.follower.clone();
         tokio::time::timeout(Duration::from_secs(5), async move {
-            while visible_tip(&service) != Some(tip) {
+            while visible_tip(&follower) != Some(tip) {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
@@ -170,7 +174,7 @@ async fn follow_head_reaches_a_moving_tip() {
     grow_chain(&mut fork, 31, 1);
     chain.set_blocks(&fork);
     reaches(id(&fork[31])).await.unwrap();
-    assert!(ctx.service.readiness().tip);
+    assert!(ctx.follower.readiness().tip);
 
     shutdown.send(true).unwrap();
     follower.await.unwrap().unwrap();
@@ -189,18 +193,18 @@ async fn a_tip_change_costs_requests_for_the_new_blocks_only() {
     let mut blocks = chain(150);
     let chain = MockChain::new(&blocks);
     let (mock, mut source) = node(&chain).await;
-    ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+    ctx.follower.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
 
     for (tip, new) in [(151, 1), (154, 3)] {
         grow_chain(&mut blocks, tip, 0);
         chain.set_blocks(&blocks);
         let before = mock.seen().len();
-        ctx.service.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
+        ctx.follower.sync_head(&mut source, PipelineConfig::default()).await.unwrap();
 
         // The poll sends one `getblockchaininfo` and three `getblockhash`: the anchor, the old
         // tip and the re-check of the new tip. It sends one `getblock` for each new block and
         // one `getblock` for the height above the new tip.
         assert_eq!(requests_since(&mock, before), (5 + new, new + 1));
-        assert_eq!(visible_tip(&ctx.service), Some(id(&blocks[tip as usize])));
+        assert_eq!(visible_tip(&ctx.follower), Some(id(&blocks[tip as usize])));
     }
 }

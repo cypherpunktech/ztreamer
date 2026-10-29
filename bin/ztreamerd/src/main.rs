@@ -26,7 +26,7 @@ use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
 use ztreamer_indexer::{
-    head::{CanonicalBlockSource, HeadSyncError},
+    head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
     index::{Index, IndexState, range_meta::NodeId},
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
@@ -35,7 +35,7 @@ use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
-use ztreamer_service::{CompactService, HeadFollowerConfig};
+use ztreamer_service::CompactService;
 use ztreamer_verify::{RangeMetaFiller, ReplicatorService};
 
 use embedded::{Embedded, EmbeddedNode};
@@ -248,10 +248,16 @@ where
 
     let filler_index = Arc::clone(&index);
     let replicate_index = Arc::clone(&index);
-    let compact = CompactService::with_backend(index, state, network.bip70_network_name(), backend)
-        .with_ping_enabled(cli.ping_very_insecure)
-        .with_node_version(node::NodeClient::version());
-    if reconcile_head(&compact, head.clone(), pipeline, &shutdown).await?.is_break() {
+    let follower = HeadFollower::new(Arc::clone(&index), state);
+    let compact = CompactService::with_backend(
+        index,
+        follower.subscribe(),
+        network.bip70_network_name(),
+        backend,
+    )
+    .with_ping_enabled(cli.ping_very_insecure)
+    .with_node_version(node::NodeClient::version());
+    if reconcile_head(&follower, head.clone(), pipeline, &shutdown).await?.is_break() {
         return Ok(());
     }
     if let Some(Embedded { p2p }) = embedded {
@@ -260,11 +266,11 @@ where
         info!(import_state = "following");
     }
     let filler = RangeMetaFiller::new(filler_index, compact.backend(), verified_by);
-    let replicator = ReplicatorService::new(replicate_index, compact.subscribe(), network);
+    let replicator = ReplicatorService::new(replicate_index, follower.subscribe(), network);
     let grpc = grpc_server
-        .add_service(CompactTxStreamerServer::new(compact.clone()))
+        .add_service(CompactTxStreamerServer::new(compact))
         .add_service(ReplicatorServer::new(replicator));
-    serve(compact, head, pipeline, grpc, &cli, filler, &shutdown).await
+    serve(follower, head, pipeline, grpc, &cli, filler, &shutdown).await
 }
 
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
@@ -318,15 +324,15 @@ async fn sync_historical(
 /// Brings the compact index onto Zakura's canonical head, recovering a deep reorg if needed.
 /// Breaks on shutdown.
 async fn reconcile_head(
-    compact: &CompactService,
+    follower: &HeadFollower,
     mut source: impl CanonicalBlockSource,
     pipeline: PipelineConfig,
     shutdown: &CancellationToken,
 ) -> Result<ControlFlow<()>> {
     let reconcile = async {
-        match compact.sync_head(&mut source, pipeline).await {
+        match follower.sync_head(&mut source, pipeline).await {
             Err(HeadSyncError::DeepReorg { .. }) => {
-                compact.recover_deep_reorg(&mut source, pipeline).await
+                follower.recover_deep_reorg(&mut source, pipeline).await
             }
             result => result,
         }
@@ -342,7 +348,7 @@ async fn reconcile_head(
 /// tasks stops. The server serves CompactTxStreamer and Replicator on one listener. Returns when
 /// the filler holds the index no more, so the caller can close the index.
 async fn serve(
-    compact: CompactService,
+    head: HeadFollower,
     source: impl CanonicalBlockSource + 'static,
     pipeline: PipelineConfig,
     grpc: Router,
@@ -351,15 +357,12 @@ async fn serve(
     shutdown: &CancellationToken,
 ) -> Result<()> {
     let (server_shutdown, _) = watch::channel(false);
-    let mut filler = tokio::spawn(
-        filler.run(compact.subscribe(), shutdown_requested(server_shutdown.subscribe())),
-    );
+    let mut filler =
+        tokio::spawn(filler.run(head.subscribe(), shutdown_requested(server_shutdown.subscribe())));
     let mut follower = tokio::spawn({
-        let compact = compact.clone();
         let receiver = server_shutdown.subscribe();
         async move {
-            compact
-                .follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
+            head.follow_head(source, pipeline, HeadFollowerConfig::default(), receiver)
                 .await
                 .wrap_err("head follower failed")
         }

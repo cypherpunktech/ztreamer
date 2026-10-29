@@ -145,10 +145,14 @@ mod tests {
     use super::*;
     use futures_util::StreamExt as _;
     use serde_json::json;
+    use tokio::sync::watch;
     use zakura_chain::{block, parameters::Network};
     use zakura_rpc::client::GetBlockchainInfoResponse;
     use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
-    use ztreamer_indexer::index::{BlockId, Index};
+    use ztreamer_indexer::{
+        head::ServingSnapshot,
+        index::{BlockId, Index},
+    };
     use ztreamer_remote::{
         RpcClient, ZakuraClient,
         test_utils::{MockNode, Reply},
@@ -156,8 +160,10 @@ mod tests {
 
     use crate::remote::RemoteBackend;
 
-    /// A service over an empty index and a remote node with an empty mempool. Its head is fresh.
-    async fn remote_service() -> (CompactService, MockNode, tempfile::TempDir) {
+    /// A service over an empty index and a remote node with an empty mempool, and the sender of
+    /// its snapshots. Its head is fresh.
+    async fn remote_service()
+    -> (CompactService, watch::Sender<ServingSnapshot>, MockNode, tempfile::TempDir) {
         let mock = MockNode::start(|_, seen| match seen.body["method"].as_str().unwrap() {
             "getblockchaininfo" => {
                 Reply::Result(serde_json::to_value(GetBlockchainInfoResponse::default()).unwrap())
@@ -172,23 +178,24 @@ mod tests {
         let index =
             Arc::new(Index::open(dir.path(), 10 << 20, "Mainnet", block::Hash([9; 32])).unwrap());
         let state = index.state().unwrap();
-        let service = CompactService::with_backend(index, state, "main", backend);
-        service.snapshot.send_modify(|snapshot| snapshot.tip_fresh = true);
-        (service, mock, dir)
+        let (snapshots, receiver) = watch::channel(ServingSnapshot::from(state));
+        let service = CompactService::with_backend(index, receiver, "main", backend);
+        snapshots.send_modify(|snapshot| snapshot.tip_fresh = true);
+        (service, snapshots, mock, dir)
     }
 
     const WAIT: Duration = Duration::from_millis(300);
 
     #[tokio::test]
     async fn mempool_stream_ends_when_the_visible_tip_changes() {
-        let (service, _mock, _dir) = remote_service().await;
+        let (service, snapshots, _mock, _dir) = remote_service().await;
         let mut stream = service.mempool_stream().await.unwrap();
 
         // A new snapshot with the same visible tip does not end the stream.
-        service.snapshot.send_modify(|snapshot| snapshot.generation += 1);
+        snapshots.send_modify(|snapshot| snapshot.generation += 1);
         assert!(tokio::time::timeout(WAIT, stream.next()).await.is_err());
 
-        service.snapshot.send_modify(|snapshot| {
+        snapshots.send_modify(|snapshot| {
             snapshot.visible_tip = Some(BlockId::new(1, block::Hash([1; 32])));
         });
         assert!(tokio::time::timeout(10 * WAIT, stream.next()).await.unwrap().is_none());
@@ -196,11 +203,11 @@ mod tests {
 
     #[tokio::test]
     async fn mempool_stream_fails_while_the_head_is_stale() {
-        let (service, _mock, _dir) = remote_service().await;
+        let (service, snapshots, _mock, _dir) = remote_service().await;
         let mut stream = service.mempool_stream().await.unwrap();
 
         // No new tip comes while the head is stale, so the stream fails.
-        service.snapshot.send_modify(|snapshot| snapshot.tip_fresh = false);
+        snapshots.send_modify(|snapshot| snapshot.tip_fresh = false);
         let error = tokio::time::timeout(10 * WAIT, stream.next()).await.unwrap().unwrap();
         assert_eq!(error.unwrap_err().code(), tonic::Code::Unavailable);
         assert!(stream.next().await.is_none());
@@ -212,14 +219,14 @@ mod tests {
 
     #[tokio::test]
     async fn mempool_stream_task_ends_when_the_client_is_gone() {
-        let (service, _mock, _dir) = remote_service().await;
+        let (service, snapshots, _mock, _dir) = remote_service().await;
         let stream = service.mempool_stream().await.unwrap();
-        // The task of the stream holds the only snapshot receiver.
-        assert_eq!(service.snapshot.receiver_count(), 1);
+        // The task of the stream holds the only snapshot receiver beside the service.
+        assert_eq!(snapshots.receiver_count(), 2);
 
         drop(stream);
         tokio::time::timeout(10 * WAIT, async {
-            while service.snapshot.receiver_count() > 0 {
+            while snapshots.receiver_count() > 1 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })

@@ -9,6 +9,11 @@ mod encoded;
 pub mod p2p;
 pub use encoded::EncodedCompactBlock;
 
+/// A stream of gRPC answers: the type of each server stream of the services in this crate.
+pub type RpcStream<T> = std::pin::Pin<
+    Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<T, tonic::Status>> + Send>,
+>;
+
 /// Server bindings that can send a previously encoded CompactBlock.
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
 pub mod wire {

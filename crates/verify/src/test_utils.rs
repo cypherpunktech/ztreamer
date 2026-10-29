@@ -35,6 +35,7 @@ use tokio_stream::{
 };
 use tonic::{Status, transport::Server};
 use zakura_chain::{block, parameters::Network};
+use ztreamer_indexer::head::ServingSnapshot;
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
     index::{Index, IndexState, RANGE_SIZE},
@@ -48,7 +49,6 @@ use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
     replicator_server::{Replicator, ReplicatorServer},
 };
-use ztreamer_service::ServingSnapshot;
 
 use crate::{
     RangeMetaFiller, ReplicatorService,
