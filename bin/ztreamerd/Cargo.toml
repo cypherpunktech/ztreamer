@@ -25,15 +25,16 @@ zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 zeroize = "1"
 ztreamer-backend = { path = "../../crates/backend" }
 ztreamer-chain = { path = "../../crates/chain" }
+ztreamer-import = { path = "../../crates/import" }
 ztreamer-index = { path = "../../crates/index" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
 ztreamer-snapshot = { path = "../../crates/snapshot" }
 ztreamer-sync = { path = "../../crates/sync" }
-ztreamer-verify = { path = "../../crates/verify" }
 ztreamer-node = { path = "../../crates/node" }
 ztreamer-p2p = { path = "../../crates/p2p" }
 ztreamer-remote = { path = "../../crates/remote" }
+ztreamer-replicator = { path = "../../crates/replicator" }
 tokio-util = "0.7"
 
 [dev-dependencies]
@@ -47,5 +48,5 @@ zakura-test.workspace = true
 ztreamer-chain = { path = "../../crates/chain", features = ["test-utils"] }
 ztreamer-index = { path = "../../crates/index", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }
+ztreamer-import = { path = "../../crates/import", features = ["test-utils"] }
 ztreamer-snapshot = { path = "../../crates/snapshot", features = ["test-utils"] }
-ztreamer-verify = { path = "../../crates/verify", features = ["test-utils"] }

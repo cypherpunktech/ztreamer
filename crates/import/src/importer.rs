@@ -217,7 +217,7 @@ impl ImportError {
 ///
 /// use tokio::sync::watch;
 /// use ztreamer_index::index::Index;
-/// use ztreamer_verify::{
+/// use ztreamer_import::{
 ///     fetch::RangeSource,
 ///     importer::{ImportConfig, ImportError, ImportReport, Importer, TrustedNode},
 /// };

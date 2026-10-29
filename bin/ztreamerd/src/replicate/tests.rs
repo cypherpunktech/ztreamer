@@ -12,6 +12,10 @@ use ztreamer_chain::{
     test_utils::grow_chain,
     types::RawIndexBlock,
 };
+use ztreamer_import::{
+    fetch::{HttpSource, PeerSource},
+    test_utils::{FileServer, SourceIndex},
+};
 use ztreamer_index::{
     index::{SEAL_DEPTH, range_meta::VerifyState},
     test_utils::range_meta_row,
@@ -21,10 +25,6 @@ use ztreamer_protocol::{
     replicate::{ListRangesRequest, replicator_client::ReplicatorClient},
 };
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
-use ztreamer_verify::{
-    fetch::{HttpSource, PeerSource},
-    test_utils::{FileServer, SourceIndex},
-};
 
 use super::*;
 use crate::{

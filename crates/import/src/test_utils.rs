@@ -53,7 +53,7 @@ use ztreamer_protocol::replicate::{
 use ztreamer_snapshot::manifest_entry::{BlobDigest, ManifestEntry};
 use ztreamer_sync::head::ServingSnapshot;
 
-use crate::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
+use ztreamer_replicator::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
 use ztreamer_snapshot::{layout::RangePath, manifest::Manifest};
 
 /// The seed of the key that signs a [`Snapshot`].

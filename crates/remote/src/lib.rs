@@ -50,7 +50,7 @@
 //! | `mempool_transactions` | `getrawmempool`, then `getrawtransaction <txid> 1` |
 //! | `submit_transaction` | `sendrawtransaction` |
 //!
-//! The `range_meta` filler of `ztreamer_verify` also uses the `RemoteBackend`. For each range
+//! The `range_meta` filler of `ztreamer_replicator` also uses the `RemoteBackend`. For each range
 //! that the tail or the head follower seals, it calls `tree_state` and the subtree methods, and
 //! writes the `range_meta` row. Thus the Replicator and `export-snapshot` serve each sealed
 //! range of a replica, not only the imported ranges.

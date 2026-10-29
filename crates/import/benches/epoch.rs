@@ -14,12 +14,12 @@ use ztreamer_chain::{
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
+use ztreamer_import::proof::EpochProof;
 use ztreamer_snapshot::epoch::Epochs;
 use ztreamer_snapshot::{
     manifest_entry::{Frontiers, ManifestEntry},
     pool::{SubtreeNode, SubtreeRoot},
 };
-use ztreamer_verify::proof::EpochProof;
 
 /// Sapling commitments per block: 1,060,000 in the range.
 const OUTPUTS_PER_BLOCK: u32 = 1_060;

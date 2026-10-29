@@ -11,11 +11,11 @@ use ztreamer_index::test_utils::sealed_range_blob;
 use ztreamer_protocol::replicate::replicator_server::ReplicatorServer;
 use ztreamer_sync::head::ServingSnapshot;
 
+use chrono::{DateTime, TimeDelta};
+use ztreamer_replicator::{MAX_RANGE_STREAMS, ReplicatorService, snapshot_writer::SnapshotWriter};
+
 use super::*;
-use crate::{
-    MAX_RANGE_STREAMS, ReplicatorService,
-    test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex},
-};
+use crate::test_utils::{FileServer, PeerServer, SEED, Snapshot, SourceIndex};
 
 /// Twelve ranges: the filler closes an epoch at range 9 only.
 const RANGES: u32 = 12;
@@ -375,4 +375,29 @@ async fn a_cut_peer_stream_resumes_when_the_peer_releases_its_place() {
     let half = blob.len() as u64 / 2;
     assert_eq!(peer.server.requests(), [(2_000, 0), (2_000, half)]);
     assert!(peer.server.refusals() > 0);
+}
+
+/// Twelve ranges: the filler closes an epoch only at range 9. The first export has the first
+/// epoch. The second export, on the next day, has all ranges.
+#[tokio::test]
+async fn http_source_reads_the_manifest_of_each_export() {
+    let source = SourceIndex::new(12).await;
+    let dir = tempfile::tempdir().unwrap();
+    let key = SigningKey::from_bytes(&SEED);
+    let http = HttpSource::new(FileServer::start(dir.path()).await.base, key.verifying_key());
+    let (http, writer) = (http.unwrap(), SnapshotWriter::new(dir.path(), key));
+    let entries = source.entries();
+    let manifest = |ranges| {
+        let entries = entries[..ranges].to_vec();
+        Manifest::new(Network::Mainnet.to_string(), Network::Mainnet.genesis_hash(), entries)
+            .unwrap()
+    };
+    let now = DateTime::from_timestamp(1_792_972_800, 0).unwrap();
+
+    for (ranges, written, now) in [(10, 10, now), (12, 2, now + TimeDelta::days(1))] {
+        let exported = writer.export(&source.index, &manifest(ranges), now).unwrap();
+
+        assert_eq!(exported.written, written);
+        assert_eq!(http.manifest().await.unwrap(), manifest(ranges));
+    }
 }

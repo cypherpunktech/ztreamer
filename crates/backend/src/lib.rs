@@ -3,7 +3,7 @@
 //!
 //! The compact index answers block and range requests. Everything else, from transparent address
 //! lookups to tree states to the mempool, comes from a node. `ztreamer_service::CompactService`
-//! and the `range_meta` filler of `ztreamer_verify` read the node through a [`StateBackend`].
+//! and the `range_meta` filler of `ztreamer_replicator` read the node through a [`StateBackend`].
 //! `ztreamer_node::InProcessBackend` reaches the embedded Zakura in-process, through its
 //! `ReadStateService` and the mempool handle. `ztreamer_remote::RemoteBackend` reaches a
 //! remote node over JSON-RPC.

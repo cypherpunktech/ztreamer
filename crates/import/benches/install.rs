@@ -24,12 +24,12 @@ use ztreamer_chain::{
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
+use ztreamer_import::range::{RangeBlob, RangeLink};
 use ztreamer_index::index::{
     BlockId, CheckedRange, Index,
     range_meta::{RangeMeta, VerifyState},
 };
 use ztreamer_snapshot::manifest_entry::ManifestEntry;
-use ztreamer_verify::range::{RangeBlob, RangeLink};
 
 /// Sapling outputs per block of the synthetic range: 1,060,000 in the range.
 const OUTPUTS_PER_BLOCK: u32 = 1_060;

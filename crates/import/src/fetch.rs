@@ -222,7 +222,7 @@ pub trait RangeSource: fmt::Debug + Send + Sync {
 ///
 /// ```no_run
 /// use ed25519_dalek::VerifyingKey;
-/// use ztreamer_verify::fetch::{FetchError, Fetcher, HttpSource};
+/// use ztreamer_import::fetch::{FetchError, Fetcher, HttpSource};
 ///
 /// # async fn run(key: VerifyingKey) -> Result<(), FetchError> {
 /// let source = HttpSource::new("https://snapshots.example/mainnet".parse().unwrap(), key)?;

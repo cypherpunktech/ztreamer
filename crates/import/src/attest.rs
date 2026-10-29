@@ -176,7 +176,7 @@ pub trait Attestor: Send + Sync {
 ///
 /// ```no_run
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_verify::attest::{Attestor, JsonRpcAttestor};
+/// use ztreamer_import::attest::{Attestor, JsonRpcAttestor};
 ///
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);

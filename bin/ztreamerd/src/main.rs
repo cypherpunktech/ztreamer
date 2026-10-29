@@ -31,12 +31,12 @@ use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
+use ztreamer_replicator::{RangeMetaFiller, ReplicatorService};
 use ztreamer_service::CompactService;
 use ztreamer_sync::{
     head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
     pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
 };
-use ztreamer_verify::{RangeMetaFiller, ReplicatorService};
 
 use embedded::{Embedded, EmbeddedNode};
 

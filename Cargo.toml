@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["bin/ztreamerd", "crates/backend", "crates/blocking", "crates/chain", "crates/index", "crates/jsonrpc", "crates/node", "crates/p2p", "crates/protocol", "crates/remote", "crates/service", "crates/snapshot", "crates/sync", "crates/verify"]
+members = ["bin/ztreamerd", "crates/backend", "crates/blocking", "crates/chain", "crates/import", "crates/index", "crates/jsonrpc", "crates/node", "crates/p2p", "crates/protocol", "crates/remote", "crates/replicator", "crates/service", "crates/snapshot", "crates/sync"]
 
 [workspace.package]
 edition = "2024"
