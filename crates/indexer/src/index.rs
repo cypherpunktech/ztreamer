@@ -61,7 +61,8 @@
 //! - The state holds the hash and the tree sizes of the durable tip.
 //! - `verified_through` is not set, or it is the last height of a range at or below
 //!   `sealed_through`. Only these writes advance it:
-//!   - An install of a [`VerifyState::Verified`] range at `verified_through + 1`, or at 0.
+//!   - An install of a [`VerifyState::Verified`](range_meta::VerifyState::Verified) range at
+//!     `verified_through + 1`, or at 0.
 //!   - A seal of mutable rows into a range at `verified_through + 1`.
 //!
 //!   A seal does not set a `verified_through` that is not set. Thus the embedded mode never
@@ -118,9 +119,9 @@ use std::{fs, io, path::Path, time::Instant};
 use heed::{Env, EnvOpenOptions, RwTxn};
 use zakura_chain::block;
 
+use crate::codec::CompactBlockRecord;
 #[cfg(any(test, feature = "test-utils"))]
 use crate::codec::TreeSizes;
-use crate::codec::{CompactBlockRecord, RANGE_FORMAT_VERSION};
 use crate::ingest::{EncodedBatch, WriteBatch};
 
 mod checked_range;
@@ -135,10 +136,10 @@ mod writer;
 pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
 use metadata::Metadata;
-use range_meta::{RangeMeta, VerifyState};
+use range_meta::RangeMeta;
 pub use snapshot::IndexSnapshot;
 pub use state::{BlockId, ChainIdentity, IndexState};
-use tables::{RangeChain, SealedRange, Tables, range_start};
+use tables::{SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
 
@@ -301,14 +302,15 @@ impl Index {
     /// - No block hash of the blob is in the index already, and no hash occurs two times.
     /// - `meta.entry` gives the range format version, the heights, the end hash and the end tree
     ///   sizes of the blob.
-    /// - `meta.state` is not [`VerifyState::Rejected`].
+    /// - `meta.state` is not [`VerifyState::Rejected`](range_meta::VerifyState::Rejected).
     ///
     /// The method does the checks on the state first. Then it checks the length and the digest.
     /// Then it decodes the blob. It calculates the digest before it starts the write
     /// transaction, because the digest does not need the index.
     ///
     /// The write adds the blob, its hash entries and `meta`. It moves the tip and
-    /// `sealed_through` to the range end. A [`VerifyState::Verified`] range advances
+    /// `sealed_through` to the range end. A
+    /// [`VerifyState::Verified`](range_meta::VerifyState::Verified) range advances
     /// `verified_through` if the old value is `start - 1`, or not set for range 0. Other states
     /// do not change `verified_through`.
     pub fn install_sealed_range(
@@ -318,12 +320,12 @@ impl Index {
         meta: &RangeMeta,
     ) -> Result<IndexState, IndexError> {
         let blob_check = meta.entry.check_blob(blob);
-        let writer = self.start_install(start)?;
+        let writer = IndexWriter::start_install(&self.env, self.tables, start)?;
         blob_check.map_err(|mismatch| IndexError::Blob { start, mismatch })?;
         let state = writer.state();
         let chain = SealedRange::new(start, blob)?
             .check_chain(state.install_parent_hash(), state.tree_sizes)?;
-        Self::finish_install(writer, start, blob, &chain, meta)
+        writer.install(start, blob, &chain, meta)
     }
 
     /// Installs a range that [`CheckedRange::check`] checked, and its metadata, in one write.
@@ -347,7 +349,7 @@ impl Index {
         meta: &RangeMeta,
     ) -> Result<IndexState, IndexError> {
         let start = range.start();
-        let writer = self.start_install(start)?;
+        let writer = IndexWriter::start_install(&self.env, self.tables, start)?;
         range
             .check_entry_blob(&meta.entry)
             .map_err(|mismatch| IndexError::Blob { start, mismatch })?;
@@ -355,49 +357,7 @@ impl Index {
         if !chain.links_to(state.install_parent_hash(), state.tree_sizes) {
             return Err(IndexError::RangeBlob { height: start });
         }
-        Self::finish_install(writer, start, range.blob(), chain, meta)
-    }
-
-    /// Starts the write of an install at `start`. Refuses an install that is not at the next
-    /// range start, and an index with mutable rows.
-    fn start_install(&self, start: u32) -> Result<IndexWriter<'_>, IndexError> {
-        let writer = IndexWriter::start_latest(&self.env, self.tables)?;
-        let state = writer.state();
-        let next = state.next_range_start()?;
-        if start != next {
-            return Err(IndexError::RangeOrder { start, next });
-        }
-        if state.has_mutable_rows() {
-            return Err(IndexError::MutableRows);
-        }
-        Ok(writer)
-    }
-
-    /// Checks that `meta` describes the range `chain` at `start`, then writes the range, its
-    /// hash entries and `meta`, and moves the tip to the range end.
-    fn finish_install(
-        mut writer: IndexWriter<'_>,
-        start: u32,
-        blob: &[u8],
-        chain: &RangeChain,
-        meta: &RangeMeta,
-    ) -> Result<IndexState, IndexError> {
-        let last = &chain.last;
-        let entry = &meta.entry;
-        if entry.range_version != RANGE_FORMAT_VERSION
-            || entry.start_height != start
-            || entry.end_height != last.height
-            || entry.end_hash != last.hash
-            || entry.end_tree_sizes != last.end_tree_sizes
-            || meta.state == VerifyState::Rejected
-        {
-            return Err(IndexError::RangeMeta { start });
-        }
-
-        writer.put_new_hashes(&chain.ids)?;
-        writer.put_sealed_range(start, blob, meta)?;
-        writer.set_tip(BlockId::new(last.height, last.hash), last.end_tree_sizes);
-        writer.commit()
+        writer.install(start, range.blob(), chain, meta)
     }
 
     /// Atomically writes a batch and packs newly sealed ranges.
@@ -412,28 +372,7 @@ impl Index {
 
     /// Atomically writes a batch with encoded records and packs newly sealed ranges.
     pub(crate) fn write_encoded(&self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
-        let EncodedBatch { base_generation, seal_through, blocks, end_tree_sizes } = batch;
-        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
-        let state = writer.state();
-        let first = blocks.first().expect("builders never emit empty batches");
-        let expected_height = match state.durable_tip {
-            Some(tip) => tip.height.checked_add(1).ok_or(IndexError::Overflow)?,
-            None => 0,
-        };
-        if first.height != expected_height
-            || state.durable_tip.is_some_and(|tip| first.previous_hash != tip.hash)
-        {
-            return Err(IndexError::StaleBatch { batch_generation: base_generation });
-        }
-
-        writer.start_timer();
-        writer.put_hashes(&blocks)?;
-        let last = blocks.last().expect("the batch is non-empty");
-        writer.set_tip(BlockId::new(last.height, last.hash), end_tree_sizes);
-        let mut blocks = blocks.into_iter().peekable();
-        writer.seal_ranges(seal_through, &mut blocks)?;
-        writer.put_mutable_blocks(blocks)?;
-        writer.commit()
+        IndexWriter::start(&self.env, self.tables, batch.base_generation)?.append(batch)
     }
 
     /// Atomically replaces every mutable block after `ancestor`.
@@ -444,42 +383,11 @@ impl Index {
         records: Vec<CompactBlockRecord>,
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
-        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
-        let state = writer.state();
-        if state.sealed_through.is_some_and(|sealed| ancestor.height < sealed) {
-            return Err(IndexError::Sealed { height: ancestor.height + 1 });
-        }
-        let ancestor_record = writer.read(ancestor.height)?;
-        if ancestor_record.hash != ancestor.hash {
-            return Err(IndexError::Replacement { height: ancestor.height });
-        }
-
-        let delete_start = ancestor.height.checked_add(1).ok_or(IndexError::Overflow)?;
-        let mut expected_height = delete_start;
-        let mut previous_hash = ancestor.hash;
-        for record in &records {
-            if record.height != expected_height || record.previous_hash != previous_hash {
-                return Err(IndexError::Replacement { height: expected_height });
-            }
-            expected_height = expected_height.checked_add(1).ok_or(IndexError::Overflow)?;
-            previous_hash = record.hash;
-        }
-
-        let old_tip = state.durable_tip.ok_or(IndexError::Metadata)?;
-        if ancestor.height > old_tip.height {
-            return Err(IndexError::Replacement { height: ancestor.height });
-        }
-        (delete_start..=old_tip.height)
-            .try_for_each(|height| writer.delete_mutable_block(height))?;
-        records.iter().try_for_each(|record| writer.put_block(record))?;
-
-        let (tip, tree_sizes) =
-            records.last().map_or((ancestor, ancestor_record.end_tree_sizes), |record| {
-                (BlockId::new(record.height, record.hash), record.end_tree_sizes)
-            });
-        writer.set_tip(tip, tree_sizes);
-        writer.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
-        writer.commit()
+        IndexWriter::start(&self.env, self.tables, base_generation)?.replace_mutable_suffix(
+            ancestor,
+            records,
+            seal_through,
+        )
     }
 
     /// Atomically rebuilds every physical range touched by a deep reorg.
@@ -490,36 +398,11 @@ impl Index {
         replacement: Vec<CompactBlockRecord>,
         seal_through: Option<u32>,
     ) -> Result<IndexState, IndexError> {
-        let mut writer = IndexWriter::start(&self.env, self.tables, base_generation)?;
-        let old_tip = writer.state().durable_tip.ok_or(IndexError::Metadata)?;
-        let common = writer.read(common_ancestor.height)?;
-        if common.hash != common_ancestor.hash {
-            return Err(IndexError::Replacement { height: common_ancestor.height });
-        }
-
-        let affected_start = range_start(common_ancestor.height);
-        let old_records = (affected_start..=old_tip.height)
-            .map(|height| writer.read(height))
-            .collect::<Result<Vec<_>, _>>()?;
-        let prefix_len = (common_ancestor.height - affected_start + 1) as usize;
-        let mut canonical = old_records[..prefix_len].to_vec();
-        canonical.extend(replacement);
-        if canonical.windows(2).any(|pair| {
-            pair[0].height.checked_add(1) != Some(pair[1].height)
-                || pair[1].previous_hash != pair[0].hash
-        }) {
-            return Err(IndexError::Replacement { height: common_ancestor.height });
-        }
-
-        // Do all deletes before the first put: `canonical` shares its prefix hashes
-        // with `old_records`.
-        old_records.iter().try_for_each(|record| writer.delete_block(record))?;
-        writer.delete_ranges_from(affected_start)?;
-        canonical.iter().try_for_each(|record| writer.put_block(record))?;
-        let tip = canonical.last().expect("the common-ancestor prefix is non-empty");
-        writer.set_tip(BlockId::new(tip.height, tip.hash), tip.end_tree_sizes);
-        writer.seal_ranges(seal_through, &mut Vec::new().into_iter().peekable())?;
-        writer.commit()
+        IndexWriter::start(&self.env, self.tables, base_generation)?.replace_deep_suffix(
+            common_ancestor,
+            replacement,
+            seal_through,
+        )
     }
 }
 
