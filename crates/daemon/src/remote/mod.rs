@@ -12,7 +12,6 @@ use std::{
 use eyre::{Result, WrapErr, eyre};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
@@ -23,9 +22,9 @@ use ztreamer_remote::{
 };
 
 use crate::{
-    DaemonConfig,
-    application::{NodeSources, run_application},
-    lifecycle::Supervisor,
+    IndexConfig,
+    lifecycle::{Supervisor, Tasks},
+    node_mode::{NodeMode, NodeSources, ReadyNode, Started},
     replicate::{Replica, ReplicaSource},
 };
 
@@ -33,7 +32,7 @@ use crate::{
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The sources of the remote mode. All three read the same node. Only
-/// [`RemoteNode`] makes them, when the node is ready for the index.
+/// [`RemoteMode`] makes them, when the node is ready for the index.
 type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBackend>;
 
 /// The configuration of the remote mode: the `--remote-rpc` node, its credentials, and the
@@ -69,13 +68,13 @@ impl RemoteConfig {
         Ok(Self { url, auth, replicate_from })
     }
 
-    /// The node of this configuration with its import. The default cookie file is the one of a
-    /// zakura with the default configuration. It reads the cookie file, but it does not call the
-    /// node.
-    pub(crate) fn node(&self) -> Result<RemoteNode> {
+    /// The remote mode of this configuration with its import. The default cookie file is the one
+    /// of a zakura with the default configuration. It reads the cookie file, but it does not call
+    /// the node.
+    pub(crate) fn mode(&self) -> Result<RemoteMode> {
         let rpc = zakura_rpc::config::rpc::Config::default();
         let client = self.client(&rpc.cookie_dir.join(rpc.cookie_file_name))?;
-        Ok(RemoteNode::new(client, self.replica()))
+        Ok(RemoteMode::new(client, self.replica()))
     }
 
     /// The import of `--replicate-from`.
@@ -108,15 +107,19 @@ impl RemoteConfig {
     }
 }
 
-/// A remote zakura node that replaces the embedded node, and the import that it attests.
+/// The remote mode: a remote zakura node that replaces the embedded node, and the import that
+/// it attests.
+///
+/// A stop during the historical pass waits for the `getblock` calls in flight. When the node
+/// stalls, each call can wait for its timeout and its retries, thus more than one minute.
 #[derive(Clone, Debug)]
-pub(crate) struct RemoteNode {
+pub(crate) struct RemoteMode {
     client: ZakuraClient,
     /// The import of `--replicate-from`. It runs before the tail.
     replica: Replica,
 }
 
-impl RemoteNode {
+impl RemoteMode {
     /// The node behind `client`, with the import `replica`.
     pub(crate) const fn new(client: ZakuraClient, replica: Replica) -> Self {
         Self { client, replica }
@@ -129,55 +132,34 @@ impl RemoteNode {
         NodeId { url: self.client.rpc().url().to_string(), version: String::new() }
     }
 
-    /// Runs the daemon on this node until `signal`, the end of the work (`--index-only`), or a
-    /// failure.
-    ///
-    /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
-    /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
-    pub(crate) async fn run_until(
-        self,
-        config: DaemonConfig,
-        grpc_server: Server,
-        signal: impl Future<Output = Result<()>>,
-    ) -> Result<()> {
-        let url = self.client.rpc().url();
-        info!(host = url.host(), port = url.port_u16(), "using remote zakura");
-        let shutdown = CancellationToken::new();
-        // No node runs in this process. Thus the supervisor runs only the application.
-        let application = self.application(config, grpc_server, shutdown.clone());
-        Supervisor::new().finite(application).run_until_signal(signal, &shutdown).await
-    }
-
     /// Reads the network from the node and opens the index of that network, as the embedded
-    /// mode does. Runs the import of `--replicate-from`. Then makes the sources when the node is
-    /// ready, and runs the daemon on them until shutdown.
+    /// mode does. Runs the import of `--replicate-from`. Then gives the node when it is ready for
+    /// the index. Breaks on shutdown.
     ///
     /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
     /// of another network.
-    async fn application(
+    async fn ready(
         self,
-        config: DaemonConfig,
-        grpc_server: Server,
-        shutdown: CancellationToken,
-    ) -> Result<()> {
-        let ControlFlow::Continue(info) = self.blockchain_info_when_up(&shutdown).await? else {
-            return Ok(());
+        index: &IndexConfig,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<(), ReadyNode<RemoteTailSource, RemoteHeadSource, RemoteBackend>>> {
+        let ControlFlow::Continue(info) = self.blockchain_info_when_up(shutdown).await? else {
+            return Ok(ControlFlow::Break(()));
         };
         let network = Network::try_from(NodeChain(info.chain()))?;
         info!(%network, "remote zakura network");
-        let index = config.index.open(&network).await?;
+        let index = index.open(&network).await?;
         let import =
-            self.replica.import(&self.client, self.id(), &info, &network, &index, &shutdown);
+            self.replica.import(&self.client, self.id(), &info, &network, &index, shutdown);
         if import.await?.is_break() {
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         }
-        let ControlFlow::Continue(sources) =
-            self.sources(info, &network, &index, &shutdown).await?
+        let ControlFlow::Continue(sources) = self.sources(info, &network, &index, shutdown).await?
         else {
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         };
         info!(import_state = "tail");
-        run_application(config, grpc_server, index, &network, None, sources, shutdown).await
+        Ok(ControlFlow::Continue(ReadyNode { network, index, sources, embedded: None }))
     }
 
     /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.
@@ -250,6 +232,35 @@ impl RemoteNode {
                 return Ok(ControlFlow::Break(()));
             }
         }
+    }
+}
+
+impl NodeMode for RemoteMode {
+    type Tail = RemoteTailSource;
+    type Head = RemoteHeadSource;
+    type Backend = RemoteBackend;
+
+    /// Logs the node. No node runs in this process, thus the supervisor gets no node task. The
+    /// startup is [`Self::ready`].
+    async fn start(
+        self,
+        index: &IndexConfig,
+        shutdown: &CancellationToken,
+    ) -> Result<
+        Started<
+            impl Tasks,
+            impl Future<
+                Output = Result<
+                    ControlFlow<(), ReadyNode<RemoteTailSource, RemoteHeadSource, RemoteBackend>>,
+                >,
+            >,
+        >,
+    > {
+        let url = self.client.rpc().url();
+        info!(host = url.host(), port = url.port_u16(), "using remote zakura");
+        let (index, shutdown) = (index.clone(), shutdown.clone());
+        let startup = async move { self.ready(&index, &shutdown).await };
+        Ok(Started { node: Supervisor::new(), startup })
     }
 }
 

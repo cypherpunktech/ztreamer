@@ -5,12 +5,12 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod application;
 mod config;
 mod daemon;
 mod embedded;
 mod lifecycle;
 mod metrics_endpoint;
+mod node_mode;
 mod remote;
 mod replicate;
 mod tasks;

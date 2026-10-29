@@ -2,6 +2,7 @@ use std::{future, time::Duration};
 
 use serde_json::json;
 use tokio::{task::JoinHandle, time::timeout};
+use tonic::transport::Server;
 use zakura_chain::{
     block::{Block, Height},
     serialization::ZcashDeserializeInto as _,
@@ -14,7 +15,11 @@ use ztreamer_remote::{
 };
 
 use super::*;
-use crate::test_utils::{free_addr, node_with_chain_name, remote_config, remote_mode};
+use crate::{
+    DaemonConfig,
+    daemon::Daemon,
+    test_utils::{free_addr, node_with_chain_name, remote_config, remote_mode_config},
+};
 
 /// A `--replicate-from` source that no server serves. The tests here stop before the import
 /// fetches from it, or test that the import fails.
@@ -37,18 +42,18 @@ fn config(dir: &tempfile::TempDir, url: &str) -> DaemonConfig {
     remote_config(dir.path(), url, NO_SNAPSHOT)
 }
 
-/// The node of `config`, with no default cookie file. Thus a cookie of a local zakura does not
-/// change the tests.
-fn node(config: &DaemonConfig) -> RemoteNode {
-    let remote = remote_mode(config);
+/// The remote mode of `config`, with no default cookie file. Thus a cookie of a local zakura does
+/// not change the tests.
+fn mode(config: &DaemonConfig) -> RemoteMode {
+    let remote = remote_mode_config(config);
     let client = remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap();
-    RemoteNode::new(client, remote.replica())
+    RemoteMode::new(client, remote.replica())
 }
 
 /// Runs the daemon with no signal, until it stops by itself.
 async fn run(config: DaemonConfig) -> Result<()> {
-    let node = node(&config);
-    let daemon = node.run_until(config, Server::builder(), future::pending());
+    let mode = mode(&config);
+    let daemon = Daemon::new(config, Server::builder()).run(mode, future::pending());
     timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
 }
 
@@ -59,19 +64,19 @@ async fn durable_tip(dir: &tempfile::TempDir) -> Option<u32> {
 }
 
 /// A daemon on a free gRPC port until [`Self::stop`] sends the signal.
-struct Daemon {
+struct RunningDaemon {
     signal: CancellationToken,
     task: JoinHandle<Result<()>>,
 }
 
-impl Daemon {
+impl RunningDaemon {
     fn start(dir: &tempfile::TempDir, url: &str) -> Self {
         let mut config = config(dir, url);
         config.servers.grpc_listen = free_addr();
-        let node = node(&config);
+        let mode = mode(&config);
         let signal = CancellationToken::new();
         let received = signal.clone().cancelled_owned();
-        let daemon = node.run_until(config, Server::builder(), async move {
+        let daemon = Daemon::new(config, Server::builder()).run(mode, async move {
             received.await;
             Ok(())
         });
@@ -187,10 +192,10 @@ async fn waits_for_the_end_of_the_warm_up() {
         _ => chain.reply(request),
     })
     .await;
-    let node = node(&config(&dir, &mock.url().to_string()));
+    let mode = mode(&config(&dir, &mock.url().to_string()));
 
     let shutdown = CancellationToken::new();
-    let info = node.blockchain_info_when_up(&shutdown);
+    let info = mode.blockchain_info_when_up(&shutdown);
     let info = timeout(Duration::from_secs(30), info).await.unwrap().unwrap();
 
     let ControlFlow::Continue(info) = info else { panic!("no shutdown was sent") };
@@ -201,7 +206,7 @@ async fn waits_for_the_end_of_the_warm_up() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn waits_for_an_unreachable_node_until_the_signal() {
     let dir = tempfile::tempdir().unwrap();
-    let mut daemon = Daemon::start(&dir, &format!("http://{}", free_addr()));
+    let mut daemon = RunningDaemon::start(&dir, &format!("http://{}", free_addr()));
 
     // The client gives up a call after about 1.4 s of retries. The daemon then waits and calls
     // again, thus it is still running after 3 s.

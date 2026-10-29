@@ -37,7 +37,7 @@ pub(crate) fn remote_config(dir: &Path, url: &str, replicate_from: &str) -> Daem
 }
 
 /// The remote configuration of `config`. Panics in the embedded mode.
-pub(crate) fn remote_mode(config: &DaemonConfig) -> &RemoteConfig {
+pub(crate) fn remote_mode_config(config: &DaemonConfig) -> &RemoteConfig {
     let Mode::Remote(remote) = &config.mode else { panic!("not the remote mode") };
     remote
 }
