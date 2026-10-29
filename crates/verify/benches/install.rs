@@ -24,7 +24,7 @@ use ztreamer_chain::{
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };
-use ztreamer_indexer::index::{
+use ztreamer_index::index::{
     BlockId, CheckedRange, Index,
     range_meta::{RangeMeta, VerifyState},
 };

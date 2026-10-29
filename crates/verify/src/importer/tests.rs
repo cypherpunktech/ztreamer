@@ -10,7 +10,7 @@ use ztreamer_chain::{
     test_utils::raw_block,
     types::RawIndexBlock,
 };
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::range_meta::{Attested, VerifyState},
     test_utils::{range_meta_row, sealed_range_blob},
 };

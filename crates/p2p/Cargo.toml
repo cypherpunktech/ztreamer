@@ -20,5 +20,5 @@ ztreamer-service = { path = "../service" }
 [dev-dependencies]
 zakura-chain.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
-ztreamer-indexer = { path = "../indexer" }
+ztreamer-index = { path = "../index" }
 ztreamer-service = { path = "../service", features = ["test-utils"] }

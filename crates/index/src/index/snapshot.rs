@@ -23,7 +23,7 @@ use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock, decode_range_record
 ///
 /// ```no_run
 /// # use ztreamer_chain::codec::CompactBlockRecord;
-/// # use ztreamer_indexer::index::{Index, IndexError};
+/// # use ztreamer_index::index::{Index, IndexError};
 /// # fn demo(index: &Index) -> Result<(), IndexError> {
 /// let snapshot = index.latest()?;
 /// let tip = snapshot.state().durable_tip().expect("the index holds blocks");

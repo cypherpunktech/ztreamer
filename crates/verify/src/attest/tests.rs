@@ -6,7 +6,7 @@ use ztreamer_chain::{
     codec::{RANGE_SIZE, TreeSizes, encode_range},
     test_utils::{hash, record},
 };
-use ztreamer_indexer::index::range_meta::Attested;
+use ztreamer_index::index::range_meta::Attested;
 use ztreamer_remote::{
     RpcClient,
     test_utils::{MockNode, Reply},

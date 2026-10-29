@@ -3,7 +3,7 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zakura_chain::block;
 use ztreamer_chain::test_utils::{hash, mixed_records, parsed};
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::{BlockId, Index, IndexState},
     ingest::OrderedBuilder,
     test_utils::populate,

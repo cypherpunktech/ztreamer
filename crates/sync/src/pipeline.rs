@@ -23,7 +23,7 @@ use ztreamer_chain::{
     parser::CompactParseError,
     types::{BlockAtHeightError, RawBlockError},
 };
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::{EncodedBatch, Index, IndexError, IndexState, WriteBatch},
     ingest::{IngestError, OrderedBuilder, partial_range_flush_threshold},
 };
@@ -213,7 +213,7 @@ pub trait HistoricalSource: Sync {
 ///
 /// ```no_run
 /// # use std::sync::atomic::AtomicBool;
-/// # use ztreamer_indexer::index::Index;
+/// # use ztreamer_index::index::Index;
 /// # use ztreamer_sync::pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig, PipelineError};
 /// # fn run(index: &Index, source: &impl HistoricalSource, stop: &AtomicBool) -> Result<(), PipelineError> {
 /// let state = HistoricalPipeline::new(index, source, PipelineConfig::default())?

@@ -18,7 +18,7 @@ use std::{
 };
 
 use ztreamer_chain::{codec::CompactBlockRecord, types::ParsedCompactBlock};
-use ztreamer_indexer::ingest::IngestError;
+use ztreamer_index::ingest::IngestError;
 
 use super::PipelineError;
 

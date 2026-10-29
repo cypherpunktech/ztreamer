@@ -12,7 +12,7 @@ use ztreamer_chain::{
     test_utils::hash,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
-use ztreamer_indexer::ingest::OrderedBuilder;
+use ztreamer_index::ingest::OrderedBuilder;
 
 struct Fixture {
     count: u32,
@@ -567,7 +567,7 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
     use crate::head::{CanonicalBlockSource, HeadError, sync_head_once};
     use zakura_chain::transaction;
     use ztreamer_chain::types::RawIndexBlock;
-    use ztreamer_indexer::index::BlockId;
+    use ztreamer_index::index::BlockId;
 
     // The live source is asked only for the historical anchor and new empty blocks.
     struct Live {

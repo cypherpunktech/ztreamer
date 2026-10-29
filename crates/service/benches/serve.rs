@@ -14,7 +14,7 @@ use ztreamer_chain::{
     test_utils::hash,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::{Index, IndexState},
     ingest::OrderedBuilder,
 };

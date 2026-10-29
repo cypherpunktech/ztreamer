@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
-use ztreamer_indexer::index::{Index, range_meta::NodeId};
+use ztreamer_index::index::{Index, range_meta::NodeId};
 use ztreamer_remote::RemoteBackend;
 use ztreamer_remote::ZakuraClient;
 use ztreamer_snapshot::layout::SNAPSHOT_PUBKEY;

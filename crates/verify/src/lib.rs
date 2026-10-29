@@ -10,7 +10,7 @@
 //! ranges of an index to replicas over gRPC. [`RangeMetaFiller`] writes the `range_meta` row of
 //! each sealed range from the answers of a node.
 //!
-//! The format of a snapshot is in `ztreamer-snapshot`. This crate depends on `ztreamer-indexer`,
+//! The format of a snapshot is in `ztreamer-snapshot`. This crate depends on `ztreamer-index`,
 //! `ztreamer-snapshot` and `ztreamer-backend`, not on the wallet service. Neither depends on this
 //! crate.
 

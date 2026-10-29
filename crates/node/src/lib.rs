@@ -21,7 +21,7 @@ use zakura_chain::{
 };
 use zakura_node_services::BoxError;
 use zakura_state::{ChainTipChange, HashOrHeight as BlockId};
-use ztreamer_indexer::index::range_meta::NodeId;
+use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_service::NodeVersion;
 
 /// An error returned by a [`NodeClient`] request.

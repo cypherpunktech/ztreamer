@@ -35,7 +35,7 @@ use ztreamer_chain::codec::{
     CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, RANGE_SIZE, TreeSizes,
     decode_range_record,
 };
-use ztreamer_indexer::index::{
+use ztreamer_index::index::{
     Index, IndexError,
     range_meta::{Attested, NodeId, RangeMeta, VerifyState},
 };
@@ -382,7 +382,7 @@ impl Epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ztreamer_indexer::test_utils::{range_meta_row, sealed_range_blob};
+    use ztreamer_index::test_utils::{range_meta_row, sealed_range_blob};
     use ztreamer_service::test_utils::EmptyChain;
 
     fn open(dir: &tempfile::TempDir) -> Arc<Index> {
@@ -405,7 +405,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
         let records = ztreamer_chain::test_utils::mixed_records(3_010);
-        let state = ztreamer_indexer::test_utils::populate(&index, &records, Some(2_999));
+        let state = ztreamer_index::test_utils::populate(&index, &records, Some(2_999));
         let (sender, snapshots) = watch::channel(ServingSnapshot::from(state));
         drop(sender);
         filler(&index).await.run(snapshots, std::future::pending()).await;
@@ -451,7 +451,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
         let records = ztreamer_chain::test_utils::mixed_records(3_010);
-        ztreamer_indexer::test_utils::populate(&index, &records[..2_010], Some(1_999));
+        ztreamer_index::test_utils::populate(&index, &records[..2_010], Some(1_999));
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(1_999));
 
         // Mark the row of range 1,000. A filler that writes it again removes the mark.
@@ -460,7 +460,7 @@ mod tests {
         index.put_range_meta(1_000, &marked).unwrap();
         let first = range_meta_row(&index, 0);
 
-        ztreamer_indexer::test_utils::populate(&index, &records[2_010..], Some(2_999));
+        ztreamer_index::test_utils::populate(&index, &records[2_010..], Some(2_999));
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(2_999));
         assert_eq!(range_meta_row(&index, 0), first);
         assert_eq!(range_meta_row(&index, 1_000), marked);
@@ -472,9 +472,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
         let records = empty_records(11_010);
-        ztreamer_indexer::test_utils::populate(&index, &records[..5_010], Some(4_999));
+        ztreamer_index::test_utils::populate(&index, &records[..5_010], Some(4_999));
         filler(&index).await.pass(None).await.unwrap();
-        ztreamer_indexer::test_utils::populate(&index, &records[5_010..], Some(10_999));
+        ztreamer_index::test_utils::populate(&index, &records[5_010..], Some(10_999));
         filler(&index).await.pass(None).await.unwrap();
 
         let epoch_ends: Vec<_> = (0..11)

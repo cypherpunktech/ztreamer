@@ -13,7 +13,7 @@ use ztreamer_chain::{
     parser::{CompactParseError, parse_block},
     types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
     ingest::{IngestError, OrderedBuilder},
 };

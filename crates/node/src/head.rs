@@ -2,7 +2,7 @@
 
 use zakura_chain::block;
 use ztreamer_chain::types::RawIndexBlock;
-use ztreamer_indexer::index::BlockId;
+use ztreamer_index::index::BlockId;
 use ztreamer_sync::head::{CanonicalBlockSource, HeadError};
 
 use crate::NodeClient;

@@ -149,7 +149,7 @@ mod tests {
     use zakura_chain::{block, parameters::Network};
     use zakura_rpc::client::GetBlockchainInfoResponse;
     use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
-    use ztreamer_indexer::index::{BlockId, Index};
+    use ztreamer_index::index::{BlockId, Index};
     use ztreamer_remote::{
         RemoteBackend, RpcClient, ZakuraClient,
         test_utils::{MockNode, Reply},

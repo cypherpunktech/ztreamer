@@ -4781,7 +4781,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ztreamer-indexer"
+name = "ztreamer-index"
 version = "0.1.0"
 dependencies = [
  "criterion",
@@ -4796,7 +4796,7 @@ dependencies = [
  "zakura-chain",
  "zakura-test",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-protocol",
  "ztreamer-snapshot",
 ]
@@ -4840,7 +4840,7 @@ dependencies = [
  "zakura-test",
  "ztreamer-backend",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-protocol",
  "ztreamer-service",
  "ztreamer-sync",
@@ -4857,7 +4857,7 @@ dependencies = [
  "zakura-chain",
  "zakura-network",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-protocol",
  "ztreamer-service",
 ]
@@ -4902,7 +4902,7 @@ dependencies = [
  "ztreamer-backend",
  "ztreamer-blocking",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-jsonrpc",
  "ztreamer-remote",
  "ztreamer-service",
@@ -4932,7 +4932,7 @@ dependencies = [
  "zakura-test",
  "ztreamer-backend",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",
@@ -4973,7 +4973,7 @@ dependencies = [
  "zakura-test",
  "ztreamer-blocking",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
 ]
 
 [[package]]
@@ -5012,7 +5012,7 @@ dependencies = [
  "ztreamer-backend",
  "ztreamer-blocking",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-node",
  "ztreamer-protocol",
  "ztreamer-remote",
@@ -5049,7 +5049,7 @@ dependencies = [
  "zeroize",
  "ztreamer-backend",
  "ztreamer-chain",
- "ztreamer-indexer",
+ "ztreamer-index",
  "ztreamer-node",
  "ztreamer-p2p",
  "ztreamer-protocol",

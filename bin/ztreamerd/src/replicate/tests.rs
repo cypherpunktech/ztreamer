@@ -12,7 +12,7 @@ use ztreamer_chain::{
     test_utils::grow_chain,
     types::RawIndexBlock,
 };
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::{SEAL_DEPTH, range_meta::VerifyState},
     test_utils::range_meta_row,
 };

@@ -24,14 +24,14 @@
 //! decode the blob again.
 //!
 //! [`RANGE_SIZE`]: ztreamer_chain::codec::RANGE_SIZE
-//! [`Index::install_checked_range`]: ztreamer_indexer::index::Index::install_checked_range
+//! [`Index::install_checked_range`]: ztreamer_index::index::Index::install_checked_range
 
 use std::fmt;
 
 use bytes::Bytes;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use ztreamer_chain::codec::{CompactBlockRecord, TreeSizes};
-use ztreamer_indexer::index::{CheckedRange, RangeCheckError};
+use ztreamer_index::index::{CheckedRange, RangeCheckError};
 use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
 /// The end of a checked range: what the next range must link to.

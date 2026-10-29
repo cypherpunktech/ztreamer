@@ -6,7 +6,7 @@ use tonic::{
     transport::{Channel, Server},
 };
 use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::range_meta::RangeMeta,
     test_utils::{range_meta_row, sealed_range_blob},
 };
@@ -35,7 +35,7 @@ impl Fixture {
             Index::open(dir.path(), 512 * 1024 * 1024, "Mainnet", network.genesis_hash()).unwrap(),
         );
         let records = ztreamer_chain::test_utils::mixed_records(5_010);
-        let state = ztreamer_indexer::test_utils::populate(&index, &records, Some(4_999));
+        let state = ztreamer_index::test_utils::populate(&index, &records, Some(4_999));
         for (start, state) in [
             (0, VerifyState::Verified),
             (1_000, VerifyState::Verified),

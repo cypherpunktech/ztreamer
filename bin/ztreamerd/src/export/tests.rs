@@ -4,7 +4,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_chain::test_utils::record;
-use ztreamer_indexer::{
+use ztreamer_index::{
     index::range_meta::{RangeMeta, VerifyState},
     test_utils::{populate, range_meta_row, sealed_range_blob},
 };

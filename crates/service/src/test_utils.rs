@@ -28,7 +28,7 @@ use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 use ztreamer_chain::codec::CompactBlockRecord;
-use ztreamer_indexer::index::{Index, IndexState};
+use ztreamer_index::index::{Index, IndexState};
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
 use ztreamer_sync::head::HeadFollower;
@@ -166,7 +166,7 @@ impl EphemeralService {
         );
         let state = match records {
             [] => index.state().unwrap(),
-            records => ztreamer_indexer::test_utils::populate(&index, records, seal_through),
+            records => ztreamer_index::test_utils::populate(&index, records, seal_through),
         };
         let follower = HeadFollower::new(Arc::clone(&index), state);
         let service = CompactService::with_backend(

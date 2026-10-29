@@ -12,7 +12,7 @@
 //!
 //! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
 //! [`EpochProof::attest`]: crate::proof::EpochProof::attest
-//! [`Attested`]: ztreamer_indexer::index::range_meta::Attested
+//! [`Attested`]: ztreamer_index::index::range_meta::Attested
 
 use std::{
     collections::BTreeMap,

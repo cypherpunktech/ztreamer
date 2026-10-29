@@ -1,5 +1,5 @@
 [package]
-name = "ztreamer-indexer"
+name = "ztreamer-index"
 version = "0.1.0"
 edition.workspace = true
 repository.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 workspace = true
 
 [features]
-# Shared test and benchmark fixtures in `ztreamer_indexer::test_utils`.
+# Shared test and benchmark fixtures in `ztreamer_index::test_utils`.
 test-utils = ["ztreamer-chain/test-utils"]
 
 [dependencies]
@@ -29,7 +29,7 @@ tempfile = "3"
 zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 # Enables `test_utils` for this crate's benches.
-ztreamer-indexer = { path = ".", features = ["test-utils"] }
+ztreamer-index = { path = ".", features = ["test-utils"] }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-snapshot = { path = "../snapshot", features = ["test-utils"] }
 

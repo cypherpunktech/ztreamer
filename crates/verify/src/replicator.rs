@@ -17,7 +17,7 @@ use prost::bytes::Bytes;
 use tokio::sync::{Semaphore, watch};
 use tonic::{Request, Response, Status};
 use zakura_chain::parameters::Network;
-use ztreamer_indexer::index::{Index, IndexError, range_meta::VerifyState};
+use ztreamer_index::index::{Index, IndexError, range_meta::VerifyState};
 use ztreamer_protocol::{
     RpcStream,
     replicate::{
