@@ -11,7 +11,7 @@ use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_blocking::BlockingTask;
-use ztreamer_indexer::index::{
+use ztreamer_index::index::{
     CheckedRange, IndexState,
     range_meta::{RangeMeta, VerifyState},
 };

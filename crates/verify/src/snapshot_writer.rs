@@ -10,7 +10,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
 use tracing::warn;
-use ztreamer_indexer::index::{Index, IndexError};
+use ztreamer_index::index::{Index, IndexError};
 use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
 use ztreamer_snapshot::{

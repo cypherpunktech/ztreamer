@@ -19,7 +19,7 @@ zakura-state = { workspace = true, features = ["indexer"] }
 zakurad = { workspace = true, features = ["indexer"] }
 ztreamer-backend = { path = "../backend" }
 ztreamer-chain = { path = "../chain" }
-ztreamer-indexer = { path = "../indexer" }
+ztreamer-index = { path = "../index" }
 ztreamer-service = { path = "../service" }
 ztreamer-sync = { path = "../sync" }
 

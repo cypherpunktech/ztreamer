@@ -14,7 +14,7 @@ use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     types::CompactShieldedAction,
 };
-use ztreamer_indexer::index::{CheckedRange, range_meta::Attested};
+use ztreamer_index::index::{CheckedRange, range_meta::Attested};
 use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
 use ztreamer_snapshot::{
     manifest_entry::Frontiers,
@@ -65,7 +65,7 @@ impl EpochProof {
     /// them with [`Index::install_checked_range`]. Thus the install does not check the blobs
     /// again.
     ///
-    /// [`Index::install_checked_range`]: ztreamer_indexer::index::Index::install_checked_range
+    /// [`Index::install_checked_range`]: ztreamer_index::index::Index::install_checked_range
     pub(crate) fn rebuild_ranges(
         epoch: &Epoch<'_>,
         blobs: &[Bytes],
@@ -147,7 +147,7 @@ impl EpochProof {
     /// the entry cannot show the difference.
     ///
     /// ```
-    /// use ztreamer_indexer::index::range_meta::Attested;
+    /// use ztreamer_index::index::range_meta::Attested;
     /// use ztreamer_snapshot::{epoch::Epoch, manifest_entry::Frontiers};
     /// use ztreamer_verify::{
     ///     attest::{Attestor, EpochError},

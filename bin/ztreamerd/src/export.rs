@@ -26,7 +26,7 @@ use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zeroize::Zeroizing;
 use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_indexer::index::Index;
+use ztreamer_index::index::Index;
 use ztreamer_snapshot::manifest::Manifest;
 use ztreamer_snapshot::manifest_entry::ManifestEntry;
 use ztreamer_verify::snapshot_writer::SnapshotWriter;

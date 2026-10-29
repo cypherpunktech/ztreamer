@@ -11,7 +11,7 @@ use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
 
 use ztreamer_chain::{parser::parse_block, types::RawIndexBlock};
-use ztreamer_indexer::index::SEAL_DEPTH;
+use ztreamer_index::index::SEAL_DEPTH;
 use ztreamer_sync::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
 
 /// The number of `getblock` requests that one worker keeps in flight.
@@ -45,7 +45,7 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 ///
 /// ```no_run
 /// use ztreamer_sync::pipeline::{HistoricalPipeline, PipelineConfig};
-/// # use ztreamer_indexer::index::Index;
+/// # use ztreamer_index::index::Index;
 /// use ztreamer_remote::{RemoteTailSource, RpcClient, ZakuraClient};
 ///
 /// # async fn demo(index: std::sync::Arc<Index>) -> Result<(), Box<dyn std::error::Error>> {
@@ -261,7 +261,7 @@ mod tests {
     use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 
     use ztreamer_chain::{codec::CompactBlockRecord, test_utils::grow_chain};
-    use ztreamer_indexer::{index::BlockId, test_utils::open_index};
+    use ztreamer_index::{index::BlockId, test_utils::open_index};
     use ztreamer_sync::pipeline::{HistoricalPipeline, PipelineConfig};
 
     use super::*;

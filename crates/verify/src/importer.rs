@@ -19,7 +19,7 @@
 //! The importer takes the verified epochs in height order, and installs each one before it
 //! takes the next. It installs each range with [`Index::install_checked_range`] and a
 //! [`VerifyState::Verified`] row. [`EpochProof::rebuild`] made the
-//! [`CheckedRange`](ztreamer_indexer::index::CheckedRange) of each blob with its one decode.
+//! [`CheckedRange`](ztreamer_index::index::CheckedRange) of each blob with its one decode.
 //! Thus the install, on one writer thread, does only the checks that need the index: it does
 //! not calculate the digest or decode the blob again.
 //!
@@ -42,7 +42,7 @@
 //! [`Epoch::closed_by_rule`]: ztreamer_snapshot::epoch::Epoch::closed_by_rule
 //! [`EpochProof::attest`]: crate::proof::EpochProof::attest
 //! [`SamplePlan::sample`]: crate::sample::SamplePlan::sample
-//! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
+//! [`VerifyState::Verified`]: ztreamer_index::index::range_meta::VerifyState::Verified
 
 mod epoch_import;
 
@@ -54,7 +54,7 @@ use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
 use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_indexer::index::{Index, IndexError, IndexState, range_meta::NodeId};
+use ztreamer_index::index::{Index, IndexError, IndexState, range_meta::NodeId};
 use ztreamer_snapshot::manifest_entry::Frontiers;
 
 use self::epoch_import::EpochImport;
@@ -216,7 +216,7 @@ impl ImportError {
 /// use std::sync::Arc;
 ///
 /// use tokio::sync::watch;
-/// use ztreamer_indexer::index::Index;
+/// use ztreamer_index::index::Index;
 /// use ztreamer_verify::{
 ///     fetch::RangeSource,
 ///     importer::{ImportConfig, ImportError, ImportReport, Importer, TrustedNode},

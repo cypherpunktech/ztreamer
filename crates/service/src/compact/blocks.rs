@@ -6,7 +6,7 @@ use tokio_stream::StreamExt;
 use tonic::Status;
 use zakura_chain::block;
 use ztreamer_chain::codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock};
-use ztreamer_indexer::index::IndexError;
+use ztreamer_index::index::IndexError;
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
 use super::{CompactService, RpcStream, ensure_ready, reorganized};
