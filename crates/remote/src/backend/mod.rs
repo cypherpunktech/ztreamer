@@ -51,6 +51,121 @@ const TREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(4_096).unwrap();
 /// The most `getrawtransaction` calls in flight for one mempool read.
 const MEMPOOL_FETCHES: usize = 16;
 
+/// A value that the node sends in the Zcash serialization: a block or a transaction.
+trait FromNodeBytes: ZcashDeserialize + Send + 'static {
+    /// The name of the value in errors.
+    const WHAT: &'static str;
+
+    /// Deserializes `bytes` on a blocking thread, because a large block takes milliseconds. The
+    /// thread runs in the tracing span of the caller.
+    fn from_node_bytes(bytes: Vec<u8>) -> impl Future<Output = Result<Self, BackendError>> + Send {
+        let span = tracing::Span::current();
+        async move {
+            tokio::task::spawn_blocking(move || {
+                span.in_scope(|| bytes.zcash_deserialize_into::<Self>())
+            })
+            .await
+            .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
+            .map_err(|error| {
+                BackendError::Unexpected(format!(
+                    "remote zakura sent a bad {}: {error}",
+                    Self::WHAT
+                ))
+            })
+        }
+    }
+}
+
+/// A note commitment tree that `z_gettreestate` prints, and the type of its root.
+trait RpcTree: FromRpc {
+    type Root: FromRpc + PartialEq;
+
+    fn tree_root(&self) -> Self::Root;
+
+    /// Reads the tree from `finalState` of one pool of a `z_gettreestate` answer. `None` when
+    /// the node leaves it out, which it does before the pool activates. When the node also gives
+    /// `finalRoot`, the root of the tree must be equal to it.
+    fn from_treestate(
+        pool: &str,
+        treestate: &Treestate,
+    ) -> Result<Option<Arc<Self>>, BackendError> {
+        let commitments = treestate.commitments();
+        let Some(state) = commitments.final_state() else {
+            return Ok(None);
+        };
+        let bad = |error| {
+            BackendError::Unexpected(format!("remote zakura sent a bad {pool} tree: {error}"))
+        };
+        let tree = Self::from_rpc_bytes(state).map_err(bad)?;
+        let root = commitments.final_root().as_deref().map(Self::Root::from_rpc_bytes).transpose();
+        if root.map_err(bad)?.is_some_and(|root| root != tree.tree_root()) {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura sent a {pool} tree that does not match its root"
+            )));
+        }
+        Ok(Some(Arc::new(tree)))
+    }
+}
+
+/// A shielded pool: its [`pool::Pool`] and its root type.
+trait Pool {
+    const POOL: pool::Pool;
+    /// The name of the pool in `z_getsubtreesbyindex`.
+    const NAME: &'static str = Self::POOL.as_str();
+    type Node: Clone + Send + Sync + 'static;
+
+    /// Returns the root in `node`. Returns `None` if `node` is a root of a different pool.
+    fn root_from_node(node: SubtreeNode) -> Option<Self::Node>;
+
+    /// Parses a `z_getsubtreesbyindex` answer that must start at `start`.
+    ///
+    /// The node prints each subtree root in the stored byte order, for all pools. This is
+    /// different from the Sapling tree root (`finalRoot` of `z_gettreestate`), which the node
+    /// prints reversed.
+    fn parse_subtrees(
+        response: GetSubtreesByIndexResponse,
+        start: NoteCommitmentSubtreeIndex,
+    ) -> Result<Subtrees<Self::Node>, BackendError> {
+        if response.pool() != Self::NAME || response.start_index() != start {
+            return Err(BackendError::Unexpected(format!(
+                "remote zakura answered {} subtrees from {}, not {} from {}",
+                response.pool(),
+                response.start_index().0,
+                Self::NAME,
+                start.0,
+            )));
+        }
+        let bad_root = |root: &str| {
+            BackendError::Unexpected(format!(
+                "remote zakura sent a bad {} subtree root {root:?}",
+                Self::NAME
+            ))
+        };
+        response
+            .subtrees()
+            .iter()
+            .zip(u32::from(start.0)..)
+            .map(|(subtree, index)| {
+                let index = u16::try_from(index).map_err(|_| {
+                    BackendError::Unexpected(format!(
+                        "remote zakura sent {} subtrees past index 65535",
+                        Self::NAME
+                    ))
+                })?;
+                let root = subtree
+                    .root
+                    .parse::<NodeBytes>()
+                    .ok()
+                    .and_then(|bytes| Self::POOL.node(bytes))
+                    .and_then(Self::root_from_node)
+                    .ok_or_else(|| bad_root(&subtree.root))?;
+                let data = NoteCommitmentSubtreeData::new(subtree.end_height, root);
+                Ok((NoteCommitmentSubtreeIndex(index), data))
+            })
+            .collect()
+    }
+}
+
 /// Why [`RemoteBackend::connect`] refused the node.
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteConnectError {
@@ -239,68 +354,12 @@ impl FetchedTransaction {
     }
 }
 
-/// A value that the node sends in the Zcash serialization: a block or a transaction.
-trait FromNodeBytes: ZcashDeserialize + Send + 'static {
-    /// The name of the value in errors.
-    const WHAT: &'static str;
-
-    /// Deserializes `bytes` on a blocking thread, because a large block takes milliseconds. The
-    /// thread runs in the tracing span of the caller.
-    fn from_node_bytes(bytes: Vec<u8>) -> impl Future<Output = Result<Self, BackendError>> + Send {
-        let span = tracing::Span::current();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                span.in_scope(|| bytes.zcash_deserialize_into::<Self>())
-            })
-            .await
-            .map_err(|error| BackendError::Unavailable(format!("decode task failed: {error}")))?
-            .map_err(|error| {
-                BackendError::Unexpected(format!(
-                    "remote zakura sent a bad {}: {error}",
-                    Self::WHAT
-                ))
-            })
-        }
-    }
-}
-
 impl FromNodeBytes for Block {
     const WHAT: &'static str = "block";
 }
 
 impl FromNodeBytes for Transaction {
     const WHAT: &'static str = "transaction";
-}
-
-/// A note commitment tree that `z_gettreestate` prints, and the type of its root.
-trait RpcTree: FromRpc {
-    type Root: FromRpc + PartialEq;
-
-    fn tree_root(&self) -> Self::Root;
-
-    /// Reads the tree from `finalState` of one pool of a `z_gettreestate` answer. `None` when
-    /// the node leaves it out, which it does before the pool activates. When the node also gives
-    /// `finalRoot`, the root of the tree must be equal to it.
-    fn from_treestate(
-        pool: &str,
-        treestate: &Treestate,
-    ) -> Result<Option<Arc<Self>>, BackendError> {
-        let commitments = treestate.commitments();
-        let Some(state) = commitments.final_state() else {
-            return Ok(None);
-        };
-        let bad = |error| {
-            BackendError::Unexpected(format!("remote zakura sent a bad {pool} tree: {error}"))
-        };
-        let tree = Self::from_rpc_bytes(state).map_err(bad)?;
-        let root = commitments.final_root().as_deref().map(Self::Root::from_rpc_bytes).transpose();
-        if root.map_err(bad)?.is_some_and(|root| root != tree.tree_root()) {
-            return Err(BackendError::Unexpected(format!(
-                "remote zakura sent a {pool} tree that does not match its root"
-            )));
-        }
-        Ok(Some(Arc::new(tree)))
-    }
 }
 
 impl RpcTree for sapling::tree::NoteCommitmentTree {
@@ -316,65 +375,6 @@ impl RpcTree for orchard::tree::NoteCommitmentTree {
 
     fn tree_root(&self) -> Self::Root {
         self.root()
-    }
-}
-
-/// A shielded pool: its [`pool::Pool`] and its root type.
-trait Pool {
-    const POOL: pool::Pool;
-    /// The name of the pool in `z_getsubtreesbyindex`.
-    const NAME: &'static str = Self::POOL.as_str();
-    type Node: Clone + Send + Sync + 'static;
-
-    /// Returns the root in `node`. Returns `None` if `node` is a root of a different pool.
-    fn root_from_node(node: SubtreeNode) -> Option<Self::Node>;
-
-    /// Parses a `z_getsubtreesbyindex` answer that must start at `start`.
-    ///
-    /// The node prints each subtree root in the stored byte order, for all pools. This is
-    /// different from the Sapling tree root (`finalRoot` of `z_gettreestate`), which the node
-    /// prints reversed.
-    fn parse_subtrees(
-        response: GetSubtreesByIndexResponse,
-        start: NoteCommitmentSubtreeIndex,
-    ) -> Result<Subtrees<Self::Node>, BackendError> {
-        if response.pool() != Self::NAME || response.start_index() != start {
-            return Err(BackendError::Unexpected(format!(
-                "remote zakura answered {} subtrees from {}, not {} from {}",
-                response.pool(),
-                response.start_index().0,
-                Self::NAME,
-                start.0,
-            )));
-        }
-        let bad_root = |root: &str| {
-            BackendError::Unexpected(format!(
-                "remote zakura sent a bad {} subtree root {root:?}",
-                Self::NAME
-            ))
-        };
-        response
-            .subtrees()
-            .iter()
-            .zip(u32::from(start.0)..)
-            .map(|(subtree, index)| {
-                let index = u16::try_from(index).map_err(|_| {
-                    BackendError::Unexpected(format!(
-                        "remote zakura sent {} subtrees past index 65535",
-                        Self::NAME
-                    ))
-                })?;
-                let root = subtree
-                    .root
-                    .parse::<NodeBytes>()
-                    .ok()
-                    .and_then(|bytes| Self::POOL.node(bytes))
-                    .and_then(Self::root_from_node)
-                    .ok_or_else(|| bad_root(&subtree.root))?;
-                let data = NoteCommitmentSubtreeData::new(subtree.end_height, root);
-                Ok((NoteCommitmentSubtreeIndex(index), data))
-            })
-            .collect()
     }
 }
 

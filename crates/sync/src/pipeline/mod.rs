@@ -33,6 +33,53 @@ pub(crate) const MAX_SOURCE_BLOCKS: u32 = 4096;
 /// How often the coordinator checks the stop flag while it waits for a block.
 const STOP_POLL: Duration = Duration::from_millis(50);
 
+/// Where the historical pass reads finalized blocks from.
+///
+/// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
+/// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
+/// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
+/// read in-process with its native range iterators. `ztreamer_remote::RemoteTailSource`
+/// reads a remote node over JSON-RPC.
+///
+/// The methods are called from blocking worker threads, never from an async context. A source
+/// that talks to the network blocks on its own runtime handle.
+///
+/// # Contract
+///
+/// - [`Self::tip`], [`Self::block_hash`] and [`Self::prune_height`] describe the finalized chain
+///   as the source sees it when called. The pass is planned from one `tip` call and ends with an
+///   error if the source changes under it.
+/// - These three methods return an error when the source cannot read the chain, for example
+///   when a request to a remote node fails. `None` means only that the source has no such
+///   block. Thus the pipeline does not report a read failure as a mismatch.
+/// - [`Self::process_segment`] must send every height from `start` to `end` inclusive, in
+///   ascending order, through `parsed_tx`, or return an error. A missing height or a height out
+///   of order ends the pass; the sender refuses it with [`PipelineError::SourceGap`].
+/// - When `expected_end_hash` is set and the block at `end` has a different hash, the source
+///   returns [`PipelineError::SourceChanged`].
+/// - A block whose serialized size plus 32 bytes per transaction id exceeds `max_source_bytes`
+///   is reported as [`PipelineError::BlockExceedsByteLimit`], not sent.
+/// - A block body the source no longer has is [`PipelineError::MissingBody`].
+pub trait HistoricalSource: Sync {
+    /// The highest finalized block, or `None` when the source has no blocks yet.
+    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError>;
+    /// The hash of the finalized block at `height`, or `None` when the source has no such block.
+    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError>;
+    /// The lowest height whose body the source still has. Zero when nothing is pruned.
+    fn prune_height(&self) -> Result<u32, PipelineError>;
+    /// Reads and parses the blocks from `start` to `end` inclusive and sends each one through
+    /// `parsed_tx` in ascending order. See the trait documentation for the contract.
+    fn process_segment(
+        &self,
+        start: u32,
+        end: u32,
+        expected_end_hash: Option<block::Hash>,
+        max_source_bytes: usize,
+        parsed_tx: &mut SegmentSender<'_>,
+        stats: &mut WorkerStats,
+    ) -> Result<(), PipelineError>;
+}
+
 /// Per-worker timing and volume counters. A [`HistoricalSource`] fills these in
 /// [`HistoricalSource::process_segment`]; the pipeline sums them over all workers and logs the
 /// totals at the end of a pass.
@@ -155,53 +202,6 @@ impl From<BlockAtHeightError> for PipelineError {
             }
         }
     }
-}
-
-/// Where the historical pass reads finalized blocks from.
-///
-/// The pipeline runs [`PipelineConfig::workers`] threads. Each one claims segments of
-/// [`PipelineConfig::source_segment_blocks`] consecutive heights and calls
-/// [`Self::process_segment`] for each. The production source is Zakura's finalized database,
-/// read in-process with its native range iterators. `ztreamer_remote::RemoteTailSource`
-/// reads a remote node over JSON-RPC.
-///
-/// The methods are called from blocking worker threads, never from an async context. A source
-/// that talks to the network blocks on its own runtime handle.
-///
-/// # Contract
-///
-/// - [`Self::tip`], [`Self::block_hash`] and [`Self::prune_height`] describe the finalized chain
-///   as the source sees it when called. The pass is planned from one `tip` call and ends with an
-///   error if the source changes under it.
-/// - These three methods return an error when the source cannot read the chain, for example
-///   when a request to a remote node fails. `None` means only that the source has no such
-///   block. Thus the pipeline does not report a read failure as a mismatch.
-/// - [`Self::process_segment`] must send every height from `start` to `end` inclusive, in
-///   ascending order, through `parsed_tx`, or return an error. A missing height or a height out
-///   of order ends the pass; the sender refuses it with [`PipelineError::SourceGap`].
-/// - When `expected_end_hash` is set and the block at `end` has a different hash, the source
-///   returns [`PipelineError::SourceChanged`].
-/// - A block whose serialized size plus 32 bytes per transaction id exceeds `max_source_bytes`
-///   is reported as [`PipelineError::BlockExceedsByteLimit`], not sent.
-/// - A block body the source no longer has is [`PipelineError::MissingBody`].
-pub trait HistoricalSource: Sync {
-    /// The highest finalized block, or `None` when the source has no blocks yet.
-    fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError>;
-    /// The hash of the finalized block at `height`, or `None` when the source has no such block.
-    fn block_hash(&self, height: u32) -> Result<Option<block::Hash>, PipelineError>;
-    /// The lowest height whose body the source still has. Zero when nothing is pruned.
-    fn prune_height(&self) -> Result<u32, PipelineError>;
-    /// Reads and parses the blocks from `start` to `end` inclusive and sends each one through
-    /// `parsed_tx` in ascending order. See the trait documentation for the contract.
-    fn process_segment(
-        &self,
-        start: u32,
-        end: u32,
-        expected_end_hash: Option<block::Hash>,
-        max_source_bytes: usize,
-        parsed_tx: &mut SegmentSender<'_>,
-        stats: &mut WorkerStats,
-    ) -> Result<(), PipelineError>;
 }
 
 /// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one

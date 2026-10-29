@@ -19,23 +19,6 @@ use incrementalmerkletree::{Hashable, frontier::Frontier};
 use zakura_chain::{orchard, sapling, serialization::SerializationError};
 use zcash_primitives::merkle_tree::{HashSer, read_commitment_tree};
 
-/// An error from [`FromRpc`].
-#[derive(Debug, thiserror::Error)]
-pub enum RpcDecodeError {
-    /// The root does not have 32 bytes.
-    #[error("tree root has {0} bytes, not 32")]
-    RootLength(usize),
-    /// The root bytes are not a valid field element.
-    #[error("tree root is not valid")]
-    Root(#[from] SerializationError),
-    /// The commitment tree encoding is not valid.
-    #[error("commitment tree encoding is not valid")]
-    Tree(#[from] io::Error),
-    /// Bytes remain after the commitment tree encoding.
-    #[error("commitment tree encoding has {0} trailing bytes")]
-    TrailingBytes(usize),
-}
-
 /// Reads a value from its `zcashd` RPC encoding.
 ///
 /// # Implementation
@@ -57,6 +40,23 @@ pub enum RpcDecodeError {
 pub trait FromRpc: Sized {
     /// Reads the value from the RPC bytes.
     fn from_rpc_bytes(bytes: &[u8]) -> Result<Self, RpcDecodeError>;
+}
+
+/// An error from [`FromRpc`].
+#[derive(Debug, thiserror::Error)]
+pub enum RpcDecodeError {
+    /// The root does not have 32 bytes.
+    #[error("tree root has {0} bytes, not 32")]
+    RootLength(usize),
+    /// The root bytes are not a valid field element.
+    #[error("tree root is not valid")]
+    Root(#[from] SerializationError),
+    /// The commitment tree encoding is not valid.
+    #[error("commitment tree encoding is not valid")]
+    Tree(#[from] io::Error),
+    /// Bytes remain after the commitment tree encoding.
+    #[error("commitment tree encoding has {0} trailing bytes")]
+    TrailingBytes(usize),
 }
 
 impl FromRpc for sapling::tree::Root {

@@ -23,6 +23,14 @@ const PROTOBUF_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<
 /// height, the previous hash of the first block, and the hash of the last block.
 pub const RANGE_ENVELOPE_BYTES: usize = 1 + 2 * size_of::<u32>() + 2 * size_of::<block::Hash>();
 
+/// A record that [`write_range`] can put into a range.
+trait RangeRecord {
+    /// The height, the hash, and the previous hash of the record.
+    fn id(&self) -> Result<(u32, block::Hash, block::Hash), CodecError>;
+    /// Writes the record encoding at the end of `bytes`.
+    fn write_to(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError>;
+}
+
 /// Owned record views: no LMDB transaction or mapped slice escapes a read call.
 pub trait StoredBlock: Sized {
     fn decode(bytes: &[u8]) -> Result<Self, CodecError>;
@@ -317,14 +325,6 @@ pub fn encode_range_from_bytes(parts: &[&[u8]]) -> Result<Vec<u8>, CodecError> {
         len.checked_add(size_of::<u32>() + part.len()).ok_or(CodecError::Length)
     })?;
     write_range(parts, body_len)
-}
-
-/// A record that [`write_range`] can put into a range.
-trait RangeRecord {
-    /// The height, the hash, and the previous hash of the record.
-    fn id(&self) -> Result<(u32, block::Hash, block::Hash), CodecError>;
-    /// Writes the record encoding at the end of `bytes`.
-    fn write_to(&self, bytes: &mut Vec<u8>) -> Result<(), CodecError>;
 }
 
 impl RangeRecord for CompactBlockRecord {
