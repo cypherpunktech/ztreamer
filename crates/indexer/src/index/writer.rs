@@ -8,13 +8,13 @@ use std::iter::Peekable;
 
 use heed::{Env, RwTxn};
 
+use super::batch::{EncodedBatch, EncodedBlock};
 use super::{
     BlockId, IndexError, IndexState, RANGE_SIZE,
     range_meta::{RangeMeta, VerifyState},
     tables::{RangeChain, Tables, range_start},
     telemetry::{WriteStage, WriteTimer, record_state_metrics},
 };
-use crate::ingest::{EncodedBatch, EncodedBlock};
 use ztreamer_chain::codec::{
     CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes,
 };

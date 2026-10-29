@@ -119,11 +119,11 @@ use std::{fs, io, path::Path, time::Instant};
 use heed::{Env, EnvOpenOptions, RwTxn};
 use zakura_chain::block;
 
-use crate::ingest::{EncodedBatch, WriteBatch};
 use ztreamer_chain::codec::CompactBlockRecord;
 #[cfg(any(test, feature = "test-utils"))]
 use ztreamer_chain::codec::TreeSizes;
 
+mod batch;
 mod checked_range;
 mod error;
 mod metadata;
@@ -133,6 +133,8 @@ mod state;
 mod tables;
 mod telemetry;
 mod writer;
+pub(crate) use batch::EncodedBatch;
+pub use batch::WriteBatch;
 pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
 use metadata::Metadata;
