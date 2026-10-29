@@ -53,6 +53,7 @@ ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
 ztreamer-snapshot = { path = "../snapshot" }
+ztreamer-sync = { path = "../sync" }
 
 [dev-dependencies]
 criterion = "0.8"

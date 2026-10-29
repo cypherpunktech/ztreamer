@@ -78,6 +78,12 @@ impl IndexState {
         self.tree_sizes
     }
 
+    /// The state with its durable tip at `tip`, and `tree_sizes` at that tip. The other fields
+    /// do not change. A replacement from a common ancestor builds on this state.
+    pub const fn with_durable_tip(self, tip: BlockId, tree_sizes: TreeSizes) -> Self {
+        Self { durable_tip: Some(tip), tree_sizes, ..self }
+    }
+
     /// Returns the first height of the next range to seal: `sealed_through + 1`, or 0 if no range
     /// is sealed.
     pub(crate) fn next_range_start(&self) -> Result<u32, IndexError> {

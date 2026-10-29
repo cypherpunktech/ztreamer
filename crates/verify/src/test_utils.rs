@@ -41,7 +41,6 @@ use ztreamer_chain::{
     test_utils::raw_block,
     types::RawIndexBlock,
 };
-use ztreamer_indexer::head::ServingSnapshot;
 use ztreamer_indexer::{
     index::{Index, IndexState},
     test_utils::{populate, range_meta_row, sealed_range_blob},
@@ -52,6 +51,7 @@ use ztreamer_protocol::replicate::{
     replicator_server::{Replicator, ReplicatorServer},
 };
 use ztreamer_snapshot::manifest_entry::{BlobDigest, ManifestEntry};
+use ztreamer_sync::head::ServingSnapshot;
 
 use crate::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
 use ztreamer_snapshot::{layout::RangePath, manifest::Manifest};

@@ -55,9 +55,9 @@
 //! writes the `range_meta` row. Thus the Replicator and `export-snapshot` serve each sealed
 //! range of a replica, not only the imported ranges.
 //!
-//! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
+//! [`HistoricalPipeline`]: ztreamer_sync::pipeline::HistoricalPipeline
 //! [`StateBackend`]: ztreamer_backend::StateBackend
-//! [`HeadFollower::follow_head`]: ztreamer_indexer::head::HeadFollower::follow_head
+//! [`HeadFollower::follow_head`]: ztreamer_sync::head::HeadFollower::follow_head
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 

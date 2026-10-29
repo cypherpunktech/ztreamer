@@ -25,17 +25,17 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
-use ztreamer_indexer::{
-    head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
-    index::{Index, IndexState, range_meta::NodeId},
-    pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
-};
+use ztreamer_indexer::index::{Index, IndexState, range_meta::NodeId};
 use ztreamer_node as node;
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
 use ztreamer_service::CompactService;
+use ztreamer_sync::{
+    head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
+    pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
+};
 use ztreamer_verify::{RangeMetaFiller, ReplicatorService};
 
 use embedded::{Embedded, EmbeddedNode};

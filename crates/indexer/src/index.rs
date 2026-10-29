@@ -133,8 +133,7 @@ mod state;
 mod tables;
 mod telemetry;
 mod writer;
-pub(crate) use batch::EncodedBatch;
-pub use batch::WriteBatch;
+pub use batch::{EncodedBatch, WriteBatch};
 pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
 use metadata::Metadata;
@@ -381,7 +380,7 @@ impl Index {
     }
 
     /// Atomically writes a batch with encoded records and packs newly sealed ranges.
-    pub(crate) fn write_encoded(&self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
+    pub fn write_encoded(&self, batch: EncodedBatch) -> Result<IndexState, IndexError> {
         IndexWriter::start(&self.env, self.tables, batch.base_generation)?.append(batch)
     }
 

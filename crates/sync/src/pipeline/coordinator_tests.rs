@@ -6,13 +6,13 @@ use std::sync::{
 };
 
 use super::*;
-use crate::ingest::OrderedBuilder;
 use zakura_chain::{parameters::GENESIS_PREVIOUS_BLOCK_HASH, transaction};
 use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     test_utils::hash,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, ParsedCompactBlock},
 };
+use ztreamer_indexer::ingest::OrderedBuilder;
 
 struct Fixture {
     count: u32,
@@ -564,12 +564,10 @@ fn worker_panic_returns_an_error_and_keeps_a_valid_prefix() {
 
 #[tokio::test]
 async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
-    use crate::{
-        head::{CanonicalBlockSource, HeadError, sync_head_once},
-        index::BlockId,
-    };
+    use crate::head::{CanonicalBlockSource, HeadError, sync_head_once};
     use zakura_chain::transaction;
     use ztreamer_chain::types::RawIndexBlock;
+    use ztreamer_indexer::index::BlockId;
 
     // The live source is asked only for the historical anchor and new empty blocks.
     struct Live {

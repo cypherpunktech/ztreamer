@@ -16,8 +16,9 @@ use ztreamer_backend::StateBackend;
 use crate::telemetry::ServiceMetrics;
 
 use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock};
-use ztreamer_indexer::{head::ServingSnapshot, index::Index};
+use ztreamer_indexer::index::Index;
 use ztreamer_protocol::{RpcStream, proto};
+use ztreamer_sync::head::ServingSnapshot;
 
 mod address;
 mod blocks;

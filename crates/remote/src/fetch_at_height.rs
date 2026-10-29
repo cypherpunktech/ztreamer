@@ -2,8 +2,8 @@
 
 use ztreamer_blocking::BlockingTaskCancelled;
 use ztreamer_chain::types::BlockAtHeightError;
-use ztreamer_indexer::head::HeadError;
 use ztreamer_jsonrpc::RpcError;
+use ztreamer_sync::head::HeadError;
 
 /// Why [`ZakuraClient::block_at_height`](crate::ZakuraClient::block_at_height) gave no block.
 #[derive(Debug, thiserror::Error)]

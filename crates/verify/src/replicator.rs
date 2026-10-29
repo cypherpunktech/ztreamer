@@ -17,10 +17,7 @@ use prost::bytes::Bytes;
 use tokio::sync::{Semaphore, watch};
 use tonic::{Request, Response, Status};
 use zakura_chain::parameters::Network;
-use ztreamer_indexer::{
-    head::ServingSnapshot,
-    index::{Index, IndexError, range_meta::VerifyState},
-};
+use ztreamer_indexer::index::{Index, IndexError, range_meta::VerifyState};
 use ztreamer_protocol::{
     RpcStream,
     replicate::{
@@ -29,6 +26,7 @@ use ztreamer_protocol::{
     },
 };
 use ztreamer_snapshot::manifest_entry::MANIFEST_VERSION;
+use ztreamer_sync::head::ServingSnapshot;
 
 /// The largest `data` of one [`RangeChunk`].
 pub(crate) const CHUNK_BYTES: usize = 1 << 20;

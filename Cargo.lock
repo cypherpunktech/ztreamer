@@ -4793,10 +4793,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "tracing",
  "zakura-chain",
  "zakura-test",
- "ztreamer-blocking",
  "ztreamer-chain",
  "ztreamer-indexer",
  "ztreamer-protocol",
@@ -4845,6 +4843,7 @@ dependencies = [
  "ztreamer-indexer",
  "ztreamer-protocol",
  "ztreamer-service",
+ "ztreamer-sync",
 ]
 
 [[package]]
@@ -4908,6 +4907,7 @@ dependencies = [
  "ztreamer-remote",
  "ztreamer-service",
  "ztreamer-snapshot",
+ "ztreamer-sync",
 ]
 
 [[package]]
@@ -4936,6 +4936,7 @@ dependencies = [
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",
+ "ztreamer-sync",
 ]
 
 [[package]]
@@ -4954,6 +4955,25 @@ dependencies = [
  "ztreamer-chain",
  "ztreamer-protocol",
  "ztreamer-snapshot",
+]
+
+[[package]]
+name = "ztreamer-sync"
+version = "0.1.0"
+dependencies = [
+ "heed",
+ "metrics",
+ "metrics-util",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tonic",
+ "tracing",
+ "zakura-chain",
+ "zakura-test",
+ "ztreamer-blocking",
+ "ztreamer-chain",
+ "ztreamer-indexer",
 ]
 
 [[package]]
@@ -4998,6 +5018,7 @@ dependencies = [
  "ztreamer-remote",
  "ztreamer-service",
  "ztreamer-snapshot",
+ "ztreamer-sync",
 ]
 
 [[package]]
@@ -5035,5 +5056,6 @@ dependencies = [
  "ztreamer-remote",
  "ztreamer-service",
  "ztreamer-snapshot",
+ "ztreamer-sync",
  "ztreamer-verify",
 ]

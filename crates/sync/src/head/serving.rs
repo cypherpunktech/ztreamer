@@ -5,8 +5,8 @@
 
 use std::{sync::Arc, time::Instant};
 
-use crate::index::{BlockId, IndexState};
 use ztreamer_chain::codec::CompactBlockRecord;
+use ztreamer_indexer::index::{BlockId, IndexState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServingSnapshot {

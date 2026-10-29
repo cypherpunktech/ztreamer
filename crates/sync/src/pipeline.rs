@@ -19,13 +19,13 @@ use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
 
-use crate::{
-    index::{EncodedBatch, Index, IndexError, IndexState, WriteBatch},
-    ingest::{IngestError, OrderedBuilder, partial_range_flush_threshold},
-};
 use ztreamer_chain::{
     parser::CompactParseError,
     types::{BlockAtHeightError, RawBlockError},
+};
+use ztreamer_indexer::{
+    index::{EncodedBatch, Index, IndexError, IndexState, WriteBatch},
+    ingest::{IngestError, OrderedBuilder, partial_range_flush_threshold},
 };
 
 const MIB: usize = 1024 * 1024;
@@ -213,7 +213,8 @@ pub trait HistoricalSource: Sync {
 ///
 /// ```no_run
 /// # use std::sync::atomic::AtomicBool;
-/// # use ztreamer_indexer::{index::Index, pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig, PipelineError}};
+/// # use ztreamer_indexer::index::Index;
+/// # use ztreamer_sync::pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig, PipelineError};
 /// # fn run(index: &Index, source: &impl HistoricalSource, stop: &AtomicBool) -> Result<(), PipelineError> {
 /// let state = HistoricalPipeline::new(index, source, PipelineConfig::default())?
 ///     .with_stop(stop)
@@ -425,7 +426,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         let mut stats = WriteStats::default();
         while let Ok(batch) = batch_rx.recv() {
             stats.batches += 1;
-            let blocks = batch.blocks.len() as u64;
+            let blocks = batch.block_count() as u64;
             stats.blocks += blocks;
             let started = Instant::now();
             let written = self.index.write_encoded(batch);

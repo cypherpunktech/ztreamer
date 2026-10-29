@@ -21,6 +21,7 @@ ztreamer-backend = { path = "../backend" }
 ztreamer-chain = { path = "../chain" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-service = { path = "../service" }
+ztreamer-sync = { path = "../sync" }
 
 [dev-dependencies]
 tempfile = "3"

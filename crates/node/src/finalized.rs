@@ -9,7 +9,7 @@ use zakura_chain::{
 };
 use zakura_state::{TransactionLocation, ZakuraDb};
 use ztreamer_chain::parser::parse_stored_block;
-use ztreamer_indexer::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
+use ztreamer_sync::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
 
 /// Zakura's finalized database as a [`HistoricalSource`]. [`NodeClient::finalized_db`] gives it.
 ///
