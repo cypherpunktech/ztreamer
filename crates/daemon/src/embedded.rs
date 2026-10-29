@@ -15,7 +15,7 @@ use ztreamer_p2p::P2pCompactService;
 use crate::{
     DaemonConfig,
     application::{NodeSources, run_application},
-    lifecycle,
+    lifecycle::Supervisor,
 };
 
 /// An embedded Zakura node, from its configuration.
@@ -90,7 +90,11 @@ impl EmbeddedNode {
             .await
         };
 
-        lifecycle::supervise(node, application, shutdown.clone(), signal).await
+        Supervisor::new()
+            .until_shutdown(node, "Zakura stopped unexpectedly")
+            .finite(application)
+            .run_until_signal(signal, &shutdown)
+            .await
     }
 }
 

@@ -25,7 +25,7 @@ use ztreamer_remote::{
 use crate::{
     DaemonConfig,
     application::{NodeSources, run_application},
-    lifecycle,
+    lifecycle::Supervisor,
     replicate::{Replica, ReplicaSource},
 };
 
@@ -143,17 +143,9 @@ impl RemoteNode {
         let url = self.client.rpc().url();
         info!(host = url.host(), port = url.port_u16(), "using remote zakura");
         let shutdown = CancellationToken::new();
-        // No node runs in this process. Thus the node half of the lifecycle only waits for the
-        // shutdown, and `supervise` can drain it.
-        let node = {
-            let shutdown = shutdown.clone();
-            async move {
-                shutdown.cancelled().await;
-                Ok(())
-            }
-        };
+        // No node runs in this process. Thus the supervisor runs only the application.
         let application = self.application(config, grpc_server, shutdown.clone());
-        lifecycle::supervise(node, application, shutdown, signal).await
+        Supervisor::new().finite(application).run_until_signal(signal, &shutdown).await
     }
 
     /// Reads the network from the node and opens the index of that network, as the embedded

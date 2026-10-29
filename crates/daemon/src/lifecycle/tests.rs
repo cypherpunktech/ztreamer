@@ -5,6 +5,21 @@ use tokio::{sync::oneshot, time::timeout};
 
 use super::*;
 
+/// The supervisor of the embedded mode: `node` must run until shutdown, and `application` can
+/// complete its work.
+async fn supervise(
+    node: impl Future<Output = Result<()>>,
+    application: impl Future<Output = Result<()>>,
+    shutdown: CancellationToken,
+    signal: impl Future<Output = Result<()>>,
+) -> Result<()> {
+    Supervisor::new()
+        .until_shutdown(node, "Zakura stopped unexpectedly")
+        .finite(application)
+        .run_until_signal(signal, &shutdown)
+        .await
+}
+
 /// [`supervise`], with a panic when it does not finish within five seconds.
 async fn supervise_within_five_seconds(
     node: impl Future<Output = Result<()>>,
@@ -150,25 +165,49 @@ async fn signal_failure_still_drains_both_futures() {
 }
 
 #[tokio::test]
-async fn drain_both_reuses_taken_results_and_awaits_the_rest() {
-    let polled = Cell::new(false);
-    let (a, b) = timeout(
-        Duration::from_secs(5),
-        drain_both(
-            (
-                async {
-                    polled.set(true);
-                    0
-                },
-                Some(1),
-            ),
-            (async { 2 }, None),
-        ),
-    )
-    .await
-    .unwrap();
-    assert_eq!((a, b), (1, 2));
-    assert!(!polled.get());
+async fn the_first_error_in_the_order_of_the_tasks_is_the_result() {
+    let shutdown = CancellationToken::new();
+    let drained = Cell::new(0);
+    let task = |result: Result<()>| async {
+        shutdown.cancelled().await;
+        tokio::task::yield_now().await;
+        drained.set(drained.get() + 1);
+        result
+    };
+    let supervisor = Supervisor::new()
+        .until_shutdown(task(Ok(())), "stopped")
+        .until_shutdown(task(Err(eyre!("second failed"))), "stopped")
+        .until_shutdown(task(Err(eyre!("third failed"))), "stopped")
+        .until_shutdown(async { Ok(()) }, "the fourth task stopped unexpectedly");
+
+    let error =
+        timeout(Duration::from_secs(5), supervisor.run(future::pending(), || shutdown.cancel()))
+            .await
+            .unwrap()
+            .unwrap_err();
+
+    assert_eq!(error.to_string(), "second failed");
+    assert_eq!(drained.get(), 3);
+}
+
+#[tokio::test]
+async fn a_task_that_stops_first_gives_its_unexpected_stop() {
+    let shutdown = CancellationToken::new();
+    let waits = async {
+        shutdown.cancelled().await;
+        Ok(())
+    };
+    let supervisor = Supervisor::new()
+        .until_shutdown(waits, "the first task stopped unexpectedly")
+        .until_shutdown(async { Ok(()) }, "the second task stopped unexpectedly");
+
+    let error =
+        timeout(Duration::from_secs(5), supervisor.run(future::pending(), || shutdown.cancel()))
+            .await
+            .unwrap()
+            .unwrap_err();
+
+    assert_eq!(error.to_string(), "the second task stopped unexpectedly");
 }
 
 use std::{
