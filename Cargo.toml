@@ -50,3 +50,11 @@ inherits = "dev"
 strip = true
 debug = false
 incremental = false
+
+# The fastest portable build, for production: `just maxperf`. Fat LTO with one codegen unit
+# lets the optimizer inline across all crates, so ztreamer's own code runs faster. `panic` stays
+# `unwind`: zakura-network does not compile with `abort`.
+[profile.maxperf]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
