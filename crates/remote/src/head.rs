@@ -3,15 +3,13 @@
 use crate::{FetchAtHeightError, ZakuraClient};
 use zakura_chain::block;
 use ztreamer_chain::types::RawIndexBlock;
-use ztreamer_indexer::{
-    head::{CanonicalBlockSource, HeadError},
-    index::BlockId,
-};
+use ztreamer_indexer::index::BlockId;
+use ztreamer_sync::head::{CanonicalBlockSource, HeadError};
 
 /// The canonical head of a remote zakura node, read over JSON-RPC.
 ///
-/// [`HeadFollower::sync_head`](ztreamer_indexer::head::HeadFollower::sync_head) and
-/// [`HeadFollower::follow_head`](ztreamer_indexer::head::HeadFollower::follow_head) use it as
+/// [`HeadFollower::sync_head`](ztreamer_sync::head::HeadFollower::sync_head) and
+/// [`HeadFollower::follow_head`](ztreamer_sync::head::HeadFollower::follow_head) use it as
 /// they use the embedded node. Each [`CanonicalBlockSource::block_hash`] call sends one `getblockhash`
 /// request. Each [`CanonicalBlockSource::block`] call sends one `getblock` request with the
 /// height and verbosity 0. The block bytes go into the index without a second serialization.
@@ -56,7 +54,7 @@ impl CanonicalBlockSource for RemoteHeadSource {
     /// It decodes the block on the blocking thread pool. The hash comes from the block. [`poll_canonical_head`] checks that each block links to
     /// the block below it. After the reads, it reads the hash of the last block again.
     ///
-    /// [`poll_canonical_head`]: ztreamer_indexer::head::poll_canonical_head
+    /// [`poll_canonical_head`]: ztreamer_sync::head::poll_canonical_head
     async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
         match self.node.block_at_height(height).await {
             Ok(block) => Ok(Some(block)),

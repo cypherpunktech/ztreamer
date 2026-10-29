@@ -17,8 +17,8 @@ use std::{
     time::Duration,
 };
 
-use crate::ingest::IngestError;
 use ztreamer_chain::{codec::CompactBlockRecord, types::ParsedCompactBlock};
+use ztreamer_indexer::ingest::IngestError;
 
 use super::PipelineError;
 

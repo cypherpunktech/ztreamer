@@ -18,9 +18,14 @@ pub struct WriteBatch {
 }
 
 impl WriteBatch {
+    /// The records of the batch, in height order.
+    pub fn into_records(self) -> Vec<CompactBlockRecord> {
+        self.records
+    }
+
     /// Encodes all records on a maximum of `threads` scoped threads. The result keeps the
     /// encoded bytes and the identity of each block, but not the decoded transactions.
-    pub(crate) fn encode(self, threads: usize) -> Result<EncodedBatch, CodecError> {
+    pub fn encode(self, threads: usize) -> Result<EncodedBatch, CodecError> {
         let end_tree_sizes =
             self.records.last().expect("builders never emit empty batches").end_tree_sizes;
         let encode = |records: &[CompactBlockRecord]| {
@@ -65,7 +70,8 @@ impl WriteBatch {
 
 /// A [`WriteBatch`] with encoded records. It does not keep the decoded transactions, so it
 /// uses less memory while it waits for the writer.
-pub(crate) struct EncodedBatch {
+#[derive(Debug)]
+pub struct EncodedBatch {
     pub(crate) base_generation: u64,
     pub(crate) seal_through: Option<u32>,
     pub(crate) blocks: Vec<EncodedBlock>,
@@ -73,7 +79,15 @@ pub(crate) struct EncodedBatch {
     pub(crate) end_tree_sizes: TreeSizes,
 }
 
+impl EncodedBatch {
+    /// The number of blocks in the batch.
+    pub const fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
+}
+
 /// One encoded block record, with the identity that the writer needs.
+#[derive(Debug)]
 pub(crate) struct EncodedBlock {
     pub(crate) height: u32,
     pub(crate) hash: block::Hash,

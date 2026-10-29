@@ -149,14 +149,12 @@ mod tests {
     use zakura_chain::{block, parameters::Network};
     use zakura_rpc::client::GetBlockchainInfoResponse;
     use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
-    use ztreamer_indexer::{
-        head::ServingSnapshot,
-        index::{BlockId, Index},
-    };
+    use ztreamer_indexer::index::{BlockId, Index};
     use ztreamer_remote::{
         RemoteBackend, RpcClient, ZakuraClient,
         test_utils::{MockNode, Reply},
     };
+    use ztreamer_sync::head::ServingSnapshot;
 
     /// A service over an empty index and a remote node with an empty mempool, and the sender of
     /// its snapshots. Its head is fresh.

@@ -82,10 +82,7 @@ impl std::fmt::Debug for OrderedBuilder {
 /// The value is `max_pending_bytes` minus the larger of one batch and one record of maximum
 /// size. The channel always lets the block at `first_missing_height` through. Because of this
 /// room, that block cannot make `pending` more than `max_pending_bytes`.
-pub(crate) fn partial_range_flush_threshold(
-    max_pending_bytes: usize,
-    max_batch_bytes: usize,
-) -> usize {
+pub fn partial_range_flush_threshold(max_pending_bytes: usize, max_batch_bytes: usize) -> usize {
     max_pending_bytes.saturating_sub(max_batch_bytes.max(MAX_RECORD_BYTES))
 }
 
@@ -134,16 +131,17 @@ impl OrderedBuilder {
     }
 
     /// Encoded-size estimate, including the contiguous ready prefix.
-    pub(crate) const fn pending_bytes(&self) -> usize {
+    pub const fn pending_bytes(&self) -> usize {
         self.pending_bytes
     }
 
     /// First height not yet in the contiguous prefix; may equal target + 1.
-    pub(crate) const fn first_missing_height(&self) -> u64 {
+    pub const fn first_missing_height(&self) -> u64 {
         self.ready_end
     }
 
-    pub(crate) const fn ready_bytes(&self) -> usize {
+    /// Encoded-size estimate of the contiguous ready prefix.
+    pub const fn ready_bytes(&self) -> usize {
         self.ready_bytes
     }
 

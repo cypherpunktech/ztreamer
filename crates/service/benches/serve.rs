@@ -15,12 +15,12 @@ use ztreamer_chain::{
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 use ztreamer_indexer::{
-    head::HeadFollower,
     index::{Index, IndexState},
     ingest::OrderedBuilder,
 };
 use ztreamer_protocol::proto;
 use ztreamer_service::CompactService;
+use ztreamer_sync::head::HeadFollower;
 
 const TIP: u32 = 2_005;
 

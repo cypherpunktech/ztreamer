@@ -28,12 +28,10 @@ use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 use ztreamer_chain::codec::CompactBlockRecord;
-use ztreamer_indexer::{
-    head::HeadFollower,
-    index::{Index, IndexState},
-};
+use ztreamer_indexer::index::{Index, IndexState};
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_protocol::wire::compact_tx_streamer_server::CompactTxStreamerServer;
+use ztreamer_sync::head::HeadFollower;
 
 /// A gRPC client for the CompactTxStreamer service.
 pub type Client = CompactTxStreamerClient<Channel>;

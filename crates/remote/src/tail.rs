@@ -11,10 +11,8 @@ use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
 
 use ztreamer_chain::{parser::parse_block, types::RawIndexBlock};
-use ztreamer_indexer::{
-    index::SEAL_DEPTH,
-    pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats},
-};
+use ztreamer_indexer::index::SEAL_DEPTH;
+use ztreamer_sync::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
 
 /// The number of `getblock` requests that one worker keeps in flight.
 const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
@@ -42,11 +40,11 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 /// worker keeps a fixed number of requests in flight ahead of the block that it waits for. The
 /// requests continue while the worker parses and sends a block, and while it waits for
 /// read-ahead budget. The node thus gets up to
-/// [`PipelineConfig::workers`](ztreamer_indexer::pipeline::PipelineConfig::workers) times that
+/// [`PipelineConfig::workers`](ztreamer_sync::pipeline::PipelineConfig::workers) times that
 /// number of `getblock` requests at the same time.
 ///
 /// ```no_run
-/// use ztreamer_indexer::pipeline::{HistoricalPipeline, PipelineConfig};
+/// use ztreamer_sync::pipeline::{HistoricalPipeline, PipelineConfig};
 /// # use ztreamer_indexer::index::Index;
 /// use ztreamer_remote::{RemoteTailSource, RpcClient, ZakuraClient};
 ///
@@ -263,11 +261,8 @@ mod tests {
     use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 
     use ztreamer_chain::{codec::CompactBlockRecord, test_utils::grow_chain};
-    use ztreamer_indexer::{
-        index::BlockId,
-        pipeline::{HistoricalPipeline, PipelineConfig},
-        test_utils::open_index,
-    };
+    use ztreamer_indexer::{index::BlockId, test_utils::open_index};
+    use ztreamer_sync::pipeline::{HistoricalPipeline, PipelineConfig};
 
     use super::*;
 

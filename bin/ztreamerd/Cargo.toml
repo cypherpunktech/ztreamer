@@ -29,6 +29,7 @@ ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
 ztreamer-snapshot = { path = "../../crates/snapshot" }
+ztreamer-sync = { path = "../../crates/sync" }
 ztreamer-verify = { path = "../../crates/verify" }
 ztreamer-node = { path = "../../crates/node" }
 ztreamer-p2p = { path = "../../crates/p2p" }

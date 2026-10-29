@@ -7,15 +7,15 @@ use zakura_chain::{
 
 use ztreamer_blocking::BlockingTaskCancelled;
 
-use crate::{
-    index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
-    ingest::{IngestError, OrderedBuilder},
-    pipeline::PipelineConfig,
-};
+use crate::pipeline::PipelineConfig;
 use ztreamer_chain::{
     codec::CompactBlockRecord,
     parser::{CompactParseError, parse_block},
     types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
+};
+use ztreamer_indexer::{
+    index::{BlockId, Index, IndexError, IndexState, PERSIST_DEPTH, SEAL_DEPTH},
+    ingest::{IngestError, OrderedBuilder},
 };
 
 mod follower;
@@ -271,19 +271,13 @@ pub async fn sync_head_once(
         .collect::<Result<Vec<_>, _>>()?;
     // With no record above the ancestor, the ancestor is the common block.
     let common_record = canonical.last().unwrap_or(&ancestor_record);
-    let base_state = IndexState {
-        durable_tip: Some(common),
-        sealed_through: state.sealed_through(),
-        verified_through: state.verified_through(),
-        generation: state.generation(),
-        tree_sizes: common_record.end_tree_sizes,
-    };
+    let base_state = state.with_durable_tip(common, common_record.end_tree_sizes);
     let mut builder = OrderedBuilder::new(base_state, config.max_pending_bytes)?;
     for block in suffix.blocks.into_iter().filter(|block| block.height > common.height) {
         builder.push(block)?;
     }
     while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        canonical.extend(batch.records);
+        canonical.extend(batch.into_records());
     }
 
     let new_durable_through = visible_tip.checked_sub(PERSIST_DEPTH);
@@ -342,20 +336,15 @@ pub async fn recover_deep_reorg(
         .ok_or(HeadSyncError::NoCommonAncestor)?;
     let prepared = poll_canonical_head(source, matching + 1, common.hash, &[]).await?.blocks;
     let visible_tip = prepared.last().map_or(matching, |block| block.height);
-    let base_state = IndexState {
-        durable_tip: Some(BlockId::new(common.height, common.hash)),
-        sealed_through: state.sealed_through(),
-        verified_through: state.verified_through(),
-        generation: state.generation(),
-        tree_sizes: common.end_tree_sizes,
-    };
+    let base_state =
+        state.with_durable_tip(BlockId::new(common.height, common.hash), common.end_tree_sizes);
     let mut builder = OrderedBuilder::new(base_state, config.max_pending_bytes)?;
     for block in prepared {
         builder.push(block)?;
     }
     let mut canonical = Vec::new();
     while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        canonical.extend(batch.records);
+        canonical.extend(batch.into_records());
     }
 
     let durable_tip =
@@ -402,7 +391,7 @@ async fn sync_extension_once(
 
     let mut volatile = Vec::new();
     while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        volatile.extend(batch.records);
+        volatile.extend(batch.into_records());
     }
     Ok((state, volatile))
 }

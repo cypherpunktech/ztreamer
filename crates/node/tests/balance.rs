@@ -11,13 +11,11 @@ use zakura_chain::{
 };
 use zakura_state::{Config, Request};
 use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_GENESIS_BYTES};
-use ztreamer_indexer::{
-    head::HeadFollower,
-    index::{Index, IndexState},
-};
+use ztreamer_indexer::index::{Index, IndexState};
 use ztreamer_node::InProcessBackend;
 use ztreamer_protocol::proto::{self, compact_tx_streamer_client::CompactTxStreamerClient};
 use ztreamer_service::{CompactService, test_utils::LocalServer};
+use ztreamer_sync::head::HeadFollower;
 
 #[tokio::test]
 async fn streamed_balance_deduplicates_and_limits_addresses() {

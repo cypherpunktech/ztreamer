@@ -1,0 +1,29 @@
+[package]
+name = "ztreamer-sync"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "Keep the ztreamer index at the node tip: the historical pass and the head follower"
+
+[lints]
+workspace = true
+
+[dependencies]
+metrics = "0.24"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tonic = "0.14.6"
+tracing = "0.1"
+zakura-chain.workspace = true
+ztreamer-blocking = { path = "../blocking" }
+ztreamer-chain = { path = "../chain" }
+ztreamer-indexer = { path = "../indexer" }
+
+[dev-dependencies]
+heed = { version = "0.22.1", default-features = false }
+metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+zakura-test.workspace = true
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
+ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
