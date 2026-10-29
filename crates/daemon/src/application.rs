@@ -28,7 +28,7 @@ use ztreamer_replicator::{RangeMetaFiller, ReplicatorService};
 use ztreamer_service::CompactService;
 use ztreamer_sync::{
     head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, HeadSyncError},
-    pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig},
+    pipeline::{FinalizedBlockSource, HistoricalPipeline, PipelineConfig},
 };
 
 use crate::{DaemonConfig, ServerConfig, SyncConfig, embedded::Embedded, lifecycle};
@@ -60,7 +60,7 @@ pub(crate) async fn run_application<T, H, B>(
     shutdown: CancellationToken,
 ) -> Result<()>
 where
-    T: HistoricalSource + Send + 'static,
+    T: FinalizedBlockSource + Send + 'static,
     H: CanonicalBlockSource + Clone + 'static,
     B: StateBackend,
 {
@@ -106,7 +106,7 @@ where
 /// Runs the historical index pass. Breaks if shutdown stopped the pass, which is an error
 /// with `index_only` because the index was the whole job.
 async fn sync_historical(
-    source: impl HistoricalSource + Send + 'static,
+    source: impl FinalizedBlockSource + Send + 'static,
     index: &Arc<Index>,
     pipeline: PipelineConfig,
     index_only: bool,

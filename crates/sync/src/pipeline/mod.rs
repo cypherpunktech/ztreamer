@@ -59,7 +59,7 @@ const STOP_POLL: Duration = Duration::from_millis(50);
 /// - A block whose serialized size plus 32 bytes per transaction id exceeds `max_source_bytes`
 ///   is reported as [`PipelineError::BlockExceedsByteLimit`], not sent.
 /// - A block body the source no longer has is [`PipelineError::MissingBody`].
-pub trait HistoricalSource: Sync {
+pub trait FinalizedBlockSource: Sync {
     /// The highest finalized block, or `None` when the source has no blocks yet.
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError>;
     /// The hash of the finalized block at `height`, or `None` when the source has no such block.
@@ -79,8 +79,8 @@ pub trait HistoricalSource: Sync {
     ) -> Result<(), PipelineError>;
 }
 
-/// Per-worker timing and volume counters. A [`HistoricalSource`] fills these in
-/// [`HistoricalSource::process_segment`]; the pipeline sums them over all workers and logs the
+/// Per-worker timing and volume counters. A [`FinalizedBlockSource`] fills these in
+/// [`FinalizedBlockSource::process_segment`]; the pipeline sums them over all workers and logs the
 /// totals at the end of a pass.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkerStats {
@@ -203,7 +203,7 @@ impl From<BlockAtHeightError> for PipelineError {
     }
 }
 
-/// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
+/// The historical pass over one [`FinalizedBlockSource`]: fetch-and-parse workers feed one
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
 /// `ztreamerd` builds one over `ztreamer_embedded::FinalizedDb` or over
@@ -213,8 +213,8 @@ impl From<BlockAtHeightError> for PipelineError {
 /// ```no_run
 /// # use std::sync::atomic::AtomicBool;
 /// # use ztreamer_index::index::Index;
-/// # use ztreamer_sync::pipeline::{HistoricalPipeline, HistoricalSource, PipelineConfig, PipelineError};
-/// # fn run(index: &Index, source: &impl HistoricalSource, stop: &AtomicBool) -> Result<(), PipelineError> {
+/// # use ztreamer_sync::pipeline::{FinalizedBlockSource, HistoricalPipeline, PipelineConfig, PipelineError};
+/// # fn run(index: &Index, source: &impl FinalizedBlockSource, stop: &AtomicBool) -> Result<(), PipelineError> {
 /// let state = HistoricalPipeline::new(index, source, PipelineConfig::default())?
 ///     .with_stop(stop)
 ///     .sync_until_stable()?;
@@ -237,7 +237,7 @@ impl<S> std::fmt::Debug for HistoricalPipeline<'_, S> {
     }
 }
 
-impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
+impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
     /// Builds a pipeline over `db` that writes into `index`. Fails with
     /// [`PipelineError::Config`] when a limit in `config` is zero or out of range.
     pub fn new(index: &'a Index, db: &'a S, config: PipelineConfig) -> Result<Self, PipelineError> {

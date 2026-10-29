@@ -44,7 +44,7 @@ impl Fixture {
     }
 }
 
-impl HistoricalSource for Fixture {
+impl FinalizedBlockSource for Fixture {
     fn tip(&self) -> Result<Option<(Height, block::Hash)>, PipelineError> {
         Ok(self.count.checked_sub(1).map(|height| (Height(height), hash(height))))
     }
