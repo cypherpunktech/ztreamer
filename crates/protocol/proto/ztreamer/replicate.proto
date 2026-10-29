@@ -27,6 +27,9 @@ message ExportInfo {
     uint32 manifest_version = 3;
     // The highest sealed height. Not set when no range is sealed.
     optional uint32 sealed_through = 4;
+    // The end height of the range_meta rows that follow each other from height 0. The source can
+    // serve the ranges to this height. Not set when the range at height 0 has no row.
+    optional uint32 filled_through = 5;
 }
 
 message ListRangesRequest {

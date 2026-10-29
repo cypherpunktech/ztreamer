@@ -174,6 +174,21 @@ fn export_closes_the_last_epoch_at_the_last_range() {
 }
 
 #[test]
+fn rows_stop_at_the_filled_through_height() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = [(0, false), (1_000, false), (3_000, false)];
+    let (index, entries) = index_with_rows(dir.path(), 4, &rows);
+    let filled_through = index.latest().unwrap().range_meta_filled_through().unwrap();
+
+    let rows = Rows::read(&index).unwrap();
+
+    assert_eq!(filled_through, Some(1_999));
+    assert_eq!(rows.entries.last().map(|entry| entry.end_height), filled_through);
+    assert_eq!(rows.entries, entries[..2]);
+    assert_eq!(rows.missing, 2);
+}
+
+#[test]
 fn an_index_without_a_row_at_genesis_is_refused() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let (index, _) = index_with_rows(dir.path(), 3, &[(1_000, false)]);

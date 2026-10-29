@@ -18,6 +18,8 @@ use ztreamer_protocol::{
 use ztreamer_service::{CompactService, test_utils::EmptyChain};
 use ztreamer_snapshot::manifest_entry::{Frontiers, ManifestEntry as Entry};
 
+use crate::test_utils::index_with_rows;
+
 /// Five sealed ranges. Ranges 0, 1,000 and 2,000 have rows, range 3,000 has none, and the
 /// row of range 4,000 is rejected.
 struct Fixture {
@@ -112,8 +114,52 @@ async fn export_info_describes_the_index() {
             genesis_hash: Network::Mainnet.genesis_hash().0.to_vec(),
             manifest_version: 1,
             sealed_through: Some(4_999),
+            filled_through: Some(2_999),
         }
     );
+}
+
+/// A service over `index` at its current generation.
+fn service_over(index: Index) -> ReplicatorService {
+    let state = index.latest().unwrap().state();
+    let (_, receiver) = watch::channel(ServingSnapshot::from(state));
+    ReplicatorService::new(Arc::new(index), receiver, &Network::Mainnet)
+}
+
+async fn filled_through(service: &ReplicatorService) -> Option<u32> {
+    service.get_export_info(Request::new(Empty {})).await.unwrap().into_inner().filled_through
+}
+
+/// Three sealed ranges. `filled_through` ends before the first range without a row.
+#[tokio::test]
+async fn export_info_gives_the_end_of_the_rows_from_genesis() {
+    let cases: [(&[(u32, bool)], _); 4] = [
+        (&[], None),
+        (&[(1_000, false), (2_000, false)], None),
+        (&[(0, false), (2_000, false)], Some(999)),
+        (&[(0, false), (1_000, false), (2_000, false)], Some(2_999)),
+    ];
+    for (rows, expected) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let (index, _) = index_with_rows(dir.path(), 3, rows);
+        assert_eq!(filled_through(&service_over(index)).await, expected, "{rows:?}");
+    }
+}
+
+/// The handler reads the rows again for each request: a row that fills the gap moves
+/// `filled_through` at the same generation.
+#[tokio::test]
+async fn export_info_follows_a_new_row() {
+    let (dir, full_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (index, _) = index_with_rows(dir.path(), 3, &[(0, false), (2_000, false)]);
+    // The same records give the same blob, thus the same row for range 1,000.
+    let (full, _) = index_with_rows(full_dir.path(), 3, &[(1_000, false)]);
+    let service = service_over(index);
+    assert_eq!(filled_through(&service).await, Some(999));
+
+    service.index.put_range_meta(1_000, &range_meta_row(&full, 1_000)).unwrap();
+
+    assert_eq!(filled_through(&service).await, Some(2_999));
 }
 
 #[tokio::test]

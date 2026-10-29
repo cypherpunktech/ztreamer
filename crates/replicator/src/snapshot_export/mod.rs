@@ -107,11 +107,14 @@ impl Rows {
             return Err(SnapshotExportError::NoSealedRange);
         };
         let sealed = sealed_through / RANGE_SIZE + 1;
-        let entries = (0..sealed)
-            .map_while(|range| index_snapshot.range_meta(range * RANGE_SIZE).transpose())
-            .map(|meta| meta.map(|meta| meta.entry))
-            .collect::<Result<Vec<_>, _>>()?;
-        let found = u32::try_from(entries.len()).expect("at most `sealed` entries");
+        let found =
+            index_snapshot.range_meta_filled_through()?.map_or(0, |end| end / RANGE_SIZE + 1);
+        let entries = index_snapshot
+            .range_metas_from(0)?
+            .into_iter()
+            .take(found as usize)
+            .map(|meta| meta.entry)
+            .collect();
         Ok(Self { entries, missing: sealed - found })
     }
 }
