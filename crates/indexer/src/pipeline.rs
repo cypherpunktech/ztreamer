@@ -20,10 +20,8 @@ use telemetry::{PipelineMetrics, SegmentMetrics};
 use zakura_chain::block::{self, Height};
 
 use crate::{
-    index::{Index, IndexError, IndexState},
-    ingest::{
-        EncodedBatch, IngestError, OrderedBuilder, WriteBatch, partial_range_flush_threshold,
-    },
+    index::{EncodedBatch, Index, IndexError, IndexState, WriteBatch},
+    ingest::{IngestError, OrderedBuilder, partial_range_flush_threshold},
 };
 use ztreamer_chain::{
     parser::CompactParseError,
