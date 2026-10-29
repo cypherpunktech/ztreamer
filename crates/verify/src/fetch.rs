@@ -4,7 +4,7 @@
 //! a byte offset. The two implementations are:
 //!
 //! - [`HttpSource`] reads a snapshot directory that `ztreamerd export-snapshot` wrote, below a
-//!   base URL, in the layout of [`crate::snapshot`]. It reads [`Latest`], then the manifest
+//!   base URL, in the layout of [`ztreamer_snapshot::layout`]. It reads [`Latest`], then the manifest
 //!   that it names, and verifies the Ed25519 signature of each with a key that the caller
 //!   gives. It does not use the key in `latest.json`: a source that can change the files can
 //!   also change that key. It reads a blob from its [`RangePath`] with an HTTP `Range` request.
@@ -31,16 +31,16 @@ use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Code, Streaming, transport::Channel};
 use tracing::{debug, warn};
 use zakura_chain::block;
-use ztreamer_indexer::manifest_entry::{BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError};
 use ztreamer_protocol::replicate::{
     self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
 };
 use ztreamer_remote::HttpsClient;
+use ztreamer_snapshot::manifest_entry::{BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError};
 
-use crate::{
-    importer::MAX_BLOB_BYTES_BEFORE_INSTALL,
+use crate::importer::MAX_BLOB_BYTES_BEFORE_INSTALL;
+use ztreamer_snapshot::{
+    layout::{Latest, LatestError, RangePath, SignatureFile},
     manifest::{Manifest, ManifestError},
-    snapshot::{Latest, LatestError, RangePath, SignatureFile},
 };
 
 /// The resumes of one blob in a row after failed transfers with no progress. The next such

@@ -23,12 +23,12 @@ use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_indexer::index::{Index, range_meta::NodeId};
 use ztreamer_remote::RemoteBackend;
 use ztreamer_remote::ZakuraClient;
+use ztreamer_snapshot::layout::SNAPSHOT_PUBKEY;
 use ztreamer_verify::{
     attest::JsonRpcAttestor,
     fetch::{HttpSource, PeerSource, RangeSource},
     importer::{ImportConfig, ImportError, Importer, TrustedNode},
     sample::{JsonRpcSampler, SamplePlan},
-    snapshot::SNAPSHOT_PUBKEY,
 };
 
 /// The command-line flag of the import. It is off by default.

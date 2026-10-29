@@ -38,7 +38,7 @@ use zakura_rpc::{
     methods::GetAddressUtxosRequest,
 };
 use zakura_state::HashOrHeight;
-use ztreamer_indexer::pool::{self, NodeBytes, SubtreeNode};
+use ztreamer_snapshot::pool::{self, NodeBytes, SubtreeNode};
 
 use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,

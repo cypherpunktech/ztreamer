@@ -1,10 +1,10 @@
+use crate::pool::SubtreeNode;
 use serde_json::Value;
 use zakura_chain::{ironwood, orchard};
 use ztreamer_chain::test_utils::hash;
-use ztreamer_indexer::pool::SubtreeNode;
 
 use super::*;
-use crate::epoch::synthetic_entries;
+use crate::test_utils::synthetic_entries;
 
 /// A manifest with two entries. The first entry has frontiers and subtree roots in all three
 /// pools.

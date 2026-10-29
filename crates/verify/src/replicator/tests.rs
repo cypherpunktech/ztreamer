@@ -8,7 +8,6 @@ use tonic::{
 use ztreamer_chain::codec::RANGE_SIZE;
 use ztreamer_indexer::{
     index::range_meta::RangeMeta,
-    manifest_entry::{Frontiers, ManifestEntry as Entry},
     test_utils::{range_meta_row, sealed_range_blob},
 };
 use ztreamer_protocol::{
@@ -17,6 +16,7 @@ use ztreamer_protocol::{
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
 use ztreamer_service::{CompactService, test_utils::EmptyChain};
+use ztreamer_snapshot::manifest_entry::{Frontiers, ManifestEntry as Entry};
 
 /// Five sealed ranges. Ranges 0, 1,000 and 2,000 have rows, range 3,000 has none, and the
 /// row of range 4,000 is rejected.

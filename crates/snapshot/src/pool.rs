@@ -164,7 +164,8 @@ pub struct PoolRoots {
     pub ironwood: Option<ironwood::tree::Root>,
 }
 
-pub(crate) fn put_subtree_roots(bytes: &mut Vec<u8>, roots: &[SubtreeRoot]) {
+/// Writes the count of `roots`, then each root: its index, its pool tag and its 32 bytes.
+pub fn put_subtree_roots(bytes: &mut Vec<u8>, roots: &[SubtreeRoot]) {
     put_count(bytes, roots.len());
     for root in roots {
         bytes.extend_from_slice(&root.index.0.to_be_bytes());
@@ -172,7 +173,8 @@ pub(crate) fn put_subtree_roots(bytes: &mut Vec<u8>, roots: &[SubtreeRoot]) {
     }
 }
 
-pub(crate) fn take_subtree_roots(reader: &mut Reader<'_>) -> Result<Vec<SubtreeRoot>, CodecError> {
+/// Reads the roots that [`put_subtree_roots`] wrote.
+pub fn take_subtree_roots(reader: &mut Reader<'_>) -> Result<Vec<SubtreeRoot>, CodecError> {
     let count = reader.count()?;
     (0..count)
         .map(|_| {

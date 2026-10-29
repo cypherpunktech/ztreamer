@@ -19,9 +19,9 @@ use ztreamer_remote::ZakuraClient;
 
 use crate::{
     attest::{EpochError, NodeError},
-    epoch::Epoch,
     range::{Check, Reject},
 };
+use ztreamer_snapshot::epoch::Epoch;
 
 /// A source of full blocks, usually a node.
 ///
@@ -79,9 +79,9 @@ impl SamplePlan {
     /// blocking thread pool of the runtime.
     ///
     /// ```
+    /// use ztreamer_snapshot::epoch::Epoch;
     /// use ztreamer_verify::{
     ///     attest::EpochError,
-    ///     epoch::Epoch,
     ///     sample::{SamplePlan, Sampler},
     /// };
     ///
@@ -184,14 +184,14 @@ mod tests {
         codec::{CompactBlockRecord, TreeSizes, encode_range},
         test_utils::{hash, raw_block},
     };
-    use ztreamer_indexer::manifest_entry::ManifestEntry;
     use ztreamer_remote::{
         RpcClient,
         test_utils::{MockNode, Reply},
     };
+    use ztreamer_snapshot::manifest_entry::ManifestEntry;
 
     use super::*;
-    use crate::epoch::Epochs;
+    use ztreamer_snapshot::epoch::Epochs;
 
     /// The height of the one block with shielded data.
     const SHIELDED: u32 = 500;

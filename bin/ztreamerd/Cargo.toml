@@ -28,6 +28,7 @@ ztreamer-chain = { path = "../../crates/chain" }
 ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
+ztreamer-snapshot = { path = "../../crates/snapshot" }
 ztreamer-verify = { path = "../../crates/verify" }
 ztreamer-node = { path = "../../crates/node" }
 ztreamer-p2p = { path = "../../crates/p2p" }
@@ -45,4 +46,5 @@ zakura-test.workspace = true
 ztreamer-chain = { path = "../../crates/chain", features = ["test-utils"] }
 ztreamer-indexer = { path = "../../crates/indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }
+ztreamer-snapshot = { path = "../../crates/snapshot", features = ["test-utils"] }
 ztreamer-verify = { path = "../../crates/verify", features = ["test-utils"] }

@@ -11,19 +11,17 @@ use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
 use tracing::Span;
 use ztreamer_blocking::BlockingTask;
-use ztreamer_indexer::{
-    index::{
-        CheckedRange, IndexState,
-        range_meta::{RangeMeta, VerifyState},
-    },
-    manifest_entry::{Frontiers, MAX_RANGES, ManifestEntry},
+use ztreamer_indexer::index::{
+    CheckedRange, IndexState,
+    range_meta::{RangeMeta, VerifyState},
 };
+use ztreamer_snapshot::manifest_entry::{Frontiers, MAX_RANGES, ManifestEntry};
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
-use crate::{
+use crate::proof::EpochProof;
+use ztreamer_snapshot::{
     epoch::{Epoch, Epochs},
     manifest::Manifest,
-    proof::EpochProof,
 };
 
 /// The blob fetches of one epoch that run at the same time: all the blobs of the epoch. The

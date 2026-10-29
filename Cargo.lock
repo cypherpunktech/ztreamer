@@ -4756,7 +4756,7 @@ dependencies = [
  "tonic",
  "zakura-chain",
  "zakura-sapling-crypto",
- "ztreamer-indexer",
+ "ztreamer-snapshot",
 ]
 
 [[package]]
@@ -4784,10 +4784,8 @@ dependencies = [
 name = "ztreamer-indexer"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "criterion",
  "heed",
- "hex",
  "metrics",
  "metrics-util",
  "prost",
@@ -4797,12 +4795,12 @@ dependencies = [
  "tonic",
  "tracing",
  "zakura-chain",
- "zakura-sapling-crypto",
  "zakura-test",
  "ztreamer-blocking",
  "ztreamer-chain",
  "ztreamer-indexer",
  "ztreamer-protocol",
+ "ztreamer-snapshot",
 ]
 
 [[package]]
@@ -4909,6 +4907,7 @@ dependencies = [
  "ztreamer-jsonrpc",
  "ztreamer-remote",
  "ztreamer-service",
+ "ztreamer-snapshot",
 ]
 
 [[package]]
@@ -4940,6 +4939,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-snapshot"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ed25519-dalek",
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror",
+ "zakura-chain",
+ "zakura-sapling-crypto",
+ "ztreamer-chain",
+ "ztreamer-protocol",
+ "ztreamer-snapshot",
+]
+
+[[package]]
 name = "ztreamer-verify"
 version = "0.1.0"
 dependencies = [
@@ -4958,9 +4975,7 @@ dependencies = [
  "prost",
  "rand 0.9.5",
  "rustls",
- "serde",
  "serde_json",
- "serde_with",
  "tempfile",
  "thiserror",
  "tokio",
@@ -4982,6 +4997,7 @@ dependencies = [
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",
+ "ztreamer-snapshot",
 ]
 
 [[package]]
@@ -5018,5 +5034,6 @@ dependencies = [
  "ztreamer-protocol",
  "ztreamer-remote",
  "ztreamer-service",
+ "ztreamer-snapshot",
  "ztreamer-verify",
 ]

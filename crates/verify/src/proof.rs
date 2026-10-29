@@ -14,18 +14,18 @@ use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     types::CompactShieldedAction,
 };
-use ztreamer_indexer::{
-    index::{CheckedRange, range_meta::Attested},
+use ztreamer_indexer::index::{CheckedRange, range_meta::Attested};
+use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
+use ztreamer_snapshot::{
     manifest_entry::Frontiers,
     pool::{Pool, PoolRoots, SubtreeNode, SubtreeRoot},
 };
-use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
 
 use crate::{
     attest::{Attestor, EpochError},
-    epoch::Epoch,
     range::{Check, RangeBlob, RangeLink, Reject},
 };
+use ztreamer_snapshot::epoch::Epoch;
 
 /// What an epoch proves when its ranges check out and its trees rebuild.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -147,10 +147,10 @@ impl EpochProof {
     /// the entry cannot show the difference.
     ///
     /// ```
-    /// use ztreamer_indexer::{index::range_meta::Attested, manifest_entry::Frontiers};
+    /// use ztreamer_indexer::index::range_meta::Attested;
+    /// use ztreamer_snapshot::{epoch::Epoch, manifest_entry::Frontiers};
     /// use ztreamer_verify::{
     ///     attest::{Attestor, EpochError},
-    ///     epoch::Epoch,
     ///     proof::EpochProof,
     /// };
     ///

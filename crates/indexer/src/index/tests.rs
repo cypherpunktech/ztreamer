@@ -2,13 +2,13 @@ use super::*;
 use crate::{
     index::range_meta::{VerifyState, full_meta},
     ingest::OrderedBuilder,
-    manifest_entry::{BlobDigest, BlobMismatch},
     test_utils::open_index,
 };
 use ztreamer_chain::{
     codec::{CodecError, ProtobufBlockRecord, StoredBlock, decode_range_record, encode_range},
     test_utils::{hash, parsed, record},
 };
+use ztreamer_snapshot::manifest_entry::{BlobDigest, BlobMismatch};
 
 /// An index environment as a build before the `range_meta` table left it: four named
 /// databases and the identity row, and nothing else.

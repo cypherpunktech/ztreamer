@@ -7,8 +7,6 @@
 pub mod head;
 pub mod index;
 pub mod ingest;
-pub mod manifest_entry;
 pub mod pipeline;
-pub mod pool;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

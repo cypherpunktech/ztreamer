@@ -6,14 +6,12 @@
 //! or at the first range that brings the note commitments it adds to [`MAX_COMMITMENTS`]. The
 //! last range of the manifest also closes an epoch. Mainnet has about 400 epochs.
 //!
-//! An [`Epoch`] only groups manifest entries. [`EpochProof`](crate::proof::EpochProof) checks
+//! An [`Epoch`] only groups manifest entries. `ztreamer_verify::proof::EpochProof` checks
 //! and rebuilds the ranges of an epoch, and the node attests the proof.
 
 use std::iter::FusedIterator;
 
-#[cfg(test)]
-use ztreamer_chain::codec::TreeSizes;
-use ztreamer_indexer::manifest_entry::{MAX_COMMITMENTS, MAX_RANGES, ManifestEntry};
+use crate::manifest_entry::{MAX_COMMITMENTS, MAX_RANGES, ManifestEntry};
 
 /// Consecutive manifest entries that are verified together.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,7 +57,7 @@ impl<'a> Epoch<'a> {
 /// a [`Manifest`](crate::manifest::Manifest) always is. The iterator does not read `epoch_end`.
 ///
 /// ```
-/// use ztreamer_verify::manifest::Manifest;
+/// use ztreamer_snapshot::manifest::Manifest;
 ///
 /// # fn run(manifest: Manifest) {
 /// for epoch in manifest.epochs() {
@@ -82,7 +80,7 @@ impl<'a> Epochs<'a> {
     /// Groups `entries` into epochs, from the entry at `start`. `start` must be the first entry
     /// of an epoch of [`Epochs::new`]. Then the epochs are the epochs of [`Epochs::new`] from
     /// that epoch.
-    pub(crate) const fn starting_at(entries: &'a [ManifestEntry], start: usize) -> Self {
+    pub const fn starting_at(entries: &'a [ManifestEntry], start: usize) -> Self {
         Self { entries, start }
     }
 }
@@ -108,49 +106,12 @@ impl<'a> Iterator for Epochs<'a> {
 
 impl FusedIterator for Epochs<'_> {}
 
-/// Contiguous entries from genesis. Entry `i` adds `adds[i]` commitments to the trees, and the
-/// `epoch_end` flags agree with [`Epochs`].
-#[cfg(test)]
-pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
-    use ztreamer_chain::{codec::RANGE_SIZE, test_utils::hash};
-    use ztreamer_indexer::manifest_entry::{BlobDigest, Frontiers};
-
-    let mut sizes = TreeSizes::default();
-    let mut entries: Vec<_> = (0..)
-        .zip(adds)
-        .map(|(index, add)| {
-            sizes = sizes.checked_add(*add).unwrap();
-            let start_height = index * RANGE_SIZE;
-            let end_height = start_height + RANGE_SIZE - 1;
-            ManifestEntry {
-                range_version: 1,
-                start_height,
-                end_height,
-                end_hash: hash(end_height),
-                end_tree_sizes: sizes,
-                frontiers: Frontiers::default(),
-                subtree_roots: Vec::new(),
-                blob_digest: BlobDigest([0; 32]),
-                blob_len: 0,
-                epoch_end: false,
-            }
-        })
-        .collect();
-    let closes: Vec<_> = Epochs::new(&entries)
-        .scan(0, |end, epoch| {
-            *end += epoch.entries().len();
-            Some(*end - 1)
-        })
-        .collect();
-    for index in closes {
-        entries[index].epoch_end = true;
-    }
-    entries
-}
-
 #[cfg(test)]
 mod tests {
+    use ztreamer_chain::codec::TreeSizes;
+
     use super::*;
+    use crate::test_utils::synthetic_entries;
 
     fn sapling(count: u32) -> TreeSizes {
         TreeSizes { sapling: count, ..TreeSizes::default() }

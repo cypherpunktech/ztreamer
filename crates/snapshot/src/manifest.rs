@@ -26,14 +26,14 @@
 //!
 //! The entries convert to [`ManifestEntry`], so that the indexer stays free of serde.
 
+use crate::{
+    manifest_entry::{BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry},
+    pool::{NodeBytes, Pool, SubtreeRoot},
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as};
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_chain::codec::{RANGE_SIZE, TreeSizes};
-use ztreamer_indexer::{
-    manifest_entry::{BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry},
-    pool::{NodeBytes, Pool, SubtreeRoot},
-};
 
 use crate::epoch::Epochs;
 
@@ -123,8 +123,8 @@ impl Manifest {
     ///
     /// ```
     /// use zakura_chain::block;
-    /// use ztreamer_indexer::manifest_entry::ManifestEntry;
-    /// use ztreamer_verify::manifest::{Manifest, ManifestError};
+    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
+    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
     ///
     /// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
     ///     Manifest::new("Mainnet", genesis, entries)
@@ -156,8 +156,8 @@ impl Manifest {
     ///
     /// ```
     /// use zakura_chain::block;
-    /// use ztreamer_indexer::manifest_entry::ManifestEntry;
-    /// use ztreamer_verify::manifest::{Manifest, ManifestError};
+    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
+    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
     ///
     /// fn manifest(genesis: block::Hash, rows: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
     ///     Manifest::from_contiguous_entries("Mainnet", genesis, rows)

@@ -35,11 +35,11 @@ use ztreamer_chain::codec::{
     CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, RANGE_SIZE, TreeSizes,
     decode_range_record,
 };
-use ztreamer_indexer::{
-    index::{
-        Index, IndexError,
-        range_meta::{Attested, NodeId, RangeMeta, VerifyState},
-    },
+use ztreamer_indexer::index::{
+    Index, IndexError,
+    range_meta::{Attested, NodeId, RangeMeta, VerifyState},
+};
+use ztreamer_snapshot::{
     manifest_entry::{BlobDigest, Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry},
     pool::{PoolRoots, SubtreeNode, SubtreeRoot},
 };

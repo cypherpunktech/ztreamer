@@ -50,6 +50,7 @@ ztreamer-backend = { path = "../backend" }
 ztreamer-chain = { path = "../chain" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-jsonrpc = { path = "../jsonrpc" }
+ztreamer-snapshot = { path = "../snapshot" }
 
 [dev-dependencies]
 base64 = "0.22"
