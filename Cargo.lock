@@ -4792,7 +4792,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "eyre",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "http",
  "metrics",
  "metrics-exporter-prometheus",
