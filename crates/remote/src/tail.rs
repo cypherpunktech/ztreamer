@@ -2,13 +2,13 @@
 
 use std::{collections::VecDeque, num::NonZeroUsize, ops::RangeInclusive, panic, time::Instant};
 
+use crate::{Method, RpcError, ZakuraClient};
 use tokio::{
     runtime::Handle,
     task::{JoinError, JoinHandle},
 };
 use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
-use ztreamer_remote::{Method, RpcError, ZakuraClient};
 
 use ztreamer_indexer::{
     index::SEAL_DEPTH,
@@ -49,8 +49,7 @@ const REQUESTS_IN_FLIGHT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 /// ```no_run
 /// use ztreamer_indexer::pipeline::{HistoricalPipeline, PipelineConfig};
 /// # use ztreamer_indexer::index::Index;
-/// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_service::remote::RemoteTailSource;
+/// use ztreamer_remote::{RemoteTailSource, RpcClient, ZakuraClient};
 ///
 /// # async fn demo(index: std::sync::Arc<Index>) -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
@@ -257,12 +256,12 @@ impl Drop for BlockRequests<'_> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::runtime::{Builder, Runtime};
-    use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
-    use ztreamer_remote::{
+    use crate::{
         RpcClient, RpcCode,
         test_utils::{MockChain, MockNode, Reply, Seen},
     };
+    use tokio::runtime::{Builder, Runtime};
+    use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 
     use ztreamer_indexer::{
         codec::CompactBlockRecord,

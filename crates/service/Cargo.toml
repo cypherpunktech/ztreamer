@@ -9,37 +9,32 @@ workspace = true
 
 [features]
 # Shared test, benchmark and example support in `ztreamer_service::test_utils`.
-test-utils = ["dep:prost", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer/test-utils"]
+test-utils = ["dep:prost", "dep:sapling-crypto", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer/test-utils"]
 
 [dependencies]
-futures-util = "0.3"
 hex = "0.4"
-lru = "0.18"
 metrics = "0.24"
 prost = { version = "0.14.4", optional = true }
-sapling-crypto.workspace = true
+sapling-crypto = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
-thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-stream = "0.1"
 tonic = "0.14.6"
-tracing = "0.1"
 zakura-chain.workspace = true
-zakura-rpc.workspace = true
-zakura-state = { workspace = true, features = ["indexer"] }
 ztreamer-backend = { path = "../backend" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
-ztreamer-remote = { path = "../remote" }
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
+futures-util = "0.3"
 metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+zakura-rpc.workspace = true
 zakura-test.workspace = true
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }

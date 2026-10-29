@@ -14,6 +14,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
+use crate::{RpcError, ZakuraClient, frontier::FromRpc};
 use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
 use lru::LruCache;
 use sapling_crypto::Node as SaplingNode;
@@ -38,7 +39,6 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 use ztreamer_indexer::pool::{self, NodeBytes, SubtreeNode};
-use ztreamer_remote::{RpcError, ZakuraClient, frontier::FromRpc};
 
 use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
@@ -93,8 +93,7 @@ impl From<NodeCallError> for BackendError {
 ///
 /// ```no_run
 /// use zakura_chain::parameters::Network;
-/// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_service::remote::RemoteBackend;
+/// use ztreamer_remote::{RemoteBackend, RpcClient, ZakuraClient};
 ///
 /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);
