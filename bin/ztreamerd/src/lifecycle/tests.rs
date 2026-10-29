@@ -181,7 +181,7 @@ use std::{
 use zakura_chain::block::Height as BlockHeight;
 use zakura_network::zakura::{Peer, Service, Stream, ZakuraConnId, ZakuraPeerId};
 use zakurad::{config::ZakuradConfig, node::CustomService};
-use ztreamer_node::NodeClient;
+use ztreamer_embedded::NodeClient;
 #[derive(Debug)]
 struct RegistrationProbe(Arc<AtomicBool>);
 

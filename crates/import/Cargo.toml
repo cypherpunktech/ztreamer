@@ -14,7 +14,7 @@ workspace = true
 test-utils = [
     "dep:chrono",
     "dep:tempfile",
-    "dep:ztreamer-node",
+    "dep:ztreamer-embedded",
     "dep:ztreamer-replicator",
     "dep:ztreamer-sync",
     "hyper/server",
@@ -47,8 +47,8 @@ zakura-rpc.workspace = true
 zakura-state.workspace = true
 ztreamer-blocking = { path = "../blocking" }
 ztreamer-chain = { path = "../chain" }
+ztreamer-embedded = { path = "../embedded", optional = true }
 ztreamer-index = { path = "../index" }
-ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
 ztreamer-replicator = { path = "../replicator", optional = true }
@@ -68,8 +68,8 @@ tokio = { version = "1", features = ["fs", "macros", "net", "rt", "rt-multi-thre
 tokio-stream = { version = "0.1", features = ["net"] }
 zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
+ztreamer-embedded = { path = "../embedded" }
 ztreamer-index = { path = "../index", features = ["test-utils"] }
-ztreamer-node = { path = "../node" }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 ztreamer-replicator = { path = "../replicator" }
 ztreamer-service = { path = "../service", features = ["test-utils"] }

@@ -207,7 +207,7 @@ impl From<BlockAtHeightError> for PipelineError {
 /// The historical pass over one [`HistoricalSource`]: fetch-and-parse workers feed one
 /// [`OrderedBuilder`], which feeds one LMDB writer.
 ///
-/// `ztreamerd` builds one over `ztreamer_node::FinalizedDb` or over
+/// `ztreamerd` builds one over `ztreamer_embedded::FinalizedDb` or over
 /// `ztreamer_remote::RemoteTailSource`. A source in another crate builds one the same
 /// way:
 ///
