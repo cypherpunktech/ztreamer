@@ -11,14 +11,14 @@
 //!    order. The request limit of the source sets the requests on the wire. A blob with a wrong
 //!    digest, or a fetch that fails after its resumes, stops the import with the error of the
 //!    first such blob in height order.
-//! 3. Run [`Epoch::verify`] on the blocking thread pool. At most `import_workers` epochs do
+//! 3. Run [`EpochProof::rebuild`] on the blocking thread pool. At most `import_workers` epochs do
 //!    this at the same time.
-//! 4. Run [`Epoch::attest`] and [`Epoch::sample`] against the [`TrustedNode`] at the same
+//! 4. Run [`EpochProof::attest`] and [`SamplePlan::sample`] against the [`TrustedNode`] at the same
 //!    time. Thus the node calls of an epoch overlap the verification of the next epoch.
 //!
 //! The importer takes the verified epochs in height order, and installs each one before it
 //! takes the next. It installs each range with [`Index::install_checked_range`] and a
-//! [`VerifyState::Verified`] row. [`Epoch::verify`] made the
+//! [`VerifyState::Verified`] row. [`EpochProof::rebuild`] made the
 //! [`CheckedRange`](ztreamer_indexer::index::CheckedRange) of each blob with its one decode.
 //! Thus the install, on one writer thread, does only the checks that need the index: it does
 //! not calculate the digest or decode the blob again.
@@ -30,18 +30,18 @@
 //! The start frontiers of the first epoch come from the `range_meta` row of the last sealed
 //! range. The importer does not trust them: wrong start frontiers give rebuilt roots that the
 //! node does not attest. The start frontiers of each other epoch are the frontiers of the
-//! manifest entry before it. [`Epoch::verify`] of the epoch before rebuilds them byte for byte,
+//! manifest entry before it. [`EpochProof::rebuild`] of the epoch before rebuilds them byte for byte,
 //! and the importer installs an epoch only after all epochs below it.
 //!
 //! A failed epoch stops the import. The importer first installs the epochs below it, thus the
 //! index keeps them. A restart continues after the last installed epoch, and fetches no range
 //! that is installed.
 //!
-//! [`Epoch::verify`]: crate::epoch::Epoch::verify
+//! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
 //! [`Fetcher::blob`]: crate::fetch::Fetcher::blob
 //! [`Epoch::closed_by_rule`]: crate::epoch::Epoch::closed_by_rule
-//! [`Epoch::attest`]: crate::epoch::Epoch::attest
-//! [`Epoch::sample`]: crate::epoch::Epoch::sample
+//! [`EpochProof::attest`]: crate::proof::EpochProof::attest
+//! [`SamplePlan::sample`]: crate::sample::SamplePlan::sample
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
 
 mod epoch_import;
@@ -77,7 +77,7 @@ pub const MAX_BLOB_BYTES_BEFORE_INSTALL: u64 = 2 << 30;
 pub struct TrustedNode {
     /// Attests the end hashes, the tree roots and the subtree roots of each epoch.
     pub attestor: Arc<dyn Attestor>,
-    /// Gives the full blocks that [`Epoch::sample`](crate::epoch::Epoch::sample) compares.
+    /// Gives the full blocks that [`SamplePlan::sample`](crate::sample::SamplePlan::sample) compares.
     pub sampler: Arc<dyn Sampler>,
     /// The node in `verified_by` of each installed row.
     pub id: NodeId,
@@ -95,7 +95,7 @@ pub struct ImportConfig {
     /// The network that the index was opened for. The manifest must have its name and its
     /// genesis hash.
     pub network: Network,
-    /// The heights of each range that [`Epoch::sample`](crate::epoch::Epoch::sample) compares,
+    /// The heights of each range that [`SamplePlan::sample`](crate::sample::SamplePlan::sample) compares,
     /// and the secret seed.
     pub verify_sample: SamplePlan,
     /// The epochs that verify at the same time. Two epochs for each worker are in work at the

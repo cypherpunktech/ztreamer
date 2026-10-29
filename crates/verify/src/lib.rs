@@ -20,11 +20,13 @@ pub mod epoch;
 pub mod fetch;
 pub mod importer;
 pub mod manifest;
+pub mod proof;
 pub mod range;
 mod range_meta_fill;
 mod replicator;
 pub mod sample;
 pub mod snapshot;
+pub mod snapshot_writer;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 

@@ -51,9 +51,8 @@ use ztreamer_protocol::replicate::{
 };
 
 use crate::{
-    RangeMetaFiller, ReplicatorService,
-    manifest::Manifest,
-    snapshot::{RangePath, SnapshotWriter},
+    RangeMetaFiller, ReplicatorService, manifest::Manifest, snapshot::RangePath,
+    snapshot_writer::SnapshotWriter,
 };
 
 /// The seed of the key that signs a [`Snapshot`].

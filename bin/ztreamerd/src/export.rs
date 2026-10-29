@@ -29,7 +29,7 @@ use ztreamer_indexer::{
     index::{Index, RANGE_SIZE},
     manifest_entry::ManifestEntry,
 };
-use ztreamer_verify::{manifest::Manifest, snapshot::SnapshotWriter};
+use ztreamer_verify::{manifest::Manifest, snapshot_writer::SnapshotWriter};
 
 /// Writes the sealed ranges of an index as a snapshot. The index is the one of the global
 /// `--index-dir` and `--index-map-size` flags.
