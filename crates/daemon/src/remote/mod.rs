@@ -1,40 +1,34 @@
-//! The remote mode: `ztreamerd` imports the sealed ranges of `--replicate-from`, checked against
-//! the `--remote-rpc` zakura node. Then it reads the tail and the head from that node over
-//! JSON-RPC. It starts no embedded node.
+//! The remote node: `ztreamerd` imports the sealed ranges of `--replicate-from` in the
+//! historical stage, checked against the `--remote-rpc` zakura node. Then it reads the tail and
+//! the head from that node over JSON-RPC. It starts no node in this process.
 
 use std::{
     ops::ControlFlow,
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
 
 use eyre::{Result, WrapErr, eyre};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
-use ztreamer_index::index::{BlockId, Index, range_meta::NodeId};
+use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_remote::{
     Auth, NodeChain, NodeUrl, RemoteBackend, RemoteHeadSource, RemoteTailSource, RpcClient,
     RpcCode, ZakuraClient,
 };
+use ztreamer_service::CompactService;
 
 use crate::{
-    DaemonConfig,
-    application::{NodeSources, run_application},
-    lifecycle::{Supervisor, TaskSet},
+    lifecycle::TaskSet,
+    node::{HistoricalSource, IndexTip, Node, NodeComponents, StageContext, Tail},
     replicate::{Replica, ReplicaSource},
 };
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(1);
-
-/// The sources of the remote mode. All three read the same node. Only
-/// [`RemoteNode`] makes them, when the node is ready for the index.
-type RemoteSources = NodeSources<RemoteTailSource, RemoteHeadSource, RemoteBackend>;
 
 /// The configuration of the remote mode: the `--remote-rpc` node, its credentials, and the
 /// import of `--replicate-from` that the node attests.
@@ -109,17 +103,22 @@ impl RemoteConfig {
 }
 
 /// A remote zakura node that replaces the embedded node, and the import that it attests.
+///
+/// A stop during the catch-up waits for the `getblock` calls in flight. When the node stalls,
+/// each call can wait for its timeout and its retries, thus more than one minute.
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteNode {
     client: ZakuraClient,
-    /// The import of `--replicate-from`. It runs before the tail.
+    /// The import of `--replicate-from`. It is the historical stage.
     replica: Replica,
+    /// The network and the `getblockchaininfo` answer of [`Node::network`].
+    chain: Option<(Network, GetBlockchainInfoResponse)>,
 }
 
 impl RemoteNode {
     /// The node behind `client`, with the import `replica`.
     pub(crate) const fn new(client: ZakuraClient, replica: Replica) -> Self {
-        Self { client, replica }
+        Self { client, replica, chain: None }
     }
 
     /// The node in `verified_by` of the `range_meta` rows that it answers: of the import, and of
@@ -127,98 +126,6 @@ impl RemoteNode {
     /// it.
     fn id(&self) -> NodeId {
         NodeId { url: self.client.rpc().url().to_string(), version: String::new() }
-    }
-
-    /// Runs the daemon on this node until `signal`, the end of the work (`--index-only`), or a
-    /// failure.
-    ///
-    /// A stop during the historical pass waits for the `getblock` calls in flight. When the node
-    /// stalls, each call can wait for its timeout and its retries, thus more than one minute.
-    pub(crate) async fn run_until(
-        self,
-        config: DaemonConfig,
-        grpc_server: Server,
-        signal: impl Future<Output = Result<()>>,
-    ) -> Result<()> {
-        let url = self.client.rpc().url();
-        info!(host = url.host(), port = url.port_u16(), "using remote zakura");
-        // No node runs in this process. Thus only the server tasks join the set.
-        let supervisor = Supervisor::new(CancellationToken::new());
-        let application = self.application(config, grpc_server, supervisor.tasks().clone());
-        supervisor.run(signal, application).await
-    }
-
-    /// Reads the network from the node and opens the index of that network, as the embedded
-    /// mode does. Runs the import of `--replicate-from`. Then makes the sources when the node is
-    /// ready, and runs the daemon on them until shutdown.
-    ///
-    /// It waits while the node is out of reach or in warm-up. [`Index::open`] refuses an index
-    /// of another network.
-    async fn application(
-        self,
-        config: DaemonConfig,
-        grpc_server: Server,
-        tasks: TaskSet,
-    ) -> Result<()> {
-        let shutdown = tasks.shutdown().clone();
-        let ControlFlow::Continue(info) = self.blockchain_info_when_up(&shutdown).await? else {
-            return Ok(());
-        };
-        let network = Network::try_from(NodeChain(info.chain()))?;
-        info!(%network, "remote zakura network");
-        let index = config.index.open(&network).await?;
-        let import =
-            self.replica.import(&self.client, self.id(), &info, &network, &index, &shutdown);
-        if import.await?.is_break() {
-            return Ok(());
-        }
-        let ControlFlow::Continue(sources) =
-            self.sources(info, &network, &index, &shutdown).await?
-        else {
-            return Ok(());
-        };
-        info!(import_state = "tail");
-        run_application(config, grpc_server, index, &network, None, sources, tasks).await
-    }
-
-    /// The sources over this node, when the node is ready for `index`. Breaks on shutdown.
-    ///
-    /// `info` is the latest `getblockchaininfo` answer. It refuses a node whose genesis block is
-    /// not the one of `network`. Then it waits until the best block of the node is at or above
-    /// the durable tip of the index.
-    async fn sources(
-        &self,
-        mut info: GetBlockchainInfoResponse,
-        network: &Network,
-        index: &Arc<Index>,
-        shutdown: &CancellationToken,
-    ) -> Result<ControlFlow<(), RemoteSources>> {
-        let backend = RemoteBackend::connect(self.client.clone(), network.clone())
-            .await
-            .wrap_err("connect to the remote zakura node")?;
-        let tip = IndexTip::read(index).await?;
-        while !tip.served_by(&info) {
-            info!(
-                best = info.blocks().0,
-                index_tip = tip.0.map(|tip| tip.height),
-                "waiting for remote zakura to reach the index tip"
-            );
-            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
-            {
-                return Ok(ControlFlow::Break(()));
-            }
-            let ControlFlow::Continue(next) = self.blockchain_info_when_up(shutdown).await? else {
-                return Ok(ControlFlow::Break(()));
-            };
-            info = next;
-        }
-        info!(best = info.blocks().0, "remote zakura is ready");
-        Ok(ControlFlow::Continue(NodeSources {
-            tail: RemoteTailSource::new(self.client.clone(), Handle::current()),
-            head: RemoteHeadSource::new(self.client.clone()),
-            backend,
-            verified_by: self.id(),
-        }))
     }
 
     /// `getblockchaininfo`, sent again after [`READY_POLL_INTERVAL`] while the node is out of
@@ -254,24 +161,116 @@ impl RemoteNode {
     }
 }
 
-/// The durable tip of the index. The remote node must serve the blocks above it before the first
-/// sync.
-#[derive(Clone, Copy, Debug)]
-struct IndexTip(Option<BlockId>);
+impl Node for RemoteNode {
+    type Components = RemoteComponents;
 
-impl IndexTip {
-    /// Reads the durable tip of `index` on a blocking thread.
-    async fn read(index: &Arc<Index>) -> Result<Self> {
-        let index = Arc::clone(index);
-        let state = tokio::task::spawn_blocking(move || index.state())
-            .await
-            .wrap_err("index state task panicked")??;
-        Ok(Self(state.durable_tip()))
+    /// Reads the network from the node. It waits while the node is out of reach or in warm-up.
+    async fn network(&mut self, shutdown: &CancellationToken) -> Result<ControlFlow<(), Network>> {
+        let url = self.client.rpc().url();
+        info!(host = url.host(), port = url.port_u16(), "using remote zakura");
+        let ControlFlow::Continue(info) = self.blockchain_info_when_up(shutdown).await? else {
+            return Ok(ControlFlow::Break(()));
+        };
+        let network = Network::try_from(NodeChain(info.chain()))?;
+        info!(%network, "remote zakura network");
+        self.chain = Some((network.clone(), info));
+        Ok(ControlFlow::Continue(network))
     }
 
-    /// True when the node of `info` has the tip, false while the node is below the tip.
-    fn served_by(self, info: &GetBlockchainInfoResponse) -> bool {
-        self.0.is_none_or(|tip| info.blocks().0 >= tip.height)
+    /// No node runs in this process: it starts nothing, and the import of the historical stage
+    /// checks the node.
+    async fn boot(self, _: &TaskSet) -> Result<ControlFlow<(), RemoteComponents>> {
+        let Self { client, replica, chain } = self;
+        let (network, info) = chain.expect("the launcher reads the network before the boot");
+        let node = Self::new(client, replica);
+        Ok(ControlFlow::Continue(RemoteComponents { node, network, info }))
+    }
+}
+
+/// The components of a booted remote node. All of them read the same node.
+pub(crate) struct RemoteComponents {
+    node: RemoteNode,
+    /// The network of the node.
+    network: Network,
+    /// The `getblockchaininfo` answer of [`Node::network`].
+    info: GetBlockchainInfoResponse,
+}
+
+impl NodeComponents for RemoteComponents {
+    type Historical = ReplicaImport;
+    type Finalized = RemoteTailSource;
+    type Head = RemoteHeadSource;
+    type Wallet = RemoteBackend;
+
+    fn historical(&self) -> ReplicaImport {
+        ReplicaImport { node: self.node.clone(), info: self.info.clone() }
+    }
+
+    /// The backend over the node. It refuses a node whose genesis block is not the one of the
+    /// network.
+    async fn wallet(&self) -> Result<RemoteBackend> {
+        RemoteBackend::connect(self.node.client.clone(), self.network.clone())
+            .await
+            .wrap_err("connect to the remote zakura node")
+    }
+
+    /// Waits until the best block of the node is at or above `tip`. The first check uses the
+    /// `getblockchaininfo` answer of [`Node::network`].
+    async fn tail(
+        &self,
+        tip: IndexTip,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<(), Tail<RemoteTailSource, RemoteHeadSource>>> {
+        let mut info = self.info.clone();
+        while !tip.is_reached_by(info.blocks().0) {
+            info!(
+                best = info.blocks().0,
+                index_tip = tip.height(),
+                "waiting for remote zakura to reach the index tip"
+            );
+            if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
+            {
+                return Ok(ControlFlow::Break(()));
+            }
+            let ControlFlow::Continue(next) = self.node.blockchain_info_when_up(shutdown).await?
+            else {
+                return Ok(ControlFlow::Break(()));
+            };
+            info = next;
+        }
+        info!(best = info.blocks().0, "remote zakura is ready");
+        info!(import_state = "tail");
+        let client = &self.node.client;
+        Ok(ControlFlow::Continue(Tail {
+            finalized: RemoteTailSource::new(client.clone(), Handle::current()),
+            head: RemoteHeadSource::new(client.clone()),
+        }))
+    }
+
+    fn id(&self) -> NodeId {
+        self.node.id()
+    }
+
+    /// Logs the import state `following`.
+    fn start_following(&self, _: &CompactService) -> Result<()> {
+        info!(import_state = "following");
+        Ok(())
+    }
+}
+
+/// The historical source of the remote node: the import of `--replicate-from`, checked against
+/// the node.
+pub(crate) struct ReplicaImport {
+    node: RemoteNode,
+    /// The `getblockchaininfo` answer of [`Node::network`].
+    info: GetBlockchainInfoResponse,
+}
+
+impl HistoricalSource for ReplicaImport {
+    async fn fill(self, stage: &StageContext<'_>) -> Result<ControlFlow<()>> {
+        let Self { node, info } = self;
+        let StageContext { index, network, shutdown, .. } = stage;
+        node.replica.import(&node.client, node.id(), &info, network, index, shutdown).await
     }
 }
 

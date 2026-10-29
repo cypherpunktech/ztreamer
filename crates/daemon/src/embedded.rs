@@ -1,21 +1,23 @@
-//! The embedded mode: `ztreamerd` runs a Zakura node in this process. It reads the tail from the
-//! finalized database of the node, and the head and the chain state from the node. The node also
-//! serves the compact service to its p2p peers.
+//! The embedded node: `ztreamerd` runs a Zakura node in this process. The historical stage and
+//! the catch-up read the finalized database of the node. The head and the chain state come from
+//! the node. The node also serves the wallet service to its p2p peers.
 
 use std::{ops::ControlFlow, path::PathBuf, sync::Arc};
 
 use eyre::{Result, WrapErr, eyre};
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use tracing::info;
+use zakura_chain::parameters::Network;
 use zakurad::config::ZakuradConfig;
-use ztreamer_embedded::{self as node, InProcessBackend};
+use ztreamer_embedded::{FinalizedDb, InProcessBackend, NodeClient};
+use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_p2p::P2pCompactService;
+use ztreamer_service::CompactService;
 
 use crate::{
-    DaemonConfig,
-    application::{NodeSources, run_application},
-    lifecycle::Supervisor,
+    index_pass::{IndexPass, PassKind},
+    lifecycle::TaskSet,
+    node::{HistoricalSource, IndexTip, Node, NodeComponents, StageContext, Tail},
 };
 
 /// An embedded Zakura node, from its configuration.
@@ -34,73 +36,12 @@ impl EmbeddedNode {
         Ok(Self { config })
     }
 
-    /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It opens
-    /// the index and starts Zakura on a thread of the blocking pool: the future of Zakura is not
-    /// `Send`.
-    pub(crate) async fn run(
-        self,
-        daemon: DaemonConfig,
-        grpc_server: Server,
-        signal: impl Future<Output = Result<()>>,
-    ) -> Result<()> {
-        let Self { config } = self;
-        let network = config.network.network.clone();
-        let index = daemon.index.open(&network).await?;
-
-        let p2p = Arc::new(P2pCompactService::pending());
-        info!(network = %network, "starting embedded Zakura");
-        let shutdown = CancellationToken::new();
-        let supervisor = Supervisor::new(shutdown.clone());
-        let tasks = supervisor.tasks().clone();
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let services = vec![p2p.registration()];
-        let zakura_shutdown = shutdown.clone();
-        tasks.spawn_on_blocking_thread(
-            "Zakura",
-            "Zakura stopped unexpectedly",
-            move || async move {
-                // Keep Zakura's large startup future on the heap while polling it.
-                Box::pin(zakurad::node::run_with_services_ready(
-                    config,
-                    services,
-                    zakura_shutdown,
-                    ready_tx,
-                ))
-                .await
-                .map_err(|error| eyre!("Zakura failed: {error}"))
-            },
-        );
-        let application = async {
-            let services = tokio::select! {
-                biased;
-                _ = shutdown.cancelled() => return Ok(()),
-                result = ready_rx => result.wrap_err("Zakura stopped before readiness")?,
-            };
-            let client = node::NodeClient::from_services(services);
-            let sources = NodeSources {
-                tail: client.finalized_db(),
-                head: client.clone(),
-                backend: InProcessBackend::with_node(client),
-                verified_by: node::NodeClient::embedded_id(),
-            };
-            if sources.wait_ready(&shutdown).await?.is_break() {
-                return Ok(());
-            }
-            let embedded = Some(Embedded { p2p: p2p.clone() });
-            run_application(daemon, grpc_server, index, &network, embedded, sources, tasks).await
-        };
-
-        supervisor.run(signal, application).await
-    }
-}
-
-impl<T, B> NodeSources<T, node::NodeClient, B> {
-    /// Waits until the embedded Zakura is near the chain tip and has a finalized block. Then the
-    /// node is ready for the historical index pass. Breaks on shutdown.
-    ///
-    /// The remote mode waits in `RemoteNode::sources`, before it makes its sources.
-    async fn wait_ready(&self, shutdown: &CancellationToken) -> Result<ControlFlow<()>> {
-        let client = &self.head;
+    /// Waits until the Zakura of `client` is near the chain tip and has a finalized block. Then
+    /// the node is ready for the historical stage. Breaks on shutdown.
+    async fn wait_ready(
+        client: &NodeClient,
+        shutdown: &CancellationToken,
+    ) -> Result<ControlFlow<()>> {
         info!("waiting for Zakura to sync near the chain tip");
         tokio::select! {
             result = client.wait_until_close_to_tip() => {
@@ -121,8 +62,103 @@ impl<T, B> NodeSources<T, node::NodeClient, B> {
     }
 }
 
-/// What only the embedded mode gives the daemon.
-pub(crate) struct Embedded {
-    /// The Zakura p2p compact service. It gets the compact service after the head reconcile.
-    pub(crate) p2p: Arc<P2pCompactService>,
+impl Node for EmbeddedNode {
+    type Components = EmbeddedComponents;
+
+    /// The network of the Zakura configuration. It does not wait.
+    async fn network(&mut self, _: &CancellationToken) -> Result<ControlFlow<(), Network>> {
+        Ok(ControlFlow::Continue(self.config.network.network.clone()))
+    }
+
+    /// Starts Zakura on a thread of the blocking pool: the future of Zakura is not `Send`. Then
+    /// waits for the services of Zakura and for [`EmbeddedNode::wait_ready`].
+    async fn boot(self, tasks: &TaskSet) -> Result<ControlFlow<(), EmbeddedComponents>> {
+        let Self { config } = self;
+        let shutdown = tasks.shutdown();
+        let p2p = Arc::new(P2pCompactService::pending());
+        info!(network = %config.network.network, "starting embedded Zakura");
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let services = vec![p2p.registration()];
+        let zakura_shutdown = shutdown.clone();
+        tasks.spawn_on_blocking_thread(
+            "Zakura",
+            "Zakura stopped unexpectedly",
+            move || async move {
+                // Keep Zakura's large startup future on the heap while polling it.
+                Box::pin(zakurad::node::run_with_services_ready(
+                    config,
+                    services,
+                    zakura_shutdown,
+                    ready_tx,
+                ))
+                .await
+                .map_err(|error| eyre!("Zakura failed: {error}"))
+            },
+        );
+
+        let services = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
+            result = ready_rx => result.wrap_err("Zakura stopped before readiness")?,
+        };
+        let client = NodeClient::from_services(services);
+        if Self::wait_ready(&client, shutdown).await?.is_break() {
+            return Ok(ControlFlow::Break(()));
+        }
+        Ok(ControlFlow::Continue(EmbeddedComponents { client, p2p }))
+    }
+}
+
+/// The components of a booted embedded node.
+pub(crate) struct EmbeddedComponents {
+    client: NodeClient,
+    /// The Zakura p2p compact service. It gets the wallet service when the index follows the
+    /// head.
+    p2p: Arc<P2pCompactService>,
+}
+
+impl NodeComponents for EmbeddedComponents {
+    type Historical = FinalizedHistory;
+    type Finalized = FinalizedDb;
+    type Head = NodeClient;
+    type Wallet = InProcessBackend;
+
+    fn historical(&self) -> FinalizedHistory {
+        FinalizedHistory(self.client.finalized_db())
+    }
+
+    async fn wallet(&self) -> Result<InProcessBackend> {
+        Ok(InProcessBackend::with_node(self.client.clone()))
+    }
+
+    /// The finalized database and the node. Zakura serves the index tip after
+    /// [`EmbeddedNode::wait_ready`]: thus it does not wait.
+    async fn tail(
+        &self,
+        _: IndexTip,
+        _: &CancellationToken,
+    ) -> Result<ControlFlow<(), Tail<FinalizedDb, NodeClient>>> {
+        let tail = Tail { finalized: self.client.finalized_db(), head: self.client.clone() };
+        Ok(ControlFlow::Continue(tail))
+    }
+
+    fn id(&self) -> NodeId {
+        NodeClient::embedded_id()
+    }
+
+    /// Gives `compact` to the p2p peers of Zakura.
+    fn start_following(&self, compact: &CompactService) -> Result<()> {
+        self.p2p.install(compact.clone()).map_err(|error| eyre!(error))
+    }
+}
+
+/// The historical source of the embedded node: a block pipeline pass over the finalized
+/// database of Zakura.
+pub(crate) struct FinalizedHistory(FinalizedDb);
+
+impl HistoricalSource for FinalizedHistory {
+    async fn fill(self, stage: &StageContext<'_>) -> Result<ControlFlow<()>> {
+        let pass = IndexPass { kind: PassKind::Historical, source: self.0 };
+        Ok(pass.run(stage).await?.map_continue(|_| ()))
+    }
 }
