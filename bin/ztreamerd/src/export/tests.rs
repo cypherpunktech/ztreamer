@@ -3,11 +3,12 @@ use std::fs;
 use serde_json::Value;
 use tempfile::TempDir;
 use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
+use ztreamer_chain::test_utils::record;
 use ztreamer_indexer::{
     index::range_meta::{RangeMeta, VerifyState},
     manifest_entry::Frontiers,
     pool::{SubtreeNode, SubtreeRoot},
-    test_utils::{populate, range_meta_row, record, sealed_range_blob},
+    test_utils::{populate, range_meta_row, sealed_range_blob},
 };
 use ztreamer_verify::snapshot::{Latest, RangePath, SignatureFile};
 

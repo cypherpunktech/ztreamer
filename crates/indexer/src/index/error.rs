@@ -4,7 +4,8 @@ use std::io;
 
 use tonic::Status;
 
-use crate::{codec::CodecError, manifest_entry::BlobMismatch};
+use crate::manifest_entry::BlobMismatch;
+use ztreamer_chain::codec::CodecError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {

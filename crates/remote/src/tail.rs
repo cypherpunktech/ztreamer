@@ -10,11 +10,10 @@ use tokio::{
 use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
 
+use ztreamer_chain::{parser::parse_block, types::RawIndexBlock};
 use ztreamer_indexer::{
     index::SEAL_DEPTH,
-    parser::parse_block,
     pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats},
-    types::RawIndexBlock,
 };
 
 /// The number of `getblock` requests that one worker keeps in flight.
@@ -263,11 +262,11 @@ mod tests {
     use tokio::runtime::{Builder, Runtime};
     use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 
+    use ztreamer_chain::{codec::CompactBlockRecord, test_utils::grow_chain};
     use ztreamer_indexer::{
-        codec::CompactBlockRecord,
         index::BlockId,
         pipeline::{HistoricalPipeline, PipelineConfig},
-        test_utils::{grow_chain, open_index},
+        test_utils::open_index,
     };
 
     use super::*;

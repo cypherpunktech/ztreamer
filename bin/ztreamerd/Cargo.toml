@@ -24,6 +24,7 @@ zakura-rpc.workspace = true
 zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 zeroize = "1"
 ztreamer-backend = { path = "../../crates/backend" }
+ztreamer-chain = { path = "../../crates/chain" }
 ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
@@ -41,6 +42,7 @@ tokio = { version = "1", features = ["fs", "net"] }
 zakura-network.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
+ztreamer-chain = { path = "../../crates/chain", features = ["test-utils"] }
 ztreamer-indexer = { path = "../../crates/indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../../crates/remote", features = ["test-utils"] }
 ztreamer-verify = { path = "../../crates/verify", features = ["test-utils"] }

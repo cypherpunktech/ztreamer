@@ -8,10 +8,8 @@ use zakura_chain::{
     serialization::{CompactSizeMessage, ZcashSerialize},
 };
 use zakura_state::{TransactionLocation, ZakuraDb};
-use ztreamer_indexer::{
-    parser::parse_stored_block,
-    pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats},
-};
+use ztreamer_chain::parser::parse_stored_block;
+use ztreamer_indexer::pipeline::{HistoricalSource, PipelineError, SegmentSender, WorkerStats};
 
 /// Zakura's finalized database as a [`HistoricalSource`]. [`NodeClient::finalized_db`] gives it.
 ///

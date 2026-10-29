@@ -7,11 +7,14 @@ use tempfile::TempDir;
 use tokio::time::timeout;
 use tonic::transport::Server;
 use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
-use ztreamer_indexer::{
-    codec::CompactBlockRecord,
-    index::{RANGE_SIZE, SEAL_DEPTH, range_meta::VerifyState},
-    test_utils::{grow_chain, range_meta_row},
+use ztreamer_chain::{
+    codec::{CompactBlockRecord, RANGE_SIZE},
+    test_utils::grow_chain,
     types::RawIndexBlock,
+};
+use ztreamer_indexer::{
+    index::{SEAL_DEPTH, range_meta::VerifyState},
+    test_utils::range_meta_row,
 };
 use ztreamer_protocol::{
     proto::BlockId,

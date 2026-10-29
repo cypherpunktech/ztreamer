@@ -6,7 +6,7 @@ use hex::{FromHex, FromHexError};
 use sapling_crypto::Node as SaplingNode;
 use zakura_chain::{ironwood, orchard, sapling, subtree::NoteCommitmentSubtreeIndex};
 
-use crate::codec::{CodecError, Reader, put_count};
+use ztreamer_chain::codec::{CodecError, Reader, put_count};
 
 /// A note commitment pool.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -173,7 +173,7 @@ pub(crate) fn put_subtree_roots(bytes: &mut Vec<u8>, roots: &[SubtreeRoot]) {
 }
 
 pub(crate) fn take_subtree_roots(reader: &mut Reader<'_>) -> Result<Vec<SubtreeRoot>, CodecError> {
-    let count = reader.len()?;
+    let count = reader.count()?;
     (0..count)
         .map(|_| {
             Ok(SubtreeRoot {

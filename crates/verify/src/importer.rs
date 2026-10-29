@@ -53,8 +53,9 @@ use tokio::sync::{Semaphore, watch};
 use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
+use ztreamer_chain::codec::RANGE_SIZE;
 use ztreamer_indexer::{
-    index::{Index, IndexError, IndexState, RANGE_SIZE, range_meta::NodeId},
+    index::{Index, IndexError, IndexState, range_meta::NodeId},
     manifest_entry::Frontiers,
 };
 

@@ -25,12 +25,12 @@ use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use zakura_rpc::client::Commitments;
 use zakura_state::HashOrHeight;
 use ztreamer_blocking::BlockingTaskCancelled;
-use ztreamer_indexer::{
+use ztreamer_chain::{
     codec::CodecError,
     parser::CompactParseError,
-    pool::{NodeBytes, Pool, PoolRoots, SubtreeNode},
     types::{BlockAtHeightError, RawBlockError},
 };
+use ztreamer_indexer::pool::{NodeBytes, Pool, PoolRoots, SubtreeNode};
 use ztreamer_remote::{
     FetchAtHeightError, RpcError, ZakuraClient,
     frontier::{FromRpc, RpcDecodeError},

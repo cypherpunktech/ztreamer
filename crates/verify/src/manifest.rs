@@ -29,9 +29,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as};
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
+use ztreamer_chain::codec::{RANGE_SIZE, TreeSizes};
 use ztreamer_indexer::{
-    codec::TreeSizes,
-    index::RANGE_SIZE,
     manifest_entry::{BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry},
     pool::{NodeBytes, Pool, SubtreeRoot},
 };

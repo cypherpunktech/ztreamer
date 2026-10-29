@@ -31,10 +31,13 @@ use zakura_chain::{
     block,
     subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
+use ztreamer_chain::codec::{
+    CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, RANGE_SIZE, TreeSizes,
+    decode_range_record,
+};
 use ztreamer_indexer::{
-    codec::{CodecError, CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, decode_range_record},
     index::{
-        Index, IndexError, RANGE_SIZE,
+        Index, IndexError,
         range_meta::{Attested, NodeId, RangeMeta, VerifyState},
     },
     manifest_entry::{BlobDigest, Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry},
@@ -380,7 +383,7 @@ impl Epoch {
 mod tests {
     use super::*;
     use ztreamer_indexer::test_utils::{range_meta_row, sealed_range_blob};
-    use ztreamer_service::test_utils::{EmptyChain, fixtures};
+    use ztreamer_service::test_utils::EmptyChain;
 
     fn open(dir: &tempfile::TempDir) -> Arc<Index> {
         Arc::new(
@@ -394,15 +397,15 @@ mod tests {
     }
 
     fn empty_records(count: u32) -> Vec<CompactBlockRecord> {
-        (0..count).map(|height| fixtures::record(height, Vec::new())).collect()
+        (0..count).map(|height| ztreamer_chain::test_utils::record(height, Vec::new())).collect()
     }
 
     #[tokio::test]
     async fn fills_a_row_for_each_sealed_range() {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
-        let records = fixtures::mixed_records(3_010);
-        let state = fixtures::populate(&index, &records, Some(2_999));
+        let records = ztreamer_chain::test_utils::mixed_records(3_010);
+        let state = ztreamer_indexer::test_utils::populate(&index, &records, Some(2_999));
         let (sender, snapshots) = watch::channel(ServingSnapshot::from(state));
         drop(sender);
         filler(&index).await.run(snapshots, std::future::pending()).await;
@@ -447,8 +450,8 @@ mod tests {
     async fn a_restart_fills_only_the_missing_rows() {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
-        let records = fixtures::mixed_records(3_010);
-        fixtures::populate(&index, &records[..2_010], Some(1_999));
+        let records = ztreamer_chain::test_utils::mixed_records(3_010);
+        ztreamer_indexer::test_utils::populate(&index, &records[..2_010], Some(1_999));
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(1_999));
 
         // Mark the row of range 1,000. A filler that writes it again removes the mark.
@@ -457,7 +460,7 @@ mod tests {
         index.put_range_meta(1_000, &marked).unwrap();
         let first = range_meta_row(&index, 0);
 
-        fixtures::populate(&index, &records[2_010..], Some(2_999));
+        ztreamer_indexer::test_utils::populate(&index, &records[2_010..], Some(2_999));
         assert_eq!(filler(&index).await.pass(None).await.unwrap(), Some(2_999));
         assert_eq!(range_meta_row(&index, 0), first);
         assert_eq!(range_meta_row(&index, 1_000), marked);
@@ -469,9 +472,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let index = open(&dir);
         let records = empty_records(11_010);
-        fixtures::populate(&index, &records[..5_010], Some(4_999));
+        ztreamer_indexer::test_utils::populate(&index, &records[..5_010], Some(4_999));
         filler(&index).await.pass(None).await.unwrap();
-        fixtures::populate(&index, &records[5_010..], Some(10_999));
+        ztreamer_indexer::test_utils::populate(&index, &records[5_010..], Some(10_999));
         filler(&index).await.pass(None).await.unwrap();
 
         let epoch_ends: Vec<_> = (0..11)

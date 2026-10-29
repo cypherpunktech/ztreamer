@@ -24,6 +24,8 @@ use crate::{
     ingest::{
         EncodedBatch, IngestError, OrderedBuilder, WriteBatch, partial_range_flush_threshold,
     },
+};
+use ztreamer_chain::{
     parser::CompactParseError,
     types::{BlockAtHeightError, RawBlockError},
 };
@@ -47,7 +49,7 @@ pub struct WorkerStats {
     pub transaction_read: Duration,
     /// Time spent reading transaction ids.
     pub txid_read: Duration,
-    /// Time spent in [`parse_stored_block`](crate::parser::parse_stored_block) or an equivalent.
+    /// Time spent in [`parse_stored_block`](ztreamer_chain::parser::parse_stored_block) or an equivalent.
     pub parse: Duration,
     /// Time spent waiting in [`SegmentSender::send`] for read-ahead budget.
     pub send_wait: Duration,

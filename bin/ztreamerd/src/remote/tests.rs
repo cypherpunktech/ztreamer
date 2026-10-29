@@ -8,7 +8,7 @@ use zakura_chain::{
     serialization::ZcashDeserializeInto as _,
 };
 use zakura_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
-use ztreamer_indexer::test_utils::grow_chain;
+use ztreamer_chain::test_utils::grow_chain;
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
 
 use super::*;

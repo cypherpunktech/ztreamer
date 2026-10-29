@@ -8,10 +8,8 @@
 
 use zakura_chain::block;
 
-use crate::{
-    codec::{CodecError, Reader, TreeSizes, put_bytes, take_bool},
-    pool::{SubtreeRoot, put_subtree_roots, take_subtree_roots},
-};
+use crate::pool::{SubtreeRoot, put_subtree_roots, take_subtree_roots};
+use ztreamer_chain::codec::{CodecError, Reader, TreeSizes, put_bytes, take_bool};
 
 mod wire;
 pub use wire::WireError;
@@ -130,7 +128,7 @@ impl ManifestEntry {
     /// Panics if `records` or `blob` is empty.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn from_records_and_blob(
-        records: &[crate::codec::CompactBlockRecord],
+        records: &[ztreamer_chain::codec::CompactBlockRecord],
         blob: &[u8],
     ) -> Self {
         let last = records.last().unwrap();
@@ -202,7 +200,7 @@ impl ManifestEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::hash;
+    use ztreamer_chain::test_utils::hash;
 
     #[test]
     fn check_blob_compares_the_length_then_the_digest() {

@@ -10,7 +10,7 @@ use super::{
     range_meta::RangeMeta,
     tables::{Tables, range_start},
 };
-use crate::codec::{CompactBlockRecord, StoredBlock, decode_range_record};
+use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock, decode_range_record};
 
 /// The reads of an [`Index`](super::Index) in one LMDB read transaction. All reads of one
 /// snapshot see one committed state, also when a write commits during the reads.
@@ -22,7 +22,8 @@ use crate::codec::{CompactBlockRecord, StoredBlock, decode_range_record};
 /// the next one, or the open fails.
 ///
 /// ```no_run
-/// # use ztreamer_indexer::{codec::CompactBlockRecord, index::{Index, IndexError}};
+/// # use ztreamer_chain::codec::CompactBlockRecord;
+/// # use ztreamer_indexer::index::{Index, IndexError};
 /// # fn demo(index: &Index) -> Result<(), IndexError> {
 /// let snapshot = index.latest()?;
 /// let tip = snapshot.state().durable_tip().expect("the index holds blocks");

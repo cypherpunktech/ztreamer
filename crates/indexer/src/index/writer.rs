@@ -14,9 +14,9 @@ use super::{
     tables::{RangeChain, Tables, range_start},
     telemetry::{WriteStage, WriteTimer, record_state_metrics},
 };
-use crate::{
-    codec::{CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes},
-    ingest::{EncodedBatch, EncodedBlock},
+use crate::ingest::{EncodedBatch, EncodedBlock};
+use ztreamer_chain::codec::{
+    CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes,
 };
 
 /// Batch rows that are not yet in any table, in height order.
@@ -425,8 +425,9 @@ mod tests {
     use super::*;
     use crate::{
         index::Index,
-        test_utils::{open_index, populate, record},
+        test_utils::{open_index, populate},
     };
+    use ztreamer_chain::test_utils::record;
 
     /// An index that holds the mutable blocks 0..=10.
     fn index_with_blocks(dir: &tempfile::TempDir) -> (Index, IndexState) {

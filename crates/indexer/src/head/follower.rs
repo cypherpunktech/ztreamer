@@ -15,10 +15,10 @@ use super::{
     telemetry::{HeadMetrics, ObservedSource},
 };
 use crate::{
-    codec::CompactBlockRecord,
     index::{Index, IndexState},
     pipeline::PipelineConfig,
 };
+use ztreamer_chain::codec::CompactBlockRecord;
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeadFollowerConfig {
@@ -227,11 +227,8 @@ impl HeadFollower {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        head::HeadError,
-        test_utils::{open_index, raw_block},
-        types::RawIndexBlock,
-    };
+    use crate::{head::HeadError, test_utils::open_index};
+    use ztreamer_chain::{test_utils::raw_block, types::RawIndexBlock};
 
     struct HeadSource(Vec<RawIndexBlock>);
 

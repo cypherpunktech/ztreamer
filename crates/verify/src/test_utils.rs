@@ -35,14 +35,17 @@ use tokio_stream::{
 };
 use tonic::{Status, transport::Server};
 use zakura_chain::{block, parameters::Network};
+use ztreamer_chain::{
+    codec::{CompactBlockRecord, RANGE_SIZE, TreeSizes},
+    parser::parse_block,
+    test_utils::raw_block,
+    types::RawIndexBlock,
+};
 use ztreamer_indexer::head::ServingSnapshot;
 use ztreamer_indexer::{
-    codec::{CompactBlockRecord, TreeSizes},
-    index::{Index, IndexState, RANGE_SIZE},
+    index::{Index, IndexState},
     manifest_entry::{BlobDigest, ManifestEntry},
-    parser::parse_block,
-    test_utils::{populate, range_meta_row, raw_block, sealed_range_blob},
-    types::RawIndexBlock,
+    test_utils::{populate, range_meta_row, sealed_range_blob},
 };
 use ztreamer_node::{InProcessBackend, NodeClient};
 use ztreamer_protocol::replicate::{

@@ -45,7 +45,7 @@ use super::{
     BlockId, ChainIdentity, IndexError, IndexState, PERSIST_DEPTH, RANGE_SIZE, SCHEMA_VERSION,
     SEAL_DEPTH,
 };
-use crate::codec::TreeSizes;
+use ztreamer_chain::codec::TreeSizes;
 
 const STATE: &[u8] = b"state";
 const IDENTITY: &[u8] = b"identity";
@@ -197,10 +197,8 @@ fn identity(network: &str, genesis_hash: block::Hash) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        index::Index,
-        test_utils::{hash, open_index},
-    };
+    use crate::{index::Index, test_utils::open_index};
+    use ztreamer_chain::test_utils::hash;
 
     fn state(sealed_through: Option<u32>) -> IndexState {
         IndexState {

@@ -42,10 +42,10 @@ use zakura_chain::{block, ironwood, orchard, sapling};
 
 use super::IndexError;
 use crate::{
-    codec::{CodecError, Reader, put_bytes, put_count, take_bool},
     manifest_entry::ManifestEntry,
     pool::{PoolRoots, SubtreeRoot, put_subtree_roots, take_subtree_roots},
 };
+use ztreamer_chain::codec::{CodecError, Reader, put_bytes, put_count, take_bool};
 
 const FORMAT_VERSION: u8 = 1;
 
@@ -176,7 +176,7 @@ impl RangeMeta {
                 subtree_roots: take_subtree_roots(reader)?,
             })
         })?;
-        let count = reader.len()?;
+        let count = reader.count()?;
         let sampled_heights = (0..count).map(|_| reader.u32()).collect::<Result<Vec<_>, _>>()?;
         reader.finish()?;
         Ok(Self { entry, state, verified_by, verified_at, attested, sampled_heights })
@@ -265,11 +265,10 @@ pub(crate) fn full_meta(start: u32) -> RangeMeta {
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 
     use crate::{
-        codec::TreeSizes,
         manifest_entry::{BlobDigest, Frontiers},
         pool::SubtreeNode,
-        test_utils::hash,
     };
+    use ztreamer_chain::{codec::TreeSizes, test_utils::hash};
 
     RangeMeta {
         entry: ManifestEntry {
@@ -322,11 +321,8 @@ pub(crate) fn full_meta(start: u32) -> RangeMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        codec::TreeSizes,
-        manifest_entry::{BlobDigest, Frontiers},
-        test_utils::hash,
-    };
+    use crate::manifest_entry::{BlobDigest, Frontiers};
+    use ztreamer_chain::{codec::TreeSizes, test_utils::hash};
 
     /// A record with every optional part absent and every list empty.
     fn bare_meta(start: u32) -> RangeMeta {

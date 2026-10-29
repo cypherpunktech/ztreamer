@@ -5,7 +5,7 @@ use zakura_chain::{
     transaction::Transaction,
 };
 use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYTES};
-use ztreamer_indexer::{
+use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     parser::parse_block,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, RawIndexBlock},

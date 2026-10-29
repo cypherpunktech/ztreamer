@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use zakura_chain::block;
 
-use crate::{
-    codec::{CodecError, CompactBlockRecord, MAX_RECORD_BYTES, TreeSizes},
-    index::{IndexState, RANGE_SIZE},
+use crate::index::IndexState;
+use ztreamer_chain::{
+    codec::{CodecError, CompactBlockRecord, MAX_RECORD_BYTES, RANGE_SIZE, TreeSizes},
     types::ParsedCompactBlock,
 };
 
@@ -317,8 +317,8 @@ mod tests {
     use super::*;
     use zakura_chain::transaction;
 
-    use crate::test_utils::{parsed, record};
-    use crate::types::{CompactSaplingOutput, CompactTransaction};
+    use ztreamer_chain::test_utils::{parsed, record};
+    use ztreamer_chain::types::{CompactSaplingOutput, CompactTransaction};
 
     #[test]
     fn reassembles_out_of_order_blocks_and_assigns_tree_sizes() {

@@ -2,12 +2,14 @@ use bytes::Bytes;
 use pasta_curves::pallas;
 use serde_json::{Value, json};
 use zakura_chain::{ironwood, orchard, sapling};
+use ztreamer_chain::{
+    codec::{RANGE_SIZE, TreeSizes, encode_range},
+    test_utils::{hash, record},
+};
 use ztreamer_indexer::{
-    codec::{TreeSizes, encode_range},
-    index::{RANGE_SIZE, range_meta::Attested},
+    index::range_meta::Attested,
     manifest_entry::{Frontiers, ManifestEntry},
     pool::SubtreeRoot,
-    test_utils::{hash, record},
 };
 use ztreamer_remote::{
     RpcClient,

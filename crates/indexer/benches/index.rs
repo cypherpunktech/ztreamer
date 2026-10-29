@@ -1,12 +1,12 @@
 #![allow(missing_docs)]
 
-use ztreamer_indexer::test_utils as fixtures;
-
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use zakura_chain::block;
+use ztreamer_chain::test_utils::{hash, mixed_records, parsed};
 use ztreamer_indexer::{
     index::{BlockId, Index, IndexState},
     ingest::OrderedBuilder,
+    test_utils::populate,
 };
 
 fn open(dir: &tempfile::TempDir) -> Index {
@@ -14,15 +14,14 @@ fn open(dir: &tempfile::TempDir) -> Index {
 }
 
 fn builder(c: &mut Criterion) {
-    let records = fixtures::mixed_records(1_000);
+    let records = mixed_records(1_000);
     let mut group = c.benchmark_group("builder_mixed_v1");
     group.throughput(Throughput::Elements(1_000));
     for reversed in [false, true] {
         group.bench_function(if reversed { "out-of-order" } else { "ordered" }, |b| {
             b.iter_batched_ref(
                 || {
-                    let mut parsed: Vec<_> =
-                        records.iter().cloned().map(fixtures::parsed).collect();
+                    let mut parsed: Vec<_> = records.iter().cloned().map(parsed).collect();
                     if reversed {
                         parsed.reverse();
                     }
@@ -47,7 +46,7 @@ fn builder(c: &mut Criterion) {
 }
 
 fn storage(c: &mut Criterion) {
-    let records = fixtures::mixed_records(2_200);
+    let records = mixed_records(2_200);
     let mut group = c.benchmark_group("write_mixed_v1");
     for (name, count, seal) in [("mutable", 100, None), ("sealed", 1_000, Some(999))] {
         group.throughput(Throughput::Elements(count as u64));
@@ -59,7 +58,7 @@ fn storage(c: &mut Criterion) {
                     let mut builder =
                         OrderedBuilder::new(IndexState::default(), 256 * 1024 * 1024).unwrap();
                     for record in &records[..count] {
-                        builder.push(fixtures::parsed(record.clone())).unwrap();
+                        builder.push(parsed(record.clone())).unwrap();
                     }
                     let batch = builder
                         .build_batch(Some(count as u32 - 1), seal, 16 * 1024 * 1024)
@@ -85,9 +84,9 @@ fn storage(c: &mut Criterion) {
                 || {
                     let dir = tempfile::tempdir().unwrap();
                     let index = open(&dir);
-                    let state = fixtures::populate(&index, &records, Some(1_999));
+                    let state = populate(&index, &records, Some(1_999));
                     let mut replacement = records[ancestor as usize + 1..].to_vec();
-                    let mut previous = fixtures::hash(ancestor);
+                    let mut previous = hash(ancestor);
                     for record in &mut replacement {
                         record.previous_hash = previous;
                         record.hash.0[31] = 1;
@@ -96,7 +95,7 @@ fn storage(c: &mut Criterion) {
                     (index, dir, state, Some(replacement))
                 },
                 |(index, _dir, state, replacement)| {
-                    let anchor = BlockId::new(ancestor, fixtures::hash(ancestor));
+                    let anchor = BlockId::new(ancestor, hash(ancestor));
                     let replacement = replacement.take().unwrap();
                     let result = if ancestor >= 1_999 {
                         index.replace_mutable_suffix(
@@ -124,7 +123,7 @@ fn storage(c: &mut Criterion) {
 
     let dir = tempfile::tempdir().unwrap();
     let index = open(&dir);
-    fixtures::populate(&index, &records, Some(1_999));
+    populate(&index, &records, Some(1_999));
     drop(index);
     c.bench_function("restart_mixed_v1/2200-blocks-warm", |b| b.iter(|| open(&dir)));
 }

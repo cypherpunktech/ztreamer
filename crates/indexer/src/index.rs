@@ -109,7 +109,7 @@
 //!   `version (u8) | height | hash (32 bytes) | previous hash (32 bytes) | length | protobuf
 //!   CompactBlock`.
 //! - A sealed range holds [`RANGE_SIZE`] records in the same encoding, and an offset table. A
-//!   reader can decode one record and not the others. [`encode_range`](crate::codec::encode_range)
+//!   reader can decode one record and not the others. [`encode_range`](ztreamer_chain::codec::encode_range)
 //!   writes a range. The `write_range` function in `codec.rs` gives its byte layout.
 //! - `index/metadata.rs` gives the byte layout of the state and of the identity, and
 //!   `index/range_meta.rs` the layout of a range metadata record.
@@ -119,10 +119,10 @@ use std::{fs, io, path::Path, time::Instant};
 use heed::{Env, EnvOpenOptions, RwTxn};
 use zakura_chain::block;
 
-use crate::codec::CompactBlockRecord;
-#[cfg(any(test, feature = "test-utils"))]
-use crate::codec::TreeSizes;
 use crate::ingest::{EncodedBatch, WriteBatch};
+use ztreamer_chain::codec::CompactBlockRecord;
+#[cfg(any(test, feature = "test-utils"))]
+use ztreamer_chain::codec::TreeSizes;
 
 mod checked_range;
 mod error;
@@ -142,9 +142,9 @@ pub use state::{BlockId, ChainIdentity, IndexState};
 use tables::{SealedRange, Tables, range_start};
 use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
+use ztreamer_chain::codec::RANGE_SIZE;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const RANGE_SIZE: u32 = 1_000;
 pub const PERSIST_DEPTH: u32 = 10;
 pub const SEAL_DEPTH: u32 = 100;
 

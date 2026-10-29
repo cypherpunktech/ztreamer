@@ -28,10 +28,8 @@ use super::{
     BlockId, IndexError,
     tables::{RangeChain, SealedRange},
 };
-use crate::{
-    codec::{CodecError, CompactBlockRecord},
-    manifest_entry::{BlobDigest, BlobMismatch, ManifestEntry},
-};
+use crate::manifest_entry::{BlobDigest, BlobMismatch, ManifestEntry};
+use ztreamer_chain::codec::{CodecError, CompactBlockRecord};
 
 /// A range blob that passed the checks of an install that do not need the index. The module
 /// docs give the checks.
@@ -153,9 +151,8 @@ impl RangeCheckError<Infallible> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        codec::{TreeSizes, encode_range, encode_range_from_bytes},
-        index::RANGE_SIZE,
+    use ztreamer_chain::{
+        codec::{RANGE_SIZE, TreeSizes, encode_range, encode_range_from_bytes},
         test_utils::{encode_with_unshielded_transaction, hash, mixed_records},
     };
 

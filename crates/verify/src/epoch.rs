@@ -12,7 +12,7 @@
 use std::iter::FusedIterator;
 
 #[cfg(test)]
-use ztreamer_indexer::codec::TreeSizes;
+use ztreamer_chain::codec::TreeSizes;
 use ztreamer_indexer::manifest_entry::{MAX_COMMITMENTS, MAX_RANGES, ManifestEntry};
 
 /// Consecutive manifest entries that are verified together.
@@ -112,11 +112,8 @@ impl FusedIterator for Epochs<'_> {}
 /// `epoch_end` flags agree with [`Epochs`].
 #[cfg(test)]
 pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
-    use ztreamer_indexer::{
-        index::RANGE_SIZE,
-        manifest_entry::{BlobDigest, Frontiers},
-        test_utils::hash,
-    };
+    use ztreamer_chain::{codec::RANGE_SIZE, test_utils::hash};
+    use ztreamer_indexer::manifest_entry::{BlobDigest, Frontiers};
 
     let mut sizes = TreeSizes::default();
     let mut entries: Vec<_> = (0..)

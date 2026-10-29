@@ -296,10 +296,8 @@ mod tests {
     use super::*;
     use zakura_chain::block;
     use zakura_network::zakura::framed_channel;
-    use ztreamer_indexer::{
-        codec::{CompactBlockRecord, TreeSizes},
-        index::IndexState,
-    };
+    use ztreamer_chain::codec::{CompactBlockRecord, TreeSizes};
+    use ztreamer_indexer::index::IndexState;
 
     use ztreamer_service::test_utils::EphemeralService;
 

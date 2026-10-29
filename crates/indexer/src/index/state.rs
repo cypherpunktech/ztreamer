@@ -3,7 +3,7 @@
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 
 use super::IndexError;
-use crate::codec::TreeSizes;
+use ztreamer_chain::codec::TreeSizes;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// References a block by hash and height.

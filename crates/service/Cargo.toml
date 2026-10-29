@@ -9,7 +9,7 @@ workspace = true
 
 [features]
 # Shared test, benchmark and example support in `ztreamer_service::test_utils`.
-test-utils = ["dep:prost", "dep:sapling-crypto", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-indexer/test-utils"]
+test-utils = ["dep:prost", "dep:sapling-crypto", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-chain/test-utils", "ztreamer-indexer/test-utils"]
 
 [dependencies]
 hex = "0.4"
@@ -22,6 +22,7 @@ tokio-stream = "0.1"
 tonic = "0.14.6"
 zakura-chain.workspace = true
 ztreamer-backend = { path = "../backend" }
+ztreamer-chain = { path = "../chain" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
 
@@ -36,6 +37,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 zakura-rpc.workspace = true
 zakura-test.workspace = true
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 # Enables `test_utils` for this crate's tests, benches and examples.
