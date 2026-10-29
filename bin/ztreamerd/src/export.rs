@@ -1,7 +1,7 @@
 //! `ztreamerd export-snapshot`: writes the sealed ranges of an index as a snapshot that a replica
 //! can import.
 //!
-//! [`ztreamer_snapshot::layout`] gives the layout of the snapshot directory. The manifest is
+//! `ztreamer_snapshot::layout` gives the layout of the snapshot directory. The manifest is
 //! `manifests/<time>.json`, where `<time>` is UTC, for example `2026-10-26T143005Z`.
 //!
 //! The export reads the chain from the identity row of the index. [`SnapshotExport`] does the

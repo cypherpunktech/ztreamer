@@ -1,0 +1,50 @@
+[package]
+name = "ztreamer-daemon"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "The ztreamer daemon: the node modes, the indexing, the head follower and the servers"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+ed25519-dalek.workspace = true
+eyre = "0.6"
+getrandom = "0.3"
+http = "1"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = ["http-listener"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
+tonic = { version = "0.14.6", features = ["tls-ring"] }
+tracing = "0.1"
+zakura-chain.workspace = true
+zakura-rpc.workspace = true
+zakurad = { workspace = true, features = ["indexer"] }
+ztreamer-backend = { path = "../backend" }
+ztreamer-embedded = { path = "../embedded" }
+ztreamer-import = { path = "../import" }
+ztreamer-index = { path = "../index" }
+ztreamer-p2p = { path = "../p2p" }
+ztreamer-protocol = { path = "../protocol" }
+ztreamer-remote = { path = "../remote" }
+ztreamer-replicator = { path = "../replicator" }
+ztreamer-service = { path = "../service" }
+ztreamer-snapshot = { path = "../snapshot" }
+ztreamer-sync = { path = "../sync" }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "net"] }
+zakura-network.workspace = true
+zakura-state = { workspace = true, features = ["indexer"] }
+zakura-test.workspace = true
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
+ztreamer-import = { path = "../import", features = ["test-utils"] }
+ztreamer-index = { path = "../index", features = ["test-utils"] }
+ztreamer-remote = { path = "../remote", features = ["test-utils"] }
+ztreamer-snapshot = { path = "../snapshot", features = ["test-utils"] }

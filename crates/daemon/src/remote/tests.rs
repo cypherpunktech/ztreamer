@@ -15,10 +15,7 @@ use ztreamer_remote::{
 };
 
 use super::*;
-use crate::{
-    Cli,
-    test_utils::{free_addr, node_with_chain_name},
-};
+use crate::test_utils::{TestCli, free_addr, node_with_chain_name};
 
 /// A `--replicate-from` source that no server serves. The tests here stop before the import
 /// fetches from it, or test that the import fails.
@@ -41,7 +38,7 @@ fn cli(dir: &tempfile::TempDir, url: &str, extra: &[&str]) -> DaemonArgs {
     let dir = dir.path().to_str().unwrap();
     let flags = ["--index-dir", dir, "--index-map-size", "67108864", "--remote-rpc", url];
     let flags = flags.into_iter().chain(["--replicate-from", NO_SNAPSHOT]);
-    Cli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
+    TestCli::parse_from(["ztreamerd"].into_iter().chain(flags).chain(extra.iter().copied())).daemon
 }
 
 /// The node of `cli`, with no default cookie file. Thus a cookie of a local zakura does not
@@ -219,7 +216,7 @@ async fn waits_for_an_unreachable_node_until_the_signal() {
 #[test]
 fn the_flags_keep_the_two_modes_apart() {
     let parse = |flags: &[&str]| {
-        Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
+        TestCli::try_parse_from(["ztreamerd"].iter().chain(flags)).map(|cli| cli.daemon)
     };
     let replica = ["--replicate-from", "peer:9068"];
     let remote = |url| ["--remote-rpc", url].into_iter().chain(replica).collect::<Vec<_>>();
@@ -237,7 +234,7 @@ fn the_flags_keep_the_two_modes_apart() {
 #[test]
 fn the_remote_mode_needs_both_remote_rpc_and_replicate_from() {
     let missing = |flags: &[&str]| {
-        let error = Cli::try_parse_from(["ztreamerd"].iter().chain(flags)).unwrap_err();
+        let error = TestCli::try_parse_from(["ztreamerd"].iter().chain(flags)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument, "{error}");
         error.to_string()
     };
@@ -256,7 +253,7 @@ fn the_credentials_come_from_the_flag_the_url_or_the_default_cookie() {
     let auth = |flags: &[&str], default_cookie: &Path| {
         let flags =
             ["ztreamerd", "--replicate-from", "peer:9068", "--remote-rpc"].iter().chain(flags);
-        Cli::parse_from(flags).daemon.remote.auth(default_cookie)
+        TestCli::parse_from(flags).daemon.remote.auth(default_cookie)
     };
     let flag = ["http://10.0.0.1:8232", "--remote-rpc-cookie", "/zakura/.cookie"];
     assert_eq!(auth(&flag, &cookie).unwrap(), Auth::Cookie("/zakura/.cookie".into()));
@@ -282,7 +279,7 @@ async fn the_node_gets_the_credentials_of_the_url_and_of_the_default_cookie() {
     let port = mock.addr().port();
     let headers = async |url: String| {
         let flags = ["ztreamerd", "--remote-rpc", &url, "--replicate-from", "peer:9068"];
-        let client = Cli::parse_from(flags).daemon.remote.client(&cookie).unwrap().unwrap();
+        let client = TestCli::parse_from(flags).daemon.remote.client(&cookie).unwrap().unwrap();
         assert!(!format!("{client:?}").contains("hunter2"));
         client.rpc().call::<_, String>("getbestblockhash", ()).await.unwrap();
         mock.seen().pop().unwrap().authorization

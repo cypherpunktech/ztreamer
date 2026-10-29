@@ -24,9 +24,10 @@ use ztreamer_remote::{
 };
 
 use crate::{
-    DaemonArgs, NodeSources, lifecycle,
+    DaemonArgs,
+    application::{NodeSources, run_application},
+    lifecycle,
     replicate::{Replica, ReplicateArgs},
-    run_application,
 };
 
 /// The time between two `getblockchaininfo` calls while the remote node is not ready.
