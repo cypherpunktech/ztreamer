@@ -173,12 +173,12 @@ fn range_meta_for_the_old_blocks_of_a_replaced_range_is_refused() {
         index.put_range_meta(1_000, &full_meta(1_000)),
         Err(IndexError::RangeEndHash { start: 1_000 })
     ));
-    assert_eq!(index.range_meta(1_000).unwrap(), None);
+    assert_eq!(index.latest().unwrap().range_meta(1_000).unwrap(), None);
 
     let mut replaced = full_meta(1_000);
     replaced.entry.end_hash = branch_hash(1_999);
     index.put_range_meta(1_000, &replaced).unwrap();
-    assert_eq!(index.range_meta(1_000).unwrap(), Some(replaced));
+    assert_eq!(index.latest().unwrap().range_meta(1_000).unwrap(), Some(replaced));
 }
 
 #[test]
