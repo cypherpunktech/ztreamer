@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
-use crate::{RpcError, ZakuraClient, frontier::FromRpc};
+use crate::{NodeState, RpcError, ZakuraClient, frontier::FromRpc};
 use futures_util::{StreamExt as _, TryStreamExt as _, future, stream};
 use lru::LruCache;
 use sapling_crypto::Node as SaplingNode;
@@ -190,16 +190,19 @@ pub enum RemoteConnectError {
     },
 }
 
-/// A failed call to the remote node. It converts to the [`BackendError`] that the call gives.
+/// A failed call to the remote node. It converts to the [`BackendError`] that the call gives:
+/// an answer that does not decode is [`BackendError::Unexpected`], and each other failure is the
+/// `Node` variant of [`RpcError::node_state`].
 struct NodeCallError(RpcError);
 
 impl From<NodeCallError> for BackendError {
     fn from(NodeCallError(error): NodeCallError) -> Self {
-        match error {
-            RpcError::Protocol { .. } | RpcError::Decode { .. } => {
-                Self::Unexpected(format!("remote zakura: {error}"))
-            }
-            _ => Self::Unavailable(format!("remote zakura: {error}")),
+        let message = format!("remote zakura: {error}");
+        match (&error, error.node_state()) {
+            (RpcError::Protocol { .. } | RpcError::Decode { .. }, _) => Self::Unexpected(message),
+            (_, NodeState::Gone) => Self::NodeGone(message),
+            (_, NodeState::Refuses) => Self::NodeRefuses(message),
+            (_, NodeState::Syncing) => Self::NodeSyncing(message),
         }
     }
 }
@@ -608,7 +611,7 @@ impl StateBackend for RemoteBackend {
             // in the cache, so the next read asks for it again.
             .filter_map(|(id, fetched)| {
                 future::ready(match fetched {
-                    Err(BackendError::Unavailable(error)) => {
+                    Err(error) if error.is_unavailable() => {
                         tracing::warn!(txid = %id, %error, "remote zakura: skipped a mempool transaction");
                         None
                     }

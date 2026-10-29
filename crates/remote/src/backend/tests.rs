@@ -405,5 +405,27 @@ async fn submit_maps_a_node_error_to_rejected() {
     let mock =
         mainnet(1, |_, _| Reply::Error { code: RpcCode::IN_WARMUP, message: "warm-up" }).await;
     let error = backend(&mock).await.submit_transaction((*coinbase).clone()).await.unwrap_err();
-    assert!(matches!(error, BackendError::Unavailable(_)), "{error}");
+    assert!(matches!(error, BackendError::NodeSyncing(_)), "{error}");
+}
+
+#[tokio::test]
+async fn a_failed_call_keeps_the_state_of_the_node() {
+    let hash = block::Hash([7; 32]);
+    let mock = mainnet(1, |_, _| Reply::Close).await;
+    let error = backend(&mock).await.tree_state(hash).await.unwrap_err();
+    let gone = "remote zakura: z_gettreestate: node closed the connection";
+    assert!(
+        matches!(&error, BackendError::NodeGone(message) if message.starts_with(gone)),
+        "{error}"
+    );
+
+    let mock =
+        mainnet(1, |_, _| Reply::Error { code: RpcCode::INVALID_PARAMETER, message: "pruned" })
+            .await;
+    let error = backend(&mock).await.tree_state(hash).await.unwrap_err();
+    assert!(matches!(error, BackendError::NodeRefuses(_)), "{error}");
+
+    let mock = mainnet(1, |_, _| Reply::Result(json!("not a tree state"))).await;
+    let error = backend(&mock).await.tree_state(hash).await.unwrap_err();
+    assert!(matches!(error, BackendError::Unexpected(_)), "{error}");
 }
