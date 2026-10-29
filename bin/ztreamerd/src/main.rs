@@ -39,10 +39,12 @@ use ztreamer_sync::{
 };
 
 use embedded::{Embedded, EmbeddedNode};
+use metrics_endpoint::MetricsEndpoint;
 
 mod embedded;
 mod export;
 mod lifecycle;
+mod metrics_endpoint;
 mod remote;
 mod replicate;
 #[cfg(test)]
@@ -198,9 +200,12 @@ async fn run_daemon(cli: DaemonArgs) -> Result<()> {
     // Read and validate the identity before starting the node or the potentially lengthy index.
     let grpc_server = grpc_server(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
     if let Some(node) = cli.remote.node(&cli.replicate)? {
-        return node.run(cli, grpc_server, lifecycle::shutdown_signal()).await;
+        MetricsEndpoint::new(cli.metrics_listen).start()?;
+        return node.run_until(cli, grpc_server, lifecycle::shutdown_signal()).await;
     }
-    EmbeddedNode::load(&cli)?.run(cli, grpc_server, lifecycle::shutdown_signal()).await
+    let node = EmbeddedNode::load(&cli)?;
+    MetricsEndpoint::new(cli.metrics_listen).start()?;
+    node.run(cli, grpc_server, lifecycle::shutdown_signal()).await
 }
 
 /// The chain access that one node mode gives the daemon.

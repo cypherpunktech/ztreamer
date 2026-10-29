@@ -10,10 +10,9 @@
 
 mod compact;
 mod grpc;
+mod metrics;
 mod project;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use compact::{CompactService, NodeVersion};
-
-mod telemetry;

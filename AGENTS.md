@@ -75,6 +75,18 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
   `warn` potential issues, `error` prevents operation.
 - Propagate spans across task boundaries with `Instrument`.
 
+### Metrics
+
+- Each crate with metrics has one `metrics.rs` at its root. It has each metric name and its
+  help text as a pair of constants, and one `LazyLock` that gives the help texts to the
+  recorder. Other modules record only through the types and functions of `metrics.rs`. Do not
+  use `counter!`, `gauge!` or `histogram!` in another file.
+- Keep a metric only if an operator or a benchmark script reads it. Remove a metric that
+  nothing reads.
+- A type of metric handles takes its handles when it is made. A test can then catch the
+  samples of worker threads with a local recorder.
+- `ztreamerd` starts the Prometheus endpoint (`--metrics-listen`) in both modes.
+
 ### Async
 
 - Tokio. No blocking in async functions.

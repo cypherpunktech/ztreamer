@@ -12,10 +12,9 @@ use std::{
 use tracing::info;
 
 mod flow_control;
-mod telemetry;
+use crate::metrics::{PipelineMetrics, SegmentMetrics};
 pub use flow_control::SegmentSender;
 use flow_control::{ReadAheadReceiver, ReadAheadSender};
-use telemetry::{PipelineMetrics, SegmentMetrics};
 
 use zakura_chain::block::{self, Height};
 
@@ -304,7 +303,7 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             return Err(PipelineError::MissingBody { height: start });
         }
         let target = tip_height.0;
-        self.metrics.target.set(f64::from(target));
+        self.metrics.target(target);
         if start > target {
             return Ok(initial_state);
         }
@@ -447,7 +446,6 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
         tip_hash: block::Hash,
         mut parsed_tx: ReadAheadSender,
     ) -> Result<WorkerStats, PipelineError> {
-        let _active = self.metrics.worker();
         let mut stats = WorkerStats::default();
         loop {
             if self.stopped() {
@@ -525,10 +523,8 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             };
             let elapsed = started.elapsed();
             receive_wait += elapsed;
-            self.metrics.receive_wait.record(elapsed.as_secs_f64());
             builder.push(block)?;
             parsed_rx.set_first_missing_height(builder.first_missing_height());
-            self.metrics.buffer(&builder);
             if builder.ready_bytes() >= self.config.max_batch_bytes
                 || builder.pending_bytes() > read_ahead_limit
             {
@@ -544,7 +540,6 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
                     };
                     parsed_rx.release_bytes(pending - builder.pending_bytes());
                     send_wait += self.send_batch(batch, &batch_tx)?;
-                    self.metrics.buffer(&builder);
                     if builder.pending_bytes() <= read_ahead_limit {
                         break;
                     }
@@ -566,7 +561,6 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
             builder.build_batch(drain_through, drain_through, self.config.max_batch_bytes)?
         {
             send_wait += self.send_batch(batch, &batch_tx)?;
-            self.metrics.buffer(&builder);
         }
         Ok((receive_wait, send_wait))
     }
@@ -580,11 +574,11 @@ impl<'a, S: HistoricalSource> HistoricalPipeline<'a, S> {
     ) -> Result<Duration, PipelineError> {
         let started = Instant::now();
         let batch = batch.encode(self.config.workers).map_err(IngestError::from)?;
-        self.metrics.encode.record(started.elapsed().as_secs_f64());
+        self.metrics.encode(started.elapsed());
         let started = Instant::now();
         let sent = batch_tx.send(batch);
         let elapsed = started.elapsed();
-        self.metrics.batch_wait.record(elapsed.as_secs_f64());
+        self.metrics.batch_send_wait(elapsed);
         sent.map_err(|_| PipelineError::Worker)?;
         Ok(elapsed)
     }

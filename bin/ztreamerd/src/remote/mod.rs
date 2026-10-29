@@ -22,7 +22,6 @@ use tonic::transport::Server;
 use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
-use zakurad::components::metrics;
 use ztreamer_index::index::{BlockId, Index, range_meta::NodeId};
 use ztreamer_remote::{Auth, RpcClient, RpcCode, Secret, ZakuraClient};
 use ztreamer_remote::{RemoteBackend, RemoteHeadSource, RemoteTailSource};
@@ -182,20 +181,6 @@ impl RemoteNode {
     /// it.
     fn id(&self) -> NodeId {
         NodeId { url: self.client.rpc().url().to_string(), version: String::new() }
-    }
-
-    /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
-    /// the Prometheus endpoint, then calls [`Self::run_until`].
-    pub(crate) async fn run(
-        self,
-        cli: DaemonArgs,
-        grpc_server: Server,
-        signal: impl Future<Output = Result<()>>,
-    ) -> Result<()> {
-        // No zakurad runs, thus the metrics endpoint is the only part of its configuration.
-        let metrics = metrics::Config { endpoint_addr: Some(cli.metrics_listen) };
-        metrics::start_endpoint(&metrics);
-        self.run_until(cli, grpc_server, signal).await
     }
 
     /// Runs the daemon on this node until `signal`, the end of the work (`--index-only`), or a

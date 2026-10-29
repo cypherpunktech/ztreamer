@@ -7,5 +7,6 @@
 
 pub mod index;
 pub mod ingest;
+mod metrics;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

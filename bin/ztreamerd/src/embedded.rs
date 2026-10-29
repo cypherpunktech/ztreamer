@@ -8,7 +8,7 @@ use eyre::{Result, WrapErr, eyre};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::info;
-use zakurad::{components::metrics, config::ZakuradConfig};
+use zakurad::config::ZakuradConfig;
 use ztreamer_embedded::{self as node, InProcessBackend};
 use ztreamer_p2p::P2pCompactService;
 
@@ -30,17 +30,15 @@ impl EmbeddedNode {
         Ok(Self { config })
     }
 
-    /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It starts
-    /// the Prometheus endpoint, opens the index, and starts Zakura.
+    /// Runs the daemon on this node until `signal`, the end of the work, or a failure. It opens
+    /// the index and starts Zakura.
     pub(crate) async fn run(
         self,
         cli: DaemonArgs,
         grpc_server: Server,
         signal: impl Future<Output = Result<()>>,
     ) -> Result<()> {
-        let Self { mut config } = self;
-        config.metrics.endpoint_addr = Some(cli.metrics_listen);
-        metrics::start_endpoint(&config.metrics);
+        let Self { config } = self;
         let network = config.network.network.clone();
         let index = cli.open_index(&network).await?;
 

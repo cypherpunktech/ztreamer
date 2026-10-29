@@ -1,36 +1,76 @@
-//! Range timings cover validation/admission through final emission or stream drop.
+//! The metrics of the range streams of the service.
+//!
+//! Each metric name and its help text is a constant in this file, and [`DESCRIBE`] gives the help
+//! text to the recorder once. Other modules record only through the types of this file. A range
+//! timing covers the validation and the admission of a request, through its last block or the
+//! drop of its stream.
 
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
-use metrics::{Counter, Gauge, Histogram};
+use metrics::{
+    Counter, Gauge, Histogram, counter, describe_counter, describe_gauge, describe_histogram,
+    gauge, histogram,
+};
 use tokio_stream::Stream;
 use tonic::Status;
 use ztreamer_protocol::RpcStream;
+
+const RANGE_ACTIVE: &str = "ztreamer.range.active";
+const RANGE_ACTIVE_HELP: &str = "Range streams that run now.";
+
+const RANGE_EMITTED_BLOCKS: &str = "ztreamer.range.emitted.blocks";
+const RANGE_EMITTED_BLOCKS_HELP: &str = "Blocks that the range streams sent.";
+
+const RANGE_FIRST_SECONDS: &str = "ztreamer.range.first.seconds";
+const RANGE_FIRST_SECONDS_HELP: &str = "Time from a range request to its first block.";
+
+const RANGE_DURATION_SECONDS: &str = "ztreamer.range.duration.seconds";
+const RANGE_DURATION_SECONDS_HELP: &str =
+    "Time of one range stream, by outcome: success, error or cancelled.";
+
+const RANGE_ADMISSION_SECONDS: &str = "ztreamer.range.admission.seconds";
+const RANGE_ADMISSION_SECONDS_HELP: &str =
+    "Time that a range request waits for a free range stream.";
+
+const OUTCOMES: [&str; 3] = ["success", "error", "cancelled"];
+
+/// Gives the help text of each metric to the recorder. [`ServiceMetrics::new`] forces it.
+static DESCRIBE: LazyLock<()> = LazyLock::new(|| {
+    describe_gauge!(RANGE_ACTIVE, RANGE_ACTIVE_HELP);
+    describe_counter!(RANGE_EMITTED_BLOCKS, RANGE_EMITTED_BLOCKS_HELP);
+    describe_histogram!(RANGE_FIRST_SECONDS, RANGE_FIRST_SECONDS_HELP);
+    describe_histogram!(RANGE_DURATION_SECONDS, RANGE_DURATION_SECONDS_HELP);
+    describe_histogram!(RANGE_ADMISSION_SECONDS, RANGE_ADMISSION_SECONDS_HELP);
+});
 
 pub(crate) struct ServiceMetrics {
     active: Gauge,
     blocks: Counter,
     first: Histogram,
     duration: [Histogram; 3],
-    pub admission: Histogram,
+    admission: Histogram,
 }
 
 impl ServiceMetrics {
     pub(crate) fn new() -> Self {
+        LazyLock::force(&DESCRIBE);
         Self {
-            active: metrics::gauge!("ztreamer.range.active"),
-            blocks: metrics::counter!("ztreamer.range.emitted.blocks"),
-            first: metrics::histogram!("ztreamer.range.first.seconds"),
-            duration: ["success", "error", "cancelled"].map(|outcome| {
-                metrics::histogram!("ztreamer.range.duration.seconds", "outcome" => outcome)
-            }),
-            admission: metrics::histogram!("ztreamer.range.admission.seconds"),
+            active: gauge!(RANGE_ACTIVE),
+            blocks: counter!(RANGE_EMITTED_BLOCKS),
+            first: histogram!(RANGE_FIRST_SECONDS),
+            duration: OUTCOMES
+                .map(|outcome| histogram!(RANGE_DURATION_SECONDS, "outcome" => outcome)),
+            admission: histogram!(RANGE_ADMISSION_SECONDS),
         }
+    }
+
+    pub(crate) fn admission(&self, elapsed: Duration) {
+        self.admission.record(elapsed.as_secs_f64());
     }
 
     pub(crate) fn range(self: &Arc<Self>) -> RangeGuard {
