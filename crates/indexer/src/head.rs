@@ -4,7 +4,6 @@ use zakura_chain::{
     block,
     parameters::{GENESIS_PREVIOUS_BLOCK_HASH, constants::MAX_BLOCK_REORG_HEIGHT},
 };
-use ztreamer_jsonrpc::RpcError;
 
 use crate::{
     blocking::BlockingTaskCancelled,
@@ -13,9 +12,7 @@ use crate::{
     ingest::{IngestError, OrderedBuilder},
     parser::{CompactParseError, parse_block},
     pipeline::PipelineConfig,
-    types::{
-        BlockAtHeightError, FetchAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock,
-    },
+    types::{BlockAtHeightError, ParsedCompactBlock, RawBlockError, RawIndexBlock},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -24,7 +21,7 @@ pub enum HeadError {
     Node(String),
     /// A request to a remote zakura node failed.
     #[error("remote Zakura head request failed: {0}")]
-    Remote(#[from] RpcError),
+    Remote(Box<dyn std::error::Error + Send + Sync>),
     #[error("Zakura head block could not be decoded: {0}")]
     Decode(String),
     #[error("Zakura returned height {actual} for requested height {expected}")]
@@ -57,18 +54,8 @@ impl From<RawBlockError> for HeadError {
 impl From<BlockAtHeightError> for HeadError {
     fn from(error: BlockAtHeightError) -> Self {
         match error {
-            BlockAtHeightError::Rpc(error) => Self::Remote(error),
             BlockAtHeightError::Decode { source, .. } => source.into(),
             BlockAtHeightError::Height { expected, actual } => Self::Height { expected, actual },
-        }
-    }
-}
-
-impl From<FetchAtHeightError> for HeadError {
-    fn from(error: FetchAtHeightError) -> Self {
-        match error {
-            FetchAtHeightError::Block(error) => error.into(),
-            FetchAtHeightError::Cancelled(error) => Self::Cancelled(error),
         }
     }
 }

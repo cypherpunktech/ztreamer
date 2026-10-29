@@ -7,11 +7,9 @@ use zakura_chain::{
     serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
-use ztreamer_jsonrpc::RpcError;
 
 use crate::{
     Ciphertext, Digest, EphemeralKey,
-    blocking::BlockingTaskCancelled,
     codec::{CompactBlockRecord, TreeSizes},
 };
 
@@ -38,31 +36,15 @@ pub enum RawBlockError {
     Serialize(io::Error),
 }
 
-/// Why [`RawIndexBlock::from_bytes_at_height`] gave no block, or why the node or the bytes of
-/// `ztreamer_remote::ZakuraClient::block_at_height` gave no block.
+/// Why [`RawIndexBlock::from_bytes_at_height`] gave no block.
 #[derive(Debug, thiserror::Error)]
 pub enum BlockAtHeightError {
-    /// The `getblock` call failed. [`RpcError::is_block_not_found`] is `true` when the node has
-    /// no block at the height.
-    #[error(transparent)]
-    Rpc(#[from] RpcError),
     /// The bytes of the block at `height` do not decode.
     #[error("block at height {height} does not decode")]
     Decode { height: u32, source: RawBlockError },
     /// The block for height `expected` has the coinbase height `actual`.
     #[error("block for height {expected} is at height {actual}")]
     Height { expected: u32, actual: u32 },
-}
-
-/// Why `ztreamer_remote::ZakuraClient::block_at_height` gave no block.
-#[derive(Debug, thiserror::Error)]
-pub enum FetchAtHeightError {
-    /// The `getblock` call failed, or the bytes do not give the block at the height.
-    #[error(transparent)]
-    Block(#[from] BlockAtHeightError),
-    /// The blocking pool stopped before the decode ran.
-    #[error(transparent)]
-    Cancelled(#[from] BlockingTaskCancelled),
 }
 
 impl RawIndexBlock {

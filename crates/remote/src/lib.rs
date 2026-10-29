@@ -26,11 +26,13 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod fetch_at_height;
 pub mod frontier;
 mod methods;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use fetch_at_height::FetchAtHeightError;
 pub use methods::{Method, ZakuraClient};
 pub use ztreamer_jsonrpc::{
     Auth, HttpsClient, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, RpcErrorObject, Secret,

@@ -26,10 +26,10 @@ use ztreamer_indexer::{
     index::range_meta::Attested,
     parser::CompactParseError,
     pool::{NodeBytes, Pool, PoolRoots, SubtreeNode},
-    types::{BlockAtHeightError, FetchAtHeightError, RawBlockError},
+    types::{BlockAtHeightError, RawBlockError},
 };
 use ztreamer_remote::{
-    RpcError, ZakuraClient,
+    FetchAtHeightError, RpcError, ZakuraClient,
     frontier::{FromRpc, RpcDecodeError},
 };
 
@@ -106,7 +106,6 @@ pub enum NodeError {
 impl From<BlockAtHeightError> for NodeError {
     fn from(error: BlockAtHeightError) -> Self {
         match error {
-            BlockAtHeightError::Rpc(error) => Self::Rpc(error),
             BlockAtHeightError::Decode { source, .. } => Self::RawBlock(source),
             BlockAtHeightError::Height { expected, actual } => Self::Height { expected, actual },
         }
@@ -116,6 +115,7 @@ impl From<BlockAtHeightError> for NodeError {
 impl From<FetchAtHeightError> for NodeError {
     fn from(error: FetchAtHeightError) -> Self {
         match error {
+            FetchAtHeightError::Rpc(error) => Self::Rpc(error),
             FetchAtHeightError::Block(error) => error.into(),
             FetchAtHeightError::Cancelled(error) => Self::Cancelled(error),
         }
