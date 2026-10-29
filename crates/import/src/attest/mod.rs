@@ -41,6 +41,34 @@ use crate::range::Reject;
 /// The most `z_gettreestate` answers that a [`JsonRpcAttestor`] keeps.
 pub const CACHE_CAPACITY: usize = 1024;
 
+/// A trusted source of the chain state at a height, usually a node.
+///
+/// # Implementation
+///
+/// Give the answers of the best chain. Return a [`NodeError`] when there is no answer, not a
+/// default value: [`EpochProof::attest`](crate::proof::EpochProof::attest) rejects a range on an
+/// answer that does not agree. A root is `None` when the pool is not active at the height. An
+/// implementation may cache its answers, because the answers at a height below the tip do not
+/// change.
+#[async_trait]
+pub trait Attestor: Send + Sync {
+    /// The hash of the best-chain block at `height`.
+    async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError>;
+
+    /// The three note commitment tree roots after the block at `height`.
+    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError>;
+
+    /// The roots of the `count` completed subtrees of `pool` from `start`, in index order.
+    /// Give exactly `count` roots, or [`NodeError::MissingSubtree`] for the first that the
+    /// source does not have.
+    async fn subtree_roots(
+        &self,
+        pool: Pool,
+        start: NoteCommitmentSubtreeIndex,
+        count: u16,
+    ) -> Result<Vec<SubtreeNode>, NodeError>;
+}
+
 /// Why a node call gave no answer.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
@@ -138,34 +166,6 @@ pub enum EpochError {
         #[source]
         source: NodeError,
     },
-}
-
-/// A trusted source of the chain state at a height, usually a node.
-///
-/// # Implementation
-///
-/// Give the answers of the best chain. Return a [`NodeError`] when there is no answer, not a
-/// default value: [`EpochProof::attest`](crate::proof::EpochProof::attest) rejects a range on an
-/// answer that does not agree. A root is `None` when the pool is not active at the height. An
-/// implementation may cache its answers, because the answers at a height below the tip do not
-/// change.
-#[async_trait]
-pub trait Attestor: Send + Sync {
-    /// The hash of the best-chain block at `height`.
-    async fn block_hash(&self, height: u32) -> Result<block::Hash, NodeError>;
-
-    /// The three note commitment tree roots after the block at `height`.
-    async fn tree_roots(&self, height: u32) -> Result<PoolRoots, NodeError>;
-
-    /// The roots of the `count` completed subtrees of `pool` from `start`, in index order.
-    /// Give exactly `count` roots, or [`NodeError::MissingSubtree`] for the first that the
-    /// source does not have.
-    async fn subtree_roots(
-        &self,
-        pool: Pool,
-        start: NoteCommitmentSubtreeIndex,
-        count: u16,
-    ) -> Result<Vec<SubtreeNode>, NodeError>;
 }
 
 /// An [`Attestor`] that asks a zakura node over JSON-RPC, and keeps the tree roots.

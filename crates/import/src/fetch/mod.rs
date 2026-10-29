@@ -63,6 +63,28 @@ pub const PEER_RANGE_STREAMS: usize = 4;
 /// fetch at the same time.
 pub(crate) const HTTP_BLOB_REQUESTS: usize = 32;
 
+/// A source of sealed ranges.
+///
+/// # Implementation
+///
+/// Give the manifest only after its checks pass: a [`Manifest`] is always valid, and a signed
+/// source must verify its signatures first. [`RangeSource::fetch_blob`] sends the bytes of the
+/// blob from `offset` to its end, and an error when the transfer stops early. It does not check
+/// the digest: [`Fetcher::blob`] does. [`Fetcher`] and the importer hold a source as a
+/// `Box<dyn RangeSource>`. The `Debug` form names the source, for logs.
+#[async_trait]
+pub trait RangeSource: fmt::Debug + Send + Sync {
+    /// The manifest of the source.
+    async fn manifest(&self) -> Result<Manifest, FetchError>;
+
+    /// The bytes of the blob of `entry` from byte `offset`.
+    async fn fetch_blob(
+        &self,
+        entry: &ManifestEntry,
+        offset: u64,
+    ) -> Result<BlobStream, FetchError>;
+}
+
 /// The bytes of a range blob, in order, from the offset of the request.
 pub type BlobStream = Pin<Box<dyn Stream<Item = Result<Bytes, FetchError>> + Send>>;
 
@@ -194,28 +216,6 @@ impl FetchError {
             _ => false,
         }
     }
-}
-
-/// A source of sealed ranges.
-///
-/// # Implementation
-///
-/// Give the manifest only after its checks pass: a [`Manifest`] is always valid, and a signed
-/// source must verify its signatures first. [`RangeSource::fetch_blob`] sends the bytes of the
-/// blob from `offset` to its end, and an error when the transfer stops early. It does not check
-/// the digest: [`Fetcher::blob`] does. [`Fetcher`] and the importer hold a source as a
-/// `Box<dyn RangeSource>`. The `Debug` form names the source, for logs.
-#[async_trait]
-pub trait RangeSource: fmt::Debug + Send + Sync {
-    /// The manifest of the source.
-    async fn manifest(&self) -> Result<Manifest, FetchError>;
-
-    /// The bytes of the blob of `entry` from byte `offset`.
-    async fn fetch_blob(
-        &self,
-        entry: &ManifestEntry,
-        offset: u64,
-    ) -> Result<BlobStream, FetchError>;
 }
 
 /// Reads complete blobs from a source, and checks the length and the digest of each blob.

@@ -25,6 +25,31 @@ mod telemetry;
 pub use follower::{HeadFollower, HeadFollowerConfig, HeadFollowerError};
 pub use serving::{Readiness, RecoveryActive, ServingSnapshot, SnapshotError};
 
+/// The canonical-head operations Ztreamer needs from Zakura.
+///
+/// # Implementation guide
+///
+/// Implement [`block`](Self::block). Implement [`tip`](Self::tip) when the source can tell its
+/// tip without a block read. Implement [`block_hash`](Self::block_hash) when the source can read
+/// a hash for less than the cost of a block: [`poll_canonical_head`] reads hashes to find the
+/// first changed height, and reads blocks from that height only.
+#[tonic::async_trait]
+pub trait CanonicalBlockSource: Send {
+    async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
+        Ok(None)
+    }
+
+    async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError>;
+
+    /// The hash of the canonical block at `height`, or `None` when the source has no block at
+    /// that height.
+    ///
+    /// The default reads the block with [`block`](Self::block).
+    async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
+        Ok(self.block(height).await?.map(|block| block.hash))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum HeadError {
     #[error("Zakura head request failed: {0}")]
@@ -82,31 +107,6 @@ pub enum HeadSyncError {
     NoCommonAncestor,
     #[error("canonical reorg crosses sealed height {height}")]
     DeepReorg { height: u32 },
-}
-
-/// The canonical-head operations Ztreamer needs from Zakura.
-///
-/// # Implementation guide
-///
-/// Implement [`block`](Self::block). Implement [`tip`](Self::tip) when the source can tell its
-/// tip without a block read. Implement [`block_hash`](Self::block_hash) when the source can read
-/// a hash for less than the cost of a block: [`poll_canonical_head`] reads hashes to find the
-/// first changed height, and reads blocks from that height only.
-#[tonic::async_trait]
-pub trait CanonicalBlockSource: Send {
-    async fn tip(&mut self) -> Result<Option<BlockId>, HeadError> {
-        Ok(None)
-    }
-
-    async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError>;
-
-    /// The hash of the canonical block at `height`, or `None` when the source has no block at
-    /// that height.
-    ///
-    /// The default reads the block with [`block`](Self::block).
-    async fn block_hash(&mut self, height: u32) -> Result<Option<block::Hash>, HeadError> {
-        Ok(self.block(height).await?.map(|block| block.hash))
-    }
 }
 
 /// The canonical chain from a start height, as one [`poll_canonical_head`] call read it.

@@ -57,6 +57,10 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 - An inherent `impl Type` block is in the file that defines `Type`, also in tests. Never
   split the methods of one type over several files: a type that needs this has too many
   jobs, so split the type. A trait impl follows the orphan rule.
+- Order the items in a file: module docs, `mod` declarations, `use` and `pub use`,
+  constants, traits, types (each struct, enum or type alias followed by its impls), free
+  functions, then `#[cfg(test)] mod tests`. A trait comes before every type and impl in its
+  file, also the types that its signature uses: Rust needs no forward declaration.
 - Doc every public item. Include a usage example where it helps.
   Traits get an implementation guide.
 - A module with submodules or with a separate test file is `foo/mod.rs`, never `foo.rs` next to
