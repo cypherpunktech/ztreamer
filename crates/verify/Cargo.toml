@@ -48,6 +48,7 @@ tracing = "0.1"
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
+ztreamer-backend = { path = "../backend" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }

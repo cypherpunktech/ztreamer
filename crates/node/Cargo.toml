@@ -20,6 +20,7 @@ zakura-network.workspace = true
 zakura-node-services.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakurad = { workspace = true, features = ["indexer"] }
+ztreamer-backend = { path = "../backend" }
 ztreamer-indexer = { path = "../indexer" }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-service = { path = "../service" }

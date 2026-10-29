@@ -24,6 +24,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig, server::Router};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use zakura_chain::parameters::Network;
+use ztreamer_backend::StateBackend;
 use ztreamer_indexer::{
     head::{CanonicalBlockSource, HeadSyncError},
     index::{Index, IndexState, range_meta::NodeId},
@@ -34,7 +35,7 @@ use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
 };
-use ztreamer_service::{CompactService, HeadFollowerConfig, StateBackend};
+use ztreamer_service::{CompactService, HeadFollowerConfig};
 use ztreamer_verify::{RangeMetaFiller, ReplicatorService};
 
 use embedded::{Embedded, EmbeddedNode};

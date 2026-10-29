@@ -1,5 +1,5 @@
 //! The embedded mode of Ztreamer: the in-process Zakura client, its block sources, its
-//! [`StateBackend`](ztreamer_service::StateBackend) and the Zakura p2p transport.
+//! [`StateBackend`](ztreamer_backend::StateBackend) and the Zakura p2p transport.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 

@@ -4749,6 +4749,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
+name = "ztreamer-backend"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tonic",
+ "zakura-chain",
+ "zakura-sapling-crypto",
+ "ztreamer-indexer",
+]
+
+[[package]]
 name = "ztreamer-indexer"
 version = "0.1.0"
 dependencies = [
@@ -4810,6 +4821,7 @@ dependencies = [
  "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
+ "ztreamer-backend",
  "ztreamer-indexer",
  "ztreamer-protocol",
  "ztreamer-service",
@@ -4876,6 +4888,7 @@ dependencies = [
  "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
+ "ztreamer-backend",
  "ztreamer-indexer",
  "ztreamer-protocol",
  "ztreamer-remote",
@@ -4917,6 +4930,7 @@ dependencies = [
  "zakura-sapling-crypto",
  "zakura-state",
  "zakura-test",
+ "ztreamer-backend",
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",
@@ -4950,6 +4964,7 @@ dependencies = [
  "zakura-state",
  "zakura-test",
  "zeroize",
+ "ztreamer-backend",
  "ztreamer-indexer",
  "ztreamer-node",
  "ztreamer-protocol",

@@ -1,5 +1,6 @@
 //! Shared CompactTxStreamer behavior with a gRPC transport adapter. The service reads the chain
-//! state through a [`StateBackend`]: `ztreamer_node::InProcessBackend` for the embedded node, or
+//! state through a [`StateBackend`](ztreamer_backend::StateBackend):
+//! `ztreamer_node::InProcessBackend` for the embedded node, or
 //! [`RemoteBackend`](remote::RemoteBackend) for a remote node over JSON-RPC. `ztreamer_node` also
 //! has the Zakura p2p transport.
 
@@ -7,7 +8,6 @@
 #![allow(missing_docs)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-pub mod backend;
 mod compact;
 mod grpc;
 mod project;
@@ -15,7 +15,6 @@ pub mod remote;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use backend::{BackendError, StateBackend};
 pub use compact::{
     CompactService, HeadFollowerConfig, HeadFollowerError, NodeVersion, Readiness, RpcStream,
     ServingSnapshot, SnapshotError, index_status,

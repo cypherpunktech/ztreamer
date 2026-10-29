@@ -16,7 +16,9 @@ use zakura_chain::{
     transaction,
 };
 
-use crate::{backend::StateBackend, telemetry::ServiceMetrics};
+use ztreamer_backend::StateBackend;
+
+use crate::telemetry::ServiceMetrics;
 
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, StoredBlock},

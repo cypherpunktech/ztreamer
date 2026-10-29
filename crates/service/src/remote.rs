@@ -31,7 +31,7 @@
 //!
 //! [`ZakuraClient`]: ztreamer_remote::ZakuraClient
 //! [`HistoricalPipeline`]: ztreamer_indexer::pipeline::HistoricalPipeline
-//! [`StateBackend`]: crate::StateBackend
+//! [`StateBackend`]: ztreamer_backend::StateBackend
 //! [`CompactService`]: crate::CompactService
 //! [`CompactService::follow_head`]: crate::CompactService::follow_head
 

@@ -40,7 +40,7 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::pool::{self, NodeBytes, SubtreeNode};
 use ztreamer_remote::{RpcError, ZakuraClient, frontier::FromRpc};
 
-use crate::backend::{
+use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 
@@ -75,8 +75,11 @@ pub enum RemoteConnectError {
     },
 }
 
-impl From<RpcError> for BackendError {
-    fn from(error: RpcError) -> Self {
+/// A failed call to the remote node. It converts to the [`BackendError`] that the call gives.
+struct NodeCallError(RpcError);
+
+impl From<NodeCallError> for BackendError {
+    fn from(NodeCallError(error): NodeCallError) -> Self {
         match error {
             RpcError::Protocol { .. } | RpcError::Decode { .. } => {
                 Self::Unexpected(format!("remote zakura: {error}"))
@@ -157,7 +160,13 @@ impl RemoteBackend {
         start: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<Subtrees<P::Node>, BackendError> {
-        P::parse_subtrees(self.node.z_get_subtrees_by_index(P::NAME, start, limit).await?, start)
+        P::parse_subtrees(
+            self.node
+                .z_get_subtrees_by_index(P::NAME, start, limit)
+                .await
+                .map_err(NodeCallError)?,
+            start,
+        )
     }
 
     /// The `getrawtransaction` answer for `id` with verbose 1. `None` when the node does not
@@ -169,7 +178,7 @@ impl RemoteBackend {
         let response = match self.node.get_raw_transaction(id).await {
             Ok(response) => response,
             Err(error) if error.is_transaction_not_found() => return Ok(None),
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(NodeCallError(error).into()),
         };
         let GetRawTransactionResponse::Object(object) = response else {
             return Err(BackendError::Unexpected(
@@ -417,14 +426,14 @@ impl StateBackend for RemoteBackend {
     }
 
     async fn tip_height(&self) -> Result<Option<block::Height>, BackendError> {
-        Ok(Some(self.node.get_block_count().await?))
+        Ok(Some(self.node.get_block_count().await.map_err(NodeCallError)?))
     }
 
     async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
         let raw = match self.node.get_block_raw(HashOrHeight::Hash(hash)).await {
             Ok(raw) => raw,
             Err(error) if error.is_block_not_found() => return Ok(None),
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(NodeCallError(error).into()),
         };
         let block = Block::from_node_bytes(raw.0).await?;
         if block.hash() != hash {
@@ -455,7 +464,8 @@ impl StateBackend for RemoteBackend {
         if let Some(trees) = cached {
             return Ok(trees);
         }
-        let response = self.node.z_get_treestate(HashOrHeight::Hash(hash)).await?;
+        let response =
+            self.node.z_get_treestate(HashOrHeight::Hash(hash)).await.map_err(NodeCallError)?;
         if response.hash() != hash {
             return Err(BackendError::Unexpected(format!(
                 "remote zakura sent the tree state of {} for {hash}",
@@ -515,7 +525,9 @@ impl StateBackend for RemoteBackend {
         // The node also moves a start above its tip down to the tip. Read the tip first: the tip
         // of the node does not go down, so the node then keeps the start as it is. A start of 0
         // cannot be above the tip.
-        if heights.start().0 > 0 && *heights.start() > self.node.get_block_count().await? {
+        if heights.start().0 > 0
+            && *heights.start() > self.node.get_block_count().await.map_err(NodeCallError)?
+        {
             return Ok(Vec::new());
         }
         let request = GetAddressTxIdsRequest::new(
@@ -525,7 +537,8 @@ impl StateBackend for RemoteBackend {
         );
         self.node
             .get_address_tx_ids(&request)
-            .await?
+            .await
+            .map_err(NodeCallError)?
             .iter()
             .map(|id| {
                 id.parse().map_err(|_| {
@@ -541,7 +554,9 @@ impl StateBackend for RemoteBackend {
     ) -> Result<Amount<NonNegative>, BackendError> {
         let request =
             GetAddressBalanceRequest::new(addresses.iter().map(ToString::to_string).collect());
-        Ok(Amount::try_from(self.node.get_address_balance(&request).await?.balance())?)
+        Ok(Amount::try_from(
+            self.node.get_address_balance(&request).await.map_err(NodeCallError)?.balance(),
+        )?)
     }
 
     async fn address_utxos(
@@ -550,7 +565,7 @@ impl StateBackend for RemoteBackend {
     ) -> Result<Vec<AddressUtxo>, BackendError> {
         let addresses = addresses.iter().map(ToString::to_string).collect();
         let request = GetAddressUtxosRequest::new(addresses, false);
-        let utxos = match self.node.get_address_utxos(&request).await? {
+        let utxos = match self.node.get_address_utxos(&request).await.map_err(NodeCallError)? {
             GetAddressUtxosResponse::Utxos(utxos) => utxos,
             GetAddressUtxosResponse::UtxosAndChainInfo(object) => object.utxos().clone(),
         };
@@ -569,7 +584,7 @@ impl StateBackend for RemoteBackend {
     }
 
     async fn mempool_transactions(&self) -> Result<Vec<UnminedTx>, BackendError> {
-        let ids = match self.node.get_raw_mempool().await? {
+        let ids = match self.node.get_raw_mempool().await.map_err(NodeCallError)? {
             GetRawMempoolResponse::TxIds(ids) => ids,
             GetRawMempoolResponse::Verbose(objects) => objects.into_keys().collect(),
         };
@@ -616,11 +631,13 @@ impl StateBackend for RemoteBackend {
             Ok(sent) => Ok(sent.hash()),
             // Warm-up and a method that the listener does not serve are about the node, not
             // about the transaction.
-            Err(error) if error.is_retryable() || error.is_method_not_found() => Err(error.into()),
+            Err(error) if error.is_retryable() || error.is_method_not_found() => {
+                Err(NodeCallError(error).into())
+            }
             Err(RpcError::Rpc { code, message, .. }) => Err(BackendError::Rejected(format!(
                 "remote zakura rejected transaction: {message} ({code})"
             ))),
-            Err(error) => Err(error.into()),
+            Err(error) => Err(NodeCallError(error).into()),
         }
     }
 }
