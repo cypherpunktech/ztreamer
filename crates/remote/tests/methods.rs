@@ -50,6 +50,15 @@ fn sent(mock: &MockNode) -> (String, Value) {
 }
 
 #[tokio::test]
+async fn get_info() {
+    let (mock, node) = node(vector(include_str!("vectors/getinfo.json"))).await;
+    let info = node.get_info().await.unwrap();
+    assert_eq!(info.build(), "v2.3.0+10.gc66d6ca.modified");
+    assert_eq!(info.subversion(), "/Zebra:2.3.0/");
+    assert_eq!(sent(&mock), ("getinfo".into(), json!([])));
+}
+
+#[tokio::test]
 async fn get_blockchain_info() {
     let (mock, node) = node(vector(include_str!("vectors/getblockchaininfo.json"))).await;
     let info = node.get_blockchain_info().await.unwrap();

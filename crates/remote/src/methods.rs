@@ -10,7 +10,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use zakura_rpc::{
     client::{
         GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
-        GetAddressUtxosResponse, GetBlockHashResponse, GetBlockchainInfoResponse,
+        GetAddressUtxosResponse, GetBlockHashResponse, GetBlockchainInfoResponse, GetInfoResponse,
         GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
         GetTreestateResponse, HexData, SendRawTransactionResponse,
         zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex, transaction},
@@ -31,6 +31,8 @@ use crate::FetchAtHeightError;
 /// chain in `test_utils` use this type, thus each name has one spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Method {
+    /// `getinfo`.
+    GetInfo,
     /// `getblockchaininfo`.
     GetBlockchainInfo,
     /// `getblockcount`.
@@ -61,6 +63,7 @@ impl Method {
     /// The name of the method on the wire.
     pub const fn name(self) -> &'static str {
         match self {
+            Self::GetInfo => "getinfo",
             Self::GetBlockchainInfo => "getblockchaininfo",
             Self::GetBlockCount => "getblockcount",
             Self::GetBlockHash => "getblockhash",
@@ -143,6 +146,11 @@ impl ZakuraClient {
         params: P,
     ) -> Result<R, RpcError> {
         self.rpc.call(method.name(), params).await
+    }
+
+    /// `getinfo`: the build and the user agent of the node.
+    pub async fn get_info(&self) -> Result<GetInfoResponse, RpcError> {
+        self.call(Method::GetInfo, ()).await
     }
 
     /// `getblockchaininfo`: the chain, the tip and the value pools.

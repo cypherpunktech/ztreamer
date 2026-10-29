@@ -12,7 +12,7 @@ use zakurad::config::ZakuradConfig;
 use ztreamer_embedded::{FinalizedDb, InProcessBackend, NodeClient};
 use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_p2p::P2pCompactService;
-use ztreamer_service::CompactService;
+use ztreamer_service::{CompactService, NodeVersion};
 
 use crate::{
     index_pass::{IndexPass, PassKind},
@@ -140,6 +140,11 @@ impl NodeComponents for EmbeddedComponents {
     ) -> Result<ControlFlow<(), Tail<FinalizedDb, NodeClient>>> {
         let tail = Tail { finalized: self.client.finalized_db(), head: self.client.clone() };
         Ok(ControlFlow::Continue(tail))
+    }
+
+    /// The Zakura of this build. It does not call the node.
+    async fn node_version(&self) -> Result<NodeVersion> {
+        Ok(NodeClient::version())
     }
 
     fn id(&self) -> NodeId {
