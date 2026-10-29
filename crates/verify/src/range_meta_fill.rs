@@ -41,10 +41,8 @@ use ztreamer_indexer::{
     pool::{PoolRoots, SubtreeNode, SubtreeRoot},
 };
 
-use ztreamer_service::{
-    ServingSnapshot,
-    backend::{BackendError, StateBackend, Subtrees},
-};
+use ztreamer_backend::{BackendError, StateBackend, Subtrees};
+use ztreamer_service::ServingSnapshot;
 
 /// The number of filled ranges between two progress lines in the log.
 const LOG_EVERY: u64 = 100;

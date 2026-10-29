@@ -1,0 +1,16 @@
+[package]
+name = "ztreamer-backend"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+description = "The chain-state reads that ztreamer needs from a Zakura node"
+
+[lints]
+workspace = true
+
+[dependencies]
+sapling-crypto.workspace = true
+thiserror = "2"
+tonic = "0.14.6"
+zakura-chain.workspace = true
+ztreamer-indexer = { path = "../indexer" }

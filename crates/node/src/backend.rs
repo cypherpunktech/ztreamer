@@ -14,7 +14,7 @@ use zakura_chain::{
     transparent,
 };
 use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
-use ztreamer_service::backend::{
+use ztreamer_backend::{
     AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 

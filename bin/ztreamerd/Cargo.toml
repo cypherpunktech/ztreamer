@@ -23,6 +23,7 @@ zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakurad = { workspace = true, features = ["indexer", "prometheus"] }
 zeroize = "1"
+ztreamer-backend = { path = "../../crates/backend" }
 ztreamer-indexer = { path = "../../crates/indexer" }
 ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }

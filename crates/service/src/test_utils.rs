@@ -3,10 +3,7 @@
 //!
 //! Compiled for this crate's own tests and for targets that enable the `test-utils` feature.
 
-use crate::{
-    CompactService, NodeVersion,
-    backend::{AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState},
-};
+use crate::{CompactService, NodeVersion};
 use prost::Message as _;
 use sapling_crypto::Node as SaplingNode;
 use std::{
@@ -26,6 +23,9 @@ use zakura_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, Transaction, UnminedTx},
     transparent,
+};
+use ztreamer_backend::{
+    AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 use ztreamer_indexer::{
     codec::CompactBlockRecord,
