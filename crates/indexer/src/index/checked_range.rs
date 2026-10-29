@@ -28,8 +28,8 @@ use super::{
     BlockId, IndexError,
     tables::{RangeChain, SealedRange},
 };
-use crate::manifest_entry::{BlobDigest, BlobMismatch, ManifestEntry};
 use ztreamer_chain::codec::{CodecError, CompactBlockRecord};
+use ztreamer_snapshot::manifest_entry::{BlobDigest, BlobMismatch, ManifestEntry};
 
 /// A range blob that passed the checks of an install that do not need the index. The module
 /// docs give the checks.

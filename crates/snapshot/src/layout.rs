@@ -9,7 +9,7 @@
 //! ```
 //!
 //! `<time>` is UTC, for example `2026-10-26T143005Z`.
-//! [`SnapshotWriter`](crate::snapshot_writer::SnapshotWriter) writes the directory.
+//! `ztreamer_verify::snapshot_writer::SnapshotWriter` writes the directory.
 //!
 //! `latest.json` is the only file that an export replaces. It holds its own signature, so that a
 //! reader never sees a new pointer with an old signature:
@@ -23,11 +23,11 @@
 //! that it trusts. The file does not hold the key: a source that can change the file can also
 //! change a key in it.
 
+use crate::manifest_entry::ManifestEntry;
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_with::{hex::Hex, serde_as};
-use ztreamer_indexer::manifest_entry::ManifestEntry;
 
 /// The Ed25519 public key that signs the snapshots that a replica accepts.
 ///
@@ -97,7 +97,7 @@ impl Latest {
 ///
 /// ```
 /// use ed25519_dalek::SigningKey;
-/// use ztreamer_verify::snapshot::SignatureFile;
+/// use ztreamer_snapshot::layout::SignatureFile;
 ///
 /// let key = SigningKey::from_bytes(&[7; 32]);
 /// let file = SignatureFile::sign(b"manifest", &key).to_hex();
@@ -160,8 +160,8 @@ impl TryFrom<&[u8]> for SignatureFile {
 /// in hex.
 ///
 /// ```
-/// # use ztreamer_indexer::manifest_entry::ManifestEntry;
-/// use ztreamer_verify::snapshot::RangePath;
+/// # use ztreamer_snapshot::manifest_entry::ManifestEntry;
+/// use ztreamer_snapshot::layout::RangePath;
 ///
 /// # fn run(entry: &ManifestEntry) {
 /// let path = RangePath::from(entry);
@@ -187,10 +187,10 @@ impl From<&ManifestEntry> for RangePath {
 
 #[cfg(test)]
 mod tests {
-    use ztreamer_indexer::manifest_entry::BlobDigest;
+    use crate::manifest_entry::BlobDigest;
 
     use super::*;
-    use crate::{epoch::synthetic_entries, test_utils::SEED};
+    use crate::test_utils::synthetic_entries;
 
     #[test]
     fn the_snapshot_key_is_a_valid_key_that_is_not_weak() {
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn a_signature_file_verifies_its_bytes_with_its_key_only() {
-        let key = SigningKey::from_bytes(&SEED);
+        let key = SigningKey::from_bytes(&[7; 32]);
         let file = format!("{}\n", SignatureFile::sign(b"manifest", &key).to_hex());
         let signature = SignatureFile::try_from(file.as_bytes()).unwrap();
 

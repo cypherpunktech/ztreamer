@@ -30,11 +30,11 @@ use ztreamer_chain::{
     parser::CompactParseError,
     types::{BlockAtHeightError, RawBlockError},
 };
-use ztreamer_indexer::pool::{NodeBytes, Pool, PoolRoots, SubtreeNode};
 use ztreamer_remote::{
     FetchAtHeightError, RpcError, ZakuraClient,
     frontier::{FromRpc, RpcDecodeError},
 };
+use ztreamer_snapshot::pool::{NodeBytes, Pool, PoolRoots, SubtreeNode};
 
 use crate::range::Reject;
 

@@ -151,13 +151,18 @@ fn fixed(field: &'static str, bytes: Vec<u8>) -> Result<[u8; 32], WireError> {
 
 #[cfg(test)]
 mod tests {
+    use zakura_chain::ironwood;
+
     use super::*;
-    use crate::index::range_meta::full_meta;
+    use crate::{pool::SubtreeNode, test_utils::full_entry};
 
     /// An entry with subtree roots of the Sapling, Orchard and Ironwood pools.
     fn entry() -> ManifestEntry {
-        let mut entry = full_meta(2_000).entry;
-        entry.subtree_roots.extend(full_meta(2_000).attested.unwrap().subtree_roots);
+        let mut entry = full_entry(2_000);
+        entry.subtree_roots.push(SubtreeRoot {
+            index: NoteCommitmentSubtreeIndex(5),
+            root: SubtreeNode::Ironwood(ironwood::tree::Node::try_from([6; 32]).unwrap()),
+        });
         entry
     }
 

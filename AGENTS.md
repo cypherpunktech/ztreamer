@@ -2,7 +2,7 @@
 
 Zcash indexer and light-wallet server with an embedded or remote Zakura node.
 Cargo workspace: `bin/ztreamerd` plus
-`crates/{backend,blocking,chain,indexer,jsonrpc,node,p2p,protocol,remote,service,verify}`.
+`crates/{backend,blocking,chain,indexer,jsonrpc,node,p2p,protocol,remote,service,snapshot,verify}`.
 Building needs `protoc` on the path.
 
 ## Commands

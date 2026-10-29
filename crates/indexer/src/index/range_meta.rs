@@ -41,11 +41,11 @@ use heed::{
 use zakura_chain::{block, ironwood, orchard, sapling};
 
 use super::IndexError;
-use crate::{
+use ztreamer_chain::codec::{CodecError, Reader, put_bytes, put_count, take_bool};
+use ztreamer_snapshot::{
     manifest_entry::ManifestEntry,
     pool::{PoolRoots, SubtreeRoot, put_subtree_roots, take_subtree_roots},
 };
-use ztreamer_chain::codec::{CodecError, Reader, put_bytes, put_count, take_bool};
 
 const FORMAT_VERSION: u8 = 1;
 
@@ -261,41 +261,12 @@ impl RangeMetaTable {
 /// A record for the range at `start` with every optional part present and every list non-empty.
 #[cfg(test)]
 pub(crate) fn full_meta(start: u32) -> RangeMeta {
-    use sapling_crypto::Node as SaplingNode;
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
-
-    use crate::{
-        manifest_entry::{BlobDigest, Frontiers},
-        pool::SubtreeNode,
-    };
-    use ztreamer_chain::{codec::TreeSizes, test_utils::hash};
+    use ztreamer_chain::test_utils::hash;
+    use ztreamer_snapshot::{pool::SubtreeNode, test_utils::full_entry};
 
     RangeMeta {
-        entry: ManifestEntry {
-            range_version: 1,
-            start_height: start,
-            end_height: start + 999,
-            end_hash: hash(start + 999),
-            end_tree_sizes: TreeSizes { sapling: 61_231_877, orchard: 12, ironwood: 0 },
-            frontiers: Frontiers {
-                sapling: vec![0xab; 1_100],
-                orchard: vec![0xcd; 900],
-                ironwood: Vec::new(),
-            },
-            subtree_roots: vec![
-                SubtreeRoot {
-                    index: NoteCommitmentSubtreeIndex(934),
-                    root: SubtreeNode::Sapling(SaplingNode::from_bytes([1; 32]).unwrap()),
-                },
-                SubtreeRoot {
-                    index: NoteCommitmentSubtreeIndex(0),
-                    root: SubtreeNode::Orchard(orchard::tree::Node::try_from([2; 32]).unwrap()),
-                },
-            ],
-            blob_digest: BlobDigest([7; 32]),
-            blob_len: 121_034_512,
-            epoch_end: true,
-        },
+        entry: full_entry(start),
         state: VerifyState::Verified,
         verified_by: Some(NodeId {
             url: "https://node.example:8232".to_owned(),
@@ -321,8 +292,8 @@ pub(crate) fn full_meta(start: u32) -> RangeMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest_entry::{BlobDigest, Frontiers};
     use ztreamer_chain::{codec::TreeSizes, test_utils::hash};
+    use ztreamer_snapshot::manifest_entry::{BlobDigest, Frontiers};
 
     /// A record with every optional part absent and every list empty.
     fn bare_meta(start: u32) -> RangeMeta {

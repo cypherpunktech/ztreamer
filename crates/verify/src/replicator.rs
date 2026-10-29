@@ -20,7 +20,6 @@ use zakura_chain::parameters::Network;
 use ztreamer_indexer::{
     head::ServingSnapshot,
     index::{Index, IndexError, range_meta::VerifyState},
-    manifest_entry::MANIFEST_VERSION,
 };
 use ztreamer_protocol::{
     RpcStream,
@@ -29,6 +28,7 @@ use ztreamer_protocol::{
         replicator_server::Replicator,
     },
 };
+use ztreamer_snapshot::manifest_entry::MANIFEST_VERSION;
 
 /// The largest `data` of one [`RangeChunk`].
 pub(crate) const CHUNK_BYTES: usize = 1 << 20;

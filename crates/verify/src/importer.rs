@@ -39,7 +39,7 @@
 //!
 //! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
 //! [`Fetcher::blob`]: crate::fetch::Fetcher::blob
-//! [`Epoch::closed_by_rule`]: crate::epoch::Epoch::closed_by_rule
+//! [`Epoch::closed_by_rule`]: ztreamer_snapshot::epoch::Epoch::closed_by_rule
 //! [`EpochProof::attest`]: crate::proof::EpochProof::attest
 //! [`SamplePlan::sample`]: crate::sample::SamplePlan::sample
 //! [`VerifyState::Verified`]: ztreamer_indexer::index::range_meta::VerifyState::Verified
@@ -54,19 +54,16 @@ use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
 use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_indexer::{
-    index::{Index, IndexError, IndexState, range_meta::NodeId},
-    manifest_entry::Frontiers,
-};
+use ztreamer_indexer::index::{Index, IndexError, IndexState, range_meta::NodeId};
+use ztreamer_snapshot::manifest_entry::Frontiers;
 
 use self::epoch_import::EpochImport;
 use crate::{
     attest::{Attestor, EpochError, NodeError},
-    epoch::Epoch,
     fetch::{FetchError, Fetcher, RangeSource},
-    manifest::Manifest,
     sample::{SamplePlan, Sampler},
 };
+use ztreamer_snapshot::{epoch::Epoch, manifest::Manifest};
 
 /// The byte budget of the blobs from their fetch to their install. Each epoch takes the bytes
 /// of its blobs before its fetch, in height order, and keeps them until its install. The

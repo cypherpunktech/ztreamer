@@ -13,4 +13,4 @@ sapling-crypto.workspace = true
 thiserror = "2"
 tonic = "0.14.6"
 zakura-chain.workspace = true
-ztreamer-indexer = { path = "../indexer" }
+ztreamer-snapshot = { path = "../snapshot" }

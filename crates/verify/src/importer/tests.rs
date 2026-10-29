@@ -12,9 +12,11 @@ use ztreamer_chain::{
 };
 use ztreamer_indexer::{
     index::range_meta::{Attested, VerifyState},
+    test_utils::{range_meta_row, sealed_range_blob},
+};
+use ztreamer_snapshot::{
     manifest_entry::{MAX_RANGES, ManifestEntry},
     pool::{Pool, PoolRoots, SubtreeNode},
-    test_utils::{range_meta_row, sealed_range_blob},
 };
 
 use super::*;

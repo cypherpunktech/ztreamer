@@ -44,7 +44,6 @@ use ztreamer_chain::{
 use ztreamer_indexer::head::ServingSnapshot;
 use ztreamer_indexer::{
     index::{Index, IndexState},
-    manifest_entry::{BlobDigest, ManifestEntry},
     test_utils::{populate, range_meta_row, sealed_range_blob},
 };
 use ztreamer_node::{InProcessBackend, NodeClient};
@@ -52,11 +51,10 @@ use ztreamer_protocol::replicate::{
     Empty, ExportInfo, GetRangeRequest, ListRangesRequest, RangeChunk,
     replicator_server::{Replicator, ReplicatorServer},
 };
+use ztreamer_snapshot::manifest_entry::{BlobDigest, ManifestEntry};
 
-use crate::{
-    RangeMetaFiller, ReplicatorService, manifest::Manifest, snapshot::RangePath,
-    snapshot_writer::SnapshotWriter,
-};
+use crate::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
+use ztreamer_snapshot::{layout::RangePath, manifest::Manifest};
 
 /// The seed of the key that signs a [`Snapshot`].
 pub const SEED: [u8; 32] = [7; 32];

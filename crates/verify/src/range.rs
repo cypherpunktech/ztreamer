@@ -31,10 +31,8 @@ use std::fmt;
 use bytes::Bytes;
 use zakura_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 use ztreamer_chain::codec::{CompactBlockRecord, TreeSizes};
-use ztreamer_indexer::{
-    index::{CheckedRange, RangeCheckError},
-    manifest_entry::{BlobMismatch, ManifestEntry},
-};
+use ztreamer_indexer::index::{CheckedRange, RangeCheckError};
+use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
 /// The end of a checked range: what the next range must link to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

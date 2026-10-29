@@ -26,7 +26,6 @@ bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 ed25519-dalek.workspace = true
 futures-util = "0.3"
-hex = "0.4"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
@@ -35,9 +34,7 @@ pasta_curves.workspace = true
 prost = "0.14.4"
 rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-serde_with = { version = "3", features = ["hex"] }
 tempfile = { version = "3", optional = true }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
@@ -55,9 +52,11 @@ ztreamer-indexer = { path = "../indexer" }
 ztreamer-node = { path = "../node", optional = true }
 ztreamer-protocol = { path = "../protocol" }
 ztreamer-remote = { path = "../remote" }
+ztreamer-snapshot = { path = "../snapshot" }
 
 [dev-dependencies]
 criterion = "0.8"
+hex = "0.4"
 hyper = { version = "1", features = ["server"] }
 incrementalmerkletree.workspace = true
 sapling-crypto.workspace = true
@@ -70,6 +69,7 @@ ztreamer-indexer = { path = "../indexer", features = ["test-utils"] }
 ztreamer-node = { path = "../node" }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 ztreamer-service = { path = "../service", features = ["test-utils"] }
+ztreamer-snapshot = { path = "../snapshot", features = ["test-utils"] }
 
 [[bench]]
 name = "epoch"

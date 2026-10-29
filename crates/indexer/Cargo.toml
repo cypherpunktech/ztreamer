@@ -12,12 +12,9 @@ workspace = true
 test-utils = ["ztreamer-chain/test-utils"]
 
 [dependencies]
-blake3.workspace = true
 heed = { version = "0.22.1", default-features = false }
-hex = "0.4"
 metrics = "0.24"
 prost = "0.14.4"
-sapling-crypto.workspace = true
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tonic = "0.14.6"
@@ -25,7 +22,7 @@ tracing = "0.1"
 zakura-chain.workspace = true
 ztreamer-blocking = { path = "../blocking" }
 ztreamer-chain = { path = "../chain" }
-ztreamer-protocol = { path = "../protocol" }
+ztreamer-snapshot = { path = "../snapshot" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
@@ -36,6 +33,8 @@ zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 # Enables `test_utils` for this crate's benches.
 ztreamer-indexer = { path = ".", features = ["test-utils"] }
+ztreamer-protocol = { path = "../protocol" }
+ztreamer-snapshot = { path = "../snapshot", features = ["test-utils"] }
 
 [[bench]]
 name = "index"

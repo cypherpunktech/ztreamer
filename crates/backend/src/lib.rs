@@ -32,7 +32,7 @@ use zakura_chain::{
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
-use ztreamer_indexer::{manifest_entry::Frontiers, pool::PoolRoots};
+use ztreamer_snapshot::{manifest_entry::Frontiers, pool::PoolRoots};
 
 /// Why a backend request failed. Each variant maps to one gRPC status code.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

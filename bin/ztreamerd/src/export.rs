@@ -1,7 +1,7 @@
 //! `ztreamerd export-snapshot`: writes the sealed ranges of an index as a snapshot that a replica
 //! can import.
 //!
-//! [`ztreamer_verify::snapshot`] gives the layout of the snapshot directory. The manifest is
+//! [`ztreamer_snapshot::layout`] gives the layout of the snapshot directory. The manifest is
 //! `manifests/<time>.json`, where `<time>` is UTC, for example `2026-10-26T143005Z`.
 //!
 //! The export reads the chain from the identity row of the index. It starts at genesis and stops
@@ -26,8 +26,10 @@ use tracing::{info, warn};
 use zakura_chain::parameters::Network;
 use zeroize::Zeroizing;
 use ztreamer_chain::codec::RANGE_SIZE;
-use ztreamer_indexer::{index::Index, manifest_entry::ManifestEntry};
-use ztreamer_verify::{manifest::Manifest, snapshot_writer::SnapshotWriter};
+use ztreamer_indexer::index::Index;
+use ztreamer_snapshot::manifest::Manifest;
+use ztreamer_snapshot::manifest_entry::ManifestEntry;
+use ztreamer_verify::snapshot_writer::SnapshotWriter;
 
 /// Writes the sealed ranges of an index as a snapshot. The index is the one of the global
 /// `--index-dir` and `--index-map-size` flags.

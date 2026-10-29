@@ -6,22 +6,19 @@ use ztreamer_chain::{
     codec::{RANGE_SIZE, TreeSizes, encode_range},
     test_utils::{hash, record},
 };
-use ztreamer_indexer::{
-    index::range_meta::Attested,
-    manifest_entry::{Frontiers, ManifestEntry},
-    pool::SubtreeRoot,
-};
+use ztreamer_indexer::index::range_meta::Attested;
 use ztreamer_remote::{
     RpcClient,
     test_utils::{MockNode, Reply},
 };
+use ztreamer_snapshot::{
+    manifest_entry::{Frontiers, ManifestEntry},
+    pool::SubtreeRoot,
+};
 
 use super::*;
-use crate::{
-    epoch::{Epochs, synthetic_entries},
-    proof::EpochProof,
-    range::Check,
-};
+use crate::{proof::EpochProof, range::Check};
+use ztreamer_snapshot::{epoch::Epochs, test_utils::synthetic_entries};
 
 const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 

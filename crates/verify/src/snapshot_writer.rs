@@ -1,5 +1,5 @@
 //! The source side of a snapshot: [`SnapshotWriter`] writes a snapshot directory from an index,
-//! in the layout of [`crate::snapshot`].
+//! in the layout of [`ztreamer_snapshot::layout`].
 
 use std::{
     fs::{self, File},
@@ -10,17 +10,15 @@ use std::{
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
 use tracing::warn;
-use ztreamer_indexer::{
-    index::{Index, IndexError},
-    manifest_entry::{BlobMismatch, ManifestEntry},
-};
+use ztreamer_indexer::index::{Index, IndexError};
+use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
-use crate::{
+use ztreamer_snapshot::{
+    layout::{Latest, RangePath, SignatureFile},
     manifest::Manifest,
-    snapshot::{Latest, RangePath, SignatureFile},
 };
 
-/// Writes a snapshot directory in the layout of [`crate::snapshot`]. One key signs the directory.
+/// Writes a snapshot directory in the layout of [`ztreamer_snapshot::layout`]. One key signs the directory.
 ///
 /// The writer writes each file to a temporary file next to its path. Then it renames the
 /// temporary file to the path. Thus a reader sees the old file or the new file, never a part of
@@ -181,10 +179,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        epoch::synthetic_entries,
         fetch::{HttpSource, RangeSource as _},
         test_utils::{FileServer, SEED, SourceIndex},
     };
+    use ztreamer_snapshot::test_utils::synthetic_entries;
 
     #[test]
     fn a_blob_that_does_not_match_its_entry_is_not_written() {

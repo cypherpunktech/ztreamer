@@ -146,7 +146,8 @@ impl ManifestEntry {
         }
     }
 
-    pub(crate) fn encode_into(&self, bytes: &mut Vec<u8>) {
+    /// Writes the entry in the `range_meta` layout of the index.
+    pub fn encode_into(&self, bytes: &mut Vec<u8>) {
         bytes.push(self.range_version);
         bytes.extend_from_slice(&self.start_height.to_be_bytes());
         bytes.extend_from_slice(&self.end_height.to_be_bytes());
@@ -166,7 +167,8 @@ impl ManifestEntry {
         bytes.push(u8::from(self.epoch_end));
     }
 
-    pub(crate) fn decode_from(reader: &mut Reader<'_>) -> Result<Self, CodecError> {
+    /// Reads an entry that [`ManifestEntry::encode_into`] wrote.
+    pub fn decode_from(reader: &mut Reader<'_>) -> Result<Self, CodecError> {
         let range_version = reader.u8()?;
         let start_height = reader.u32()?;
         let end_height = reader.u32()?;
