@@ -11,10 +11,9 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use zakura_chain::sapling;
 use ztreamer_indexer::{
     codec::{TreeSizes, encode_range},
-    index::{
-        RANGE_SIZE,
-        range_meta::{Frontiers, ManifestEntry, SubtreeNode, SubtreeRoot},
-    },
+    index::RANGE_SIZE,
+    manifest_entry::{Frontiers, ManifestEntry},
+    pool::{SubtreeNode, SubtreeRoot},
     test_utils::{hash, record},
     types::{CompactSaplingOutput, CompactTransaction},
 };

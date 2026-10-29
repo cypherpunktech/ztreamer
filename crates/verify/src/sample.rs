@@ -179,7 +179,7 @@ mod tests {
     use zakura_test::vectors::BLOCK_MAINNET_949496_BYTES;
     use ztreamer_indexer::{
         codec::{CompactBlockRecord, TreeSizes, encode_range},
-        index::range_meta::ManifestEntry,
+        manifest_entry::ManifestEntry,
         test_utils::{hash, raw_block},
     };
     use ztreamer_remote::{

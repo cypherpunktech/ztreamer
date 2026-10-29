@@ -31,12 +31,9 @@ use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as}
 use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
 use ztreamer_indexer::{
     codec::TreeSizes,
-    index::{
-        RANGE_SIZE,
-        range_meta::{
-            BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry, NodeBytes, Pool, SubtreeRoot,
-        },
-    },
+    index::RANGE_SIZE,
+    manifest_entry::{BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry},
+    pool::{NodeBytes, Pool, SubtreeRoot},
 };
 
 use crate::epoch::Epochs;
@@ -127,7 +124,7 @@ impl Manifest {
     ///
     /// ```
     /// use zakura_chain::block;
-    /// use ztreamer_indexer::index::range_meta::ManifestEntry;
+    /// use ztreamer_indexer::manifest_entry::ManifestEntry;
     /// use ztreamer_verify::manifest::{Manifest, ManifestError};
     ///
     /// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
@@ -160,7 +157,7 @@ impl Manifest {
     ///
     /// ```
     /// use zakura_chain::block;
-    /// use ztreamer_indexer::index::range_meta::ManifestEntry;
+    /// use ztreamer_indexer::manifest_entry::ManifestEntry;
     /// use ztreamer_verify::manifest::{Manifest, ManifestError};
     ///
     /// fn manifest(genesis: block::Hash, rows: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {

@@ -34,9 +34,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_with::{hex::Hex, serde_as};
 use tracing::warn;
-use ztreamer_indexer::index::{
-    Index, IndexError,
-    range_meta::{BlobMismatch, ManifestEntry},
+use ztreamer_indexer::{
+    index::{Index, IndexError},
+    manifest_entry::{BlobMismatch, ManifestEntry},
 };
 
 use crate::manifest::Manifest;
@@ -172,7 +172,7 @@ impl TryFrom<&[u8]> for SignatureFile {
 /// in hex.
 ///
 /// ```
-/// # use ztreamer_indexer::index::range_meta::ManifestEntry;
+/// # use ztreamer_indexer::manifest_entry::ManifestEntry;
 /// use ztreamer_verify::snapshot::RangePath;
 ///
 /// # fn run(entry: &ManifestEntry) {
@@ -355,7 +355,7 @@ impl SnapshotWriter {
 mod tests {
     use chrono::TimeDelta;
     use zakura_chain::parameters::Network;
-    use ztreamer_indexer::index::range_meta::BlobDigest;
+    use ztreamer_indexer::manifest_entry::BlobDigest;
 
     use super::*;
     use crate::{

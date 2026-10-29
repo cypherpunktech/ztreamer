@@ -54,10 +54,8 @@ use tracing::{Instrument as _, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::{
     blocking::{BlockingTask, BlockingTaskCancelled},
-    index::{
-        Index, IndexError, IndexState, RANGE_SIZE,
-        range_meta::{Frontiers, NodeId},
-    },
+    index::{Index, IndexError, IndexState, RANGE_SIZE, range_meta::NodeId},
+    manifest_entry::Frontiers,
 };
 
 use self::epoch_import::EpochImport;

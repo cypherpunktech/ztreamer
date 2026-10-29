@@ -37,10 +37,8 @@ use tonic::{Status, transport::Server};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
-    index::{
-        Index, IndexState, RANGE_SIZE,
-        range_meta::{BlobDigest, ManifestEntry},
-    },
+    index::{Index, IndexState, RANGE_SIZE},
+    manifest_entry::{BlobDigest, ManifestEntry},
     parser::parse_block,
     test_utils::{populate, range_meta_row, raw_block, sealed_range_blob},
     types::RawIndexBlock,

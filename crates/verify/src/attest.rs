@@ -23,8 +23,9 @@ use zakura_state::HashOrHeight;
 use ztreamer_indexer::{
     blocking::BlockingTaskCancelled,
     codec::CodecError,
-    index::range_meta::{Attested, NodeBytes, Pool, PoolRoots, SubtreeNode},
+    index::range_meta::Attested,
     parser::CompactParseError,
+    pool::{NodeBytes, Pool, PoolRoots, SubtreeNode},
     types::{BlockAtHeightError, FetchAtHeightError, RawBlockError},
 };
 use ztreamer_remote::{
@@ -185,7 +186,7 @@ impl Epoch<'_> {
     /// the entry cannot show the difference.
     ///
     /// ```
-    /// use ztreamer_indexer::index::range_meta::{Attested, Frontiers};
+    /// use ztreamer_indexer::{index::range_meta::Attested, manifest_entry::Frontiers};
     /// use ztreamer_verify::{
     ///     attest::{Attestor, EpochError},
     ///     epoch::Epoch,

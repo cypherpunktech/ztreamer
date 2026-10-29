@@ -538,6 +538,24 @@ fn set_u32(bytes: &mut [u8], offset: usize, value: usize) -> Result<(), CodecErr
     Ok(())
 }
 
+pub(crate) fn put_count(bytes: &mut Vec<u8>, count: usize) {
+    let count = u32::try_from(count).expect("range metadata lists are far below u32::MAX items");
+    bytes.extend_from_slice(&count.to_be_bytes());
+}
+
+pub(crate) fn put_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
+    put_count(bytes, value.len());
+    bytes.extend_from_slice(value);
+}
+
+pub(crate) fn take_bool(reader: &mut Reader<'_>) -> Result<bool, CodecError> {
+    match reader.u8()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(CodecError::InvalidRecord),
+    }
+}
+
 /// A cursor over an encoded value. Every read is bounds-checked; a short value is
 /// [`CodecError::Truncated`].
 pub(crate) struct Reader<'a> {

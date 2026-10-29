@@ -9,8 +9,10 @@ pub mod codec;
 pub mod head;
 pub mod index;
 pub mod ingest;
+pub mod manifest_entry;
 pub mod parser;
 pub mod pipeline;
+pub mod pool;
 mod protobuf;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

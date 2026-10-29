@@ -2,8 +2,7 @@
 
 use std::io;
 
-use super::range_meta::BlobMismatch;
-use crate::codec::CodecError;
+use crate::{codec::CodecError, manifest_entry::BlobMismatch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {

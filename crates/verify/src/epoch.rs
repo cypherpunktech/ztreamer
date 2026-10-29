@@ -17,13 +17,9 @@ use pasta_curves::{group::ff::PrimeField, pallas};
 use zakura_chain::{ironwood, orchard, sapling};
 use ztreamer_indexer::{
     codec::{CompactBlockRecord, TreeSizes},
-    index::{
-        CheckedRange,
-        range_meta::{
-            Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry, PoolRoots, SubtreeNode,
-            SubtreeRoot,
-        },
-    },
+    index::CheckedRange,
+    manifest_entry::{Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry},
+    pool::{PoolRoots, SubtreeNode, SubtreeRoot},
     types::CompactShieldedAction,
 };
 use ztreamer_remote::frontier::{FromRpc, RpcDecodeError};
@@ -350,10 +346,8 @@ impl TryFrom<&CompactBlockRecord> for Leaves {
 #[cfg(test)]
 pub(crate) fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
     use ztreamer_indexer::{
-        index::{
-            RANGE_SIZE,
-            range_meta::{BlobDigest, Frontiers},
-        },
+        index::RANGE_SIZE,
+        manifest_entry::{BlobDigest, Frontiers},
         test_utils::hash,
     };
 

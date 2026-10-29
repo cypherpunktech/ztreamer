@@ -14,8 +14,9 @@ use ztreamer_indexer::{
     blocking::BlockingTask,
     index::{
         CheckedRange, IndexState,
-        range_meta::{Frontiers, MAX_RANGES, ManifestEntry, RangeMeta, VerifyState},
+        range_meta::{RangeMeta, VerifyState},
     },
+    manifest_entry::{Frontiers, MAX_RANGES, ManifestEntry},
 };
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};

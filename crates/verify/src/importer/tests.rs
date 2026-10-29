@@ -7,9 +7,9 @@ use tokio::sync::Notify;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_indexer::{
     codec::{RangeDecoder, encode_range},
-    index::range_meta::{
-        Attested, MAX_RANGES, ManifestEntry, Pool, PoolRoots, SubtreeNode, VerifyState,
-    },
+    index::range_meta::{Attested, VerifyState},
+    manifest_entry::{MAX_RANGES, ManifestEntry},
+    pool::{Pool, PoolRoots, SubtreeNode},
     test_utils::{range_meta_row, raw_block, sealed_range_blob},
     types::RawIndexBlock,
 };
