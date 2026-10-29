@@ -8,25 +8,23 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-prost = "0.14.4"
 sapling-crypto.workspace = true
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
-tokio-stream = "0.1"
 tonic = "0.14.6"
 tower = { version = "0.5.3", features = ["buffer", "util"] }
 zakura-chain.workspace = true
-zakura-network.workspace = true
 zakura-node-services.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakurad = { workspace = true, features = ["indexer"] }
 ztreamer-backend = { path = "../backend" }
 ztreamer-indexer = { path = "../indexer" }
-ztreamer-protocol = { path = "../protocol" }
 ztreamer-service = { path = "../service" }
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+tokio-stream = "0.1"
 zakura-test.workspace = true
+ztreamer-protocol = { path = "../protocol" }
 ztreamer-service = { path = "../service", features = ["test-utils"] }

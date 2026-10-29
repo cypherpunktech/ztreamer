@@ -29,6 +29,7 @@ ztreamer-protocol = { path = "../../crates/protocol" }
 ztreamer-service = { path = "../../crates/service" }
 ztreamer-verify = { path = "../../crates/verify" }
 ztreamer-node = { path = "../../crates/node" }
+ztreamer-p2p = { path = "../../crates/p2p" }
 ztreamer-remote = { path = "../../crates/remote" }
 tokio-util = "0.7"
 
