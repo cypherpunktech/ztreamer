@@ -1,8 +1,39 @@
-//! Write-stage timing for [`Index::write`](super::Index::write) and the index state gauges.
+//! The metrics of the index: the time of each write stage, and the heights of the index.
+//!
+//! Each metric name and its help text is a constant in this file, and [`DESCRIBE`] gives the help
+//! text to the recorder once. Other modules record only through the types and functions of this
+//! file.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::LazyLock,
+    time::{Duration, Instant},
+};
 
-use super::IndexState;
+use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
+
+use crate::index::IndexState;
+
+const WRITE_SECONDS: &str = "ztreamer.index.write.seconds";
+const WRITE_SECONDS_HELP: &str = "Time of each stage of one index write that committed.";
+
+const WRITE_SEAL_READ_BLOCKS: &str = "ztreamer.index.write.seal_read.blocks";
+const WRITE_SEAL_READ_BLOCKS_HELP: &str =
+    "Mutable blocks that index writes read again to seal a range.";
+
+const DURABLE_HEIGHT: &str = "ztreamer.index.durable.block.height";
+const DURABLE_HEIGHT_HELP: &str = "The highest block in the index. NaN on an empty index.";
+
+const SEALED_HEIGHT: &str = "ztreamer.index.sealed.block.height";
+const SEALED_HEIGHT_HELP: &str =
+    "The last block of the highest sealed range. NaN when no range is sealed.";
+
+/// Gives the help text of each metric to the recorder. Each record forces it.
+static DESCRIBE: LazyLock<()> = LazyLock::new(|| {
+    describe_histogram!(WRITE_SECONDS, WRITE_SECONDS_HELP);
+    describe_counter!(WRITE_SEAL_READ_BLOCKS, WRITE_SEAL_READ_BLOCKS_HELP);
+    describe_gauge!(DURABLE_HEIGHT, DURABLE_HEIGHT_HELP);
+    describe_gauge!(SEALED_HEIGHT, SEALED_HEIGHT_HELP);
+});
 
 #[derive(Clone, Copy)]
 pub(crate) enum WriteStage {
@@ -31,8 +62,8 @@ impl WriteStage {
     ];
 
     pub(crate) fn record(self, elapsed: Duration) {
-        metrics::histogram!("ztreamer.index.write.seconds", "stage" => self.label())
-            .record(elapsed.as_secs_f64());
+        LazyLock::force(&DESCRIBE);
+        histogram!(WRITE_SECONDS, "stage" => self.label()).record(elapsed.as_secs_f64());
     }
 
     const fn label(self) -> &'static str {
@@ -56,18 +87,12 @@ impl WriteStage {
 pub(crate) struct WriteTimer {
     last: Instant,
     elapsed: [Option<Duration>; WRITE_STAGES],
-    bytes: [usize; WRITE_STAGES],
     seal_read_blocks: usize,
 }
 
 impl WriteTimer {
     pub(crate) fn start() -> Self {
-        Self {
-            last: Instant::now(),
-            elapsed: [None; WRITE_STAGES],
-            bytes: [0; WRITE_STAGES],
-            seal_read_blocks: 0,
-        }
+        Self { last: Instant::now(), elapsed: [None; WRITE_STAGES], seal_read_blocks: 0 }
     }
 
     pub(crate) fn lap(&mut self, stage: WriteStage) {
@@ -89,10 +114,6 @@ impl WriteTimer {
         self.lap_if(blocks > 0, WriteStage::SealRead);
         self.seal_read_blocks += blocks;
     }
-
-    pub(crate) const fn bytes(&mut self, stage: WriteStage, bytes: usize) {
-        self.bytes[stage as usize] += bytes;
-    }
 }
 
 impl WriteTimer {
@@ -103,20 +124,14 @@ impl WriteTimer {
             if let Some(elapsed) = self.elapsed[index] {
                 stage.record(elapsed);
             }
-            if self.bytes[index] > 0 {
-                metrics::counter!("ztreamer.index.write.bytes", "stage" => stage.label())
-                    .increment(self.bytes[index] as u64);
-            }
         }
-        metrics::counter!("ztreamer.index.write.seal_read.blocks")
-            .increment(self.seal_read_blocks as u64);
+        LazyLock::force(&DESCRIBE);
+        counter!(WRITE_SEAL_READ_BLOCKS).increment(self.seal_read_blocks as u64);
     }
 }
 
 pub(crate) fn record_state_metrics(state: IndexState) {
-    metrics::gauge!("ztreamer.index.durable.block.height")
-        .set(state.durable_tip.map_or(f64::NAN, |tip| tip.height.into()));
-    metrics::gauge!("ztreamer.index.sealed.block.height")
-        .set(state.sealed_through.map_or(f64::NAN, Into::into));
-    metrics::gauge!("ztreamer.index.generation").set(state.generation as f64);
+    LazyLock::force(&DESCRIBE);
+    gauge!(DURABLE_HEIGHT).set(state.durable_tip().map_or(f64::NAN, |tip| tip.height.into()));
+    gauge!(SEALED_HEIGHT).set(state.sealed_through().map_or(f64::NAN, Into::into));
 }

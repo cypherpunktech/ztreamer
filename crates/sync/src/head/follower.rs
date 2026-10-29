@@ -7,16 +7,18 @@ use std::{
 };
 
 use tokio::sync::watch;
+use ztreamer_chain::codec::CompactBlockRecord;
+use ztreamer_index::index::{Index, IndexState};
 
 use super::{
     CanonicalBlockSource, HeadSyncError, recover_deep_reorg,
     serving::{Readiness, ServingSnapshot, SnapshotError},
     sync_head_once,
-    telemetry::{HeadMetrics, ObservedSource},
 };
-use crate::pipeline::PipelineConfig;
-use ztreamer_chain::codec::CompactBlockRecord;
-use ztreamer_index::index::{Index, IndexState};
+use crate::{
+    metrics::{HeadMetrics, ObservedSource},
+    pipeline::PipelineConfig,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeadFollowerConfig {
@@ -137,12 +139,12 @@ impl HeadFollower {
             self.begin_recovery();
         }
         let (state, head) = result.inspect_err(|_| {
-            self.metrics.head_error.record(started.elapsed().as_secs_f64());
+            self.metrics.reconcile(started.elapsed(), false);
         })?;
         self.publish_head(state, head)
             .expect("head reconciliation must produce a connected snapshot");
         self.metrics.published(observed.observed, self.snapshot().visible_tip);
-        self.metrics.head_success.record(started.elapsed().as_secs_f64());
+        self.metrics.reconcile(started.elapsed(), true);
         Ok(state)
     }
 

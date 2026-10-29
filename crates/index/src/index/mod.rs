@@ -132,8 +132,8 @@ pub mod range_meta;
 mod snapshot;
 mod state;
 mod tables;
-mod telemetry;
 mod writer;
+use crate::metrics::{WriteStage, record_state_metrics};
 pub use batch::{EncodedBatch, WriteBatch};
 pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
@@ -142,7 +142,6 @@ use range_meta::RangeMeta;
 pub use snapshot::IndexSnapshot;
 pub use state::{BlockId, ChainIdentity, IndexState};
 use tables::{SealedRange, Tables, range_start};
-use telemetry::{WriteStage, record_state_metrics};
 use writer::IndexWriter;
 use ztreamer_chain::codec::RANGE_SIZE;
 

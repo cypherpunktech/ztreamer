@@ -13,7 +13,7 @@ use zakura_chain::{
 
 use ztreamer_backend::StateBackend;
 
-use crate::telemetry::ServiceMetrics;
+use crate::metrics::ServiceMetrics;
 
 use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock};
 use ztreamer_index::index::Index;

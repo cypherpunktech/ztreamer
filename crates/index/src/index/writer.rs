@@ -13,8 +13,8 @@ use super::{
     BlockId, IndexError, IndexState, RANGE_SIZE,
     range_meta::{RangeMeta, VerifyState},
     tables::{RangeChain, Tables, range_start},
-    telemetry::{WriteStage, WriteTimer, record_state_metrics},
 };
+use crate::metrics::{WriteStage, WriteTimer, record_state_metrics};
 use ztreamer_chain::codec::{
     CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes,
 };
@@ -283,7 +283,6 @@ impl<'env> IndexWriter<'env> {
         let mut wrote = false;
         for block in blocks {
             self.tables.mutable_blocks.put(&mut self.txn, block.height, block.bytes.as_slice())?;
-            self.with_timer(|timer| timer.bytes(WriteStage::MutablePut, block.bytes.len()));
             wrote = true;
         }
         self.with_timer(|timer| timer.lap_if(wrote, WriteStage::MutablePut));
@@ -377,10 +376,7 @@ impl<'env> IndexWriter<'env> {
         self.with_timer(|timer| timer.lap(WriteStage::SealEncode));
         self.tables.sealed_ranges.put(&mut self.txn, start, packed.as_slice())?;
         self.tables.mutable_blocks.delete_range(&mut self.txn, start..mutable_end)?;
-        self.with_timer(|timer| {
-            timer.lap(WriteStage::SealPut);
-            timer.bytes(WriteStage::SealPut, packed.len());
-        });
+        self.with_timer(|timer| timer.lap(WriteStage::SealPut));
         self.state.sealed_through = Some(end);
         self.join_sealed_range_to_verified_prefix(start, end);
         Ok(())

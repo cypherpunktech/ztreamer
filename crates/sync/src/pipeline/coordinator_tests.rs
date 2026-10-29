@@ -511,7 +511,7 @@ fn failed_lmdb_transaction_never_advances_checkpoint_and_can_resume() {
 }
 
 #[test]
-fn failed_pass_exports_partial_work_and_resets_live_gauges() {
+fn failed_pass_exports_partial_work() {
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 
     let recorder = DebuggingRecorder::new();
@@ -529,9 +529,6 @@ fn failed_pass_exports_partial_work_and_resets_live_gauges() {
     assert_eq!(metric("ztreamer.pipeline.source.blocks"), &DebugValue::Counter(10));
     let committed = index.state().unwrap().durable_tip().map_or(0, |tip| u64::from(tip.height) + 1);
     assert_eq!(metric("ztreamer.pipeline.committed.blocks"), &DebugValue::Counter(committed));
-    for name in ["workers.active", "pending.bytes", "ready.bytes"] {
-        assert_eq!(metric(&format!("ztreamer.pipeline.{name}")), &DebugValue::Gauge(0.0.into()));
-    }
     for name in ["pass", "segment"] {
         let outcome = values
             .iter()

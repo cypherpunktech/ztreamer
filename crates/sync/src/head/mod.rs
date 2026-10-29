@@ -20,7 +20,6 @@ use ztreamer_index::{
 
 mod follower;
 mod serving;
-mod telemetry;
 
 pub use follower::{HeadFollower, HeadFollowerConfig, HeadFollowerError};
 pub use serving::{Readiness, RecoveryActive, ServingSnapshot, SnapshotError};

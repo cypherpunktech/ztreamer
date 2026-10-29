@@ -132,7 +132,7 @@ impl CompactService {
         }
         let admission_started = Instant::now();
         let permit = Arc::clone(&self.range_streams).acquire_owned().await;
-        self.metrics.admission.record(admission_started.elapsed().as_secs_f64());
+        self.metrics.admission(admission_started.elapsed());
         let permit = permit.map_err(|_| Status::unavailable("range stream pool is closed"))?;
         let index = Arc::clone(&self.index);
         let ascending = start <= end;
