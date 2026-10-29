@@ -148,6 +148,31 @@ fn continuity_rejects_metadata_for_a_range_that_is_not_sealed() {
     index.verify_continuity().unwrap();
 }
 
+/// A row built from the blocks of a range before a deep reorg replaced the range is refused. A
+/// row for the new blocks is written.
+#[test]
+fn range_meta_for_the_old_blocks_of_a_replaced_range_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let index = open_index(dir.path());
+    let old = index.write(batch(&index, 0..=2_100, 2_200)).unwrap();
+    let common = BlockId::new(1_950, hash(1_950));
+    let replacement = branch(common, 1_951..=2_110);
+    let state =
+        index.replace_deep_suffix(old.generation(), common, replacement, Some(2_010)).unwrap();
+    assert_eq!(state.sealed_through(), Some(1_999));
+
+    assert!(matches!(
+        index.put_range_meta(1_000, &full_meta(1_000)),
+        Err(IndexError::RangeEndHash { start: 1_000 })
+    ));
+    assert_eq!(index.range_meta(1_000).unwrap(), None);
+
+    let mut replaced = full_meta(1_000);
+    replaced.entry.end_hash = branch_hash(1_999);
+    index.put_range_meta(1_000, &replaced).unwrap();
+    assert_eq!(index.range_meta(1_000).unwrap(), Some(replaced));
+}
+
 #[test]
 fn deep_reorg_drops_the_metadata_of_rebuilt_ranges_and_they_rejoin_the_verified_prefix() {
     let dir = tempfile::tempdir().unwrap();

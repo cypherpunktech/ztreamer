@@ -208,14 +208,12 @@ impl RangeMetaFiller {
             }),
             sampled_heights: Vec::new(),
         };
-        self.blocking(move |index| {
-            // A deep reorg can replace the range after the read. Do not write a row for the old
-            // blocks.
-            if RangeRead::record(index, meta.entry.end_height)?.hash != meta.entry.end_hash {
-                return Err(FillError::Replaced { start });
-            }
-            index.put_range_meta(start, &meta)?;
-            Ok(meta)
+        // A deep reorg can replace the range after the read. The write refuses a row for the old
+        // blocks.
+        self.blocking(move |index| match index.put_range_meta(start, &meta) {
+            Ok(()) => Ok(meta),
+            Err(IndexError::RangeEndHash { .. }) => Err(FillError::Replaced { start }),
+            Err(error) => Err(error.into()),
         })
         .await
     }

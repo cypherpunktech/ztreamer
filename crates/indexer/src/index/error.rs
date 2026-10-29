@@ -37,6 +37,13 @@ pub enum IndexError {
     Replacement { height: u32 },
     #[error("range metadata at {start} does not describe a sealed range that starts there")]
     RangeMeta { start: u32 },
+    /// The canonical block at the end height of a range does not have the end hash of the range
+    /// metadata. A deep reorg replaced the range.
+    #[error("sealed range at {start} does not end with the end hash of its metadata")]
+    RangeEndHash {
+        /// The first height of the range.
+        start: u32,
+    },
     #[error("height {height} is not the first height of a range")]
     RangeStart { height: u32 },
     #[error("sealed range at {start} is not the next range; the next range starts at {next}")]
