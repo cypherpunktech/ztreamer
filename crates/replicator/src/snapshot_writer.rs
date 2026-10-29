@@ -115,10 +115,7 @@ impl SnapshotWriter {
     }
 
     /// The path of the manifest for `now`. It refuses the path if a file has it.
-    pub(crate) fn new_manifest_path(
-        &self,
-        now: DateTime<Utc>,
-    ) -> Result<String, SnapshotWriteError> {
+    pub fn new_manifest_path(&self, now: DateTime<Utc>) -> Result<String, SnapshotWriteError> {
         let path = format!("manifests/{}.json", now.format("%Y-%m-%dT%H%M%SZ"));
         if self.root.join(&path).exists() {
             return Err(SnapshotWriteError::ManifestExists(path));
@@ -145,11 +142,7 @@ impl SnapshotWriter {
     /// Writes the manifest at `path`, then its signature, then `latest.json`. For a short time,
     /// the manifest is present without its signature. But `latest.json` points at the manifest
     /// only after the signature is present.
-    pub(crate) fn put_manifest_and_latest(
-        &self,
-        path: &str,
-        manifest: &Manifest,
-    ) -> io::Result<()> {
+    pub fn put_manifest_and_latest(&self, path: &str, manifest: &Manifest) -> io::Result<()> {
         let bytes = serde_json::to_vec(manifest).expect("a Manifest always serializes");
         self.put(path, &bytes)?;
         let signature = SignatureFile::sign(&bytes, &self.key);
@@ -174,20 +167,13 @@ impl SnapshotWriter {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
-    use zakura_chain::parameters::Network;
-
     use super::*;
-    use crate::{
-        fetch::{HttpSource, RangeSource as _},
-        test_utils::{FileServer, SEED, SourceIndex},
-    };
     use ztreamer_snapshot::test_utils::synthetic_entries;
 
     #[test]
     fn a_blob_that_does_not_match_its_entry_is_not_written() {
         let dir = tempfile::tempdir().unwrap();
-        let writer = SnapshotWriter::new(dir.path(), SigningKey::from_bytes(&SEED));
+        let writer = SnapshotWriter::new(dir.path(), SigningKey::from_bytes(&[7; 32]));
         let mut entry = synthetic_entries(&[Default::default()]).pop().unwrap();
         entry.blob_len = 5;
 
@@ -198,30 +184,5 @@ mod tests {
             "{error:?}"
         );
         assert!(!dir.path().join(RangePath::from(&entry).as_str()).exists());
-    }
-
-    /// Twelve ranges: the filler closes an epoch only at range 9. The first export has the first
-    /// epoch. The second export, on the next day, has all ranges.
-    #[tokio::test]
-    async fn http_source_reads_the_manifest_of_each_export() {
-        let source = SourceIndex::new(12).await;
-        let dir = tempfile::tempdir().unwrap();
-        let key = SigningKey::from_bytes(&SEED);
-        let http = HttpSource::new(FileServer::start(dir.path()).await.base, key.verifying_key());
-        let (http, writer) = (http.unwrap(), SnapshotWriter::new(dir.path(), key));
-        let entries = source.entries();
-        let manifest = |ranges| {
-            let entries = entries[..ranges].to_vec();
-            Manifest::new(Network::Mainnet.to_string(), Network::Mainnet.genesis_hash(), entries)
-                .unwrap()
-        };
-        let now = DateTime::from_timestamp(1_792_972_800, 0).unwrap();
-
-        for (ranges, written, now) in [(10, 10, now), (12, 2, now + TimeDelta::days(1))] {
-            let exported = writer.export(&source.index, &manifest(ranges), now).unwrap();
-
-            assert_eq!(exported.written, written);
-            assert_eq!(http.manifest().await.unwrap(), manifest(ranges));
-        }
     }
 }

@@ -2,7 +2,7 @@
 
 Zcash indexer and light-wallet server with an embedded or remote Zakura node.
 Cargo workspace: `bin/ztreamerd` plus
-`crates/{backend,blocking,chain,index,jsonrpc,node,p2p,protocol,remote,service,snapshot,sync,verify}`.
+`crates/{backend,blocking,chain,import,index,jsonrpc,node,p2p,protocol,remote,replicator,service,snapshot,sync}`.
 Building needs `protoc` on the path.
 
 ## Commands
@@ -80,7 +80,7 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
   `foo/tests.rs`. Integration tests in
   `tests/`. Benchmarks in `benches/`. Shared fixtures in the `test_utils` modules of
   `ztreamer_chain`, `ztreamer_index`, `ztreamer_remote` and `ztreamer_service`, behind the
-  `test-utils` feature of each crate. `ztreamer_verify::test_utils` is for the
+  `test-utils` feature of each crate. `ztreamer_import::test_utils` is for the
   tests of that crate only.
 - A module of shared test fixtures is named `test_utils`, also in a binary or inside a
   module. Never `test_support`.

@@ -149,7 +149,7 @@ impl EpochProof {
     /// ```
     /// use ztreamer_index::index::range_meta::Attested;
     /// use ztreamer_snapshot::{epoch::Epoch, manifest_entry::Frontiers};
-    /// use ztreamer_verify::{
+    /// use ztreamer_import::{
     ///     attest::{Attestor, EpochError},
     ///     proof::EpochProof,
     /// };

@@ -7,8 +7,8 @@
 //! - [`manifest`]: the JSON manifest of a snapshot.
 //! - [`layout`]: the files of a snapshot directory and their signatures.
 //!
-//! The crate has no I/O. The source writes the files with `ztreamer_verify::snapshot_writer`,
-//! and the replica reads them with `ztreamer_verify::fetch`.
+//! The crate has no I/O. The source writes the files with `ztreamer_replicator::snapshot_writer`,
+//! and the replica reads them with `ztreamer_import::fetch`.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 

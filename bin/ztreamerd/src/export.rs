@@ -27,9 +27,9 @@ use zakura_chain::parameters::Network;
 use zeroize::Zeroizing;
 use ztreamer_chain::codec::RANGE_SIZE;
 use ztreamer_index::index::Index;
+use ztreamer_replicator::snapshot_writer::SnapshotWriter;
 use ztreamer_snapshot::manifest::Manifest;
 use ztreamer_snapshot::manifest_entry::ManifestEntry;
-use ztreamer_verify::snapshot_writer::SnapshotWriter;
 
 /// Writes the sealed ranges of an index as a snapshot. The index is the one of the global
 /// `--index-dir` and `--index-map-size` flags.

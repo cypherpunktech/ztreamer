@@ -1,5 +1,5 @@
 //! The HTTP/1 client over rustls of [`RpcClient`](crate::RpcClient) and of the snapshot source
-//! of `ztreamer-verify`.
+//! of `ztreamer-import`.
 
 use std::{error::Error, sync::Arc, time::Duration};
 

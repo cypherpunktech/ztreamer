@@ -80,7 +80,7 @@ impl SamplePlan {
     ///
     /// ```
     /// use ztreamer_snapshot::epoch::Epoch;
-    /// use ztreamer_verify::{
+    /// use ztreamer_import::{
     ///     attest::EpochError,
     ///     sample::{SamplePlan, Sampler},
     /// };
@@ -143,7 +143,7 @@ impl SamplePlan {
 ///
 /// ```no_run
 /// use ztreamer_remote::{RpcClient, ZakuraClient};
-/// use ztreamer_verify::sample::{JsonRpcSampler, Sampler};
+/// use ztreamer_import::sample::{JsonRpcSampler, Sampler};
 ///
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ZakuraClient::config("http://127.0.0.1:8232".parse()?);

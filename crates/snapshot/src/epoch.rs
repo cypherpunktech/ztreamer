@@ -6,7 +6,7 @@
 //! or at the first range that brings the note commitments it adds to [`MAX_COMMITMENTS`]. The
 //! last range of the manifest also closes an epoch. Mainnet has about 400 epochs.
 //!
-//! An [`Epoch`] only groups manifest entries. `ztreamer_verify::proof::EpochProof` checks
+//! An [`Epoch`] only groups manifest entries. `ztreamer_import::proof::EpochProof` checks
 //! and rebuilds the ranges of an epoch, and the node attests the proof.
 
 use std::iter::FusedIterator;

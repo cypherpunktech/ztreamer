@@ -9,7 +9,7 @@
 //! ```
 //!
 //! `<time>` is UTC, for example `2026-10-26T143005Z`.
-//! `ztreamer_verify::snapshot_writer::SnapshotWriter` writes the directory.
+//! `ztreamer_replicator::snapshot_writer::SnapshotWriter` writes the directory.
 //!
 //! `latest.json` is the only file that an export replaces. It holds its own signature, so that a
 //! reader never sees a new pointer with an old signature:
