@@ -8,10 +8,14 @@ use zakura_chain::{
     transaction,
 };
 
-use crate::{
-    Ciphertext, Digest, EphemeralKey,
-    codec::{CompactBlockRecord, TreeSizes},
-};
+use crate::codec::{CompactBlockRecord, TreeSizes};
+
+/// A 32-byte digest: a commitment, a nullifier or a key.
+pub type Digest = [u8; 32];
+/// The ephemeral public key of a shielded output.
+pub type EphemeralKey = [u8; 32];
+/// The first 52 bytes of a shielded output ciphertext, as the compact format keeps them.
+pub type Ciphertext = [u8; 52];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RawIndexBlock {

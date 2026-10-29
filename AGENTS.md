@@ -57,6 +57,8 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 - An inherent `impl Type` block is in the file that defines `Type`, also in tests. Never
   split the methods of one type over several files: a type that needs this has too many
   jobs, so split the type. A trait impl follows the orphan rule.
+- `lib.rs` holds only the crate docs, crate attributes, `mod` declarations and `pub use`
+  re-exports. Each type, trait, function, constant and type alias is in a module file.
 - Order the items in a file: module docs, `mod` declarations, `use` and `pub use`,
   constants, traits, types (each struct, enum or type alias followed by its impls), free
   functions, then `#[cfg(test)] mod tests`. A trait comes before every type and impl in its

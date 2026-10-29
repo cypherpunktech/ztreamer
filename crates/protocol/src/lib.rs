@@ -7,33 +7,23 @@
 
 mod encoded;
 pub mod p2p;
-pub use encoded::EncodedCompactBlock;
+mod rpc_stream;
 
-/// A stream of gRPC answers: the type of each server stream of the services in this crate.
-pub type RpcStream<T> = std::pin::Pin<
-    Box<dyn tonic::codegen::tokio_stream::Stream<Item = Result<T, tonic::Status>> + Send>,
->;
+pub use encoded::EncodedCompactBlock;
+pub use rpc_stream::RpcStream;
 
 /// Server bindings that can send a previously encoded CompactBlock.
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
-pub mod wire {
-    include!(concat!(env!("OUT_DIR"), "/wire/cash.z.wallet.sdk.rpc.rs"));
-}
+pub mod wire;
 
 /// Compact messages whose byte fields share one owned decode buffer.
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
-pub mod compact_bytes {
-    include!(concat!(env!("OUT_DIR"), "/compact_bytes/cash.z.wallet.sdk.rpc.rs"));
-}
+pub mod compact_bytes;
 
 /// Generated Lightwallet protocol types and service descriptors.
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
-pub mod proto {
-    tonic::include_proto!("cash.z.wallet.sdk.rpc");
-}
+pub mod proto;
 
 /// Generated Replicator service types: a ztreamer serves its sealed ranges to a replica.
 #[allow(missing_docs, clippy::missing_const_for_fn)] // Generated code.
-pub mod replicate {
-    tonic::include_proto!("ztreamer.replicate");
-}
+pub mod replicate;
