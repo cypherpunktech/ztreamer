@@ -80,5 +80,6 @@ pub use node_chain::{NodeChain, UnknownChain};
 pub use node_url::{NodeUrl, NodeUrlError};
 pub use tail::RemoteTailSource;
 pub use ztreamer_jsonrpc::{
-    Auth, HttpsClient, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, RpcErrorObject, Secret,
+    Auth, HttpsClient, NodeState, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError,
+    RpcErrorObject, Secret,
 };

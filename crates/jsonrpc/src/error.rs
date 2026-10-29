@@ -63,6 +63,33 @@ pub struct RpcErrorObject {
     pub message: String,
 }
 
+/// The state of a node that a failed call shows, after the retries of the client.
+///
+/// A caller stops on [`Self::Gone`] and [`Self::Refuses`]: a second call gets the same failure.
+/// Only [`Self::Syncing`] is worth a wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NodeState {
+    /// The node did not answer: the connection, the DNS lookup, the TLS handshake or the read
+    /// failed, the call timed out, the node closed the connection, or a proxy answered HTTP 502,
+    /// 503 or 504.
+    Gone,
+    /// The node answered, but it refuses the call: an error answer that does not change on a
+    /// retry, bad credentials, a bad configuration, or an answer that does not decode.
+    Refuses,
+    /// The node answered [`RpcCode::IN_WARMUP`]. A later call can succeed.
+    Syncing,
+}
+
+impl fmt::Display for NodeState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Gone => "is gone",
+            Self::Refuses => "refuses the call",
+            Self::Syncing => "is syncing",
+        })
+    }
+}
+
 /// Why a remote call failed.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -233,6 +260,35 @@ impl RpcError {
         }
     }
 
+    /// The state of the node that this error shows. See [`NodeState`].
+    ///
+    /// HTTP 429 is [`NodeState::Refuses`]: the node or a proxy answers, and it limits the rate
+    /// of the calls also after the retries.
+    pub fn node_state(&self) -> NodeState {
+        match self {
+            Self::Transport { .. } | Self::ConnectionClosed { .. } | Self::Timeout { .. } => {
+                NodeState::Gone
+            }
+            Self::Http { status, .. }
+                if matches!(
+                    *status,
+                    StatusCode::BAD_GATEWAY
+                        | StatusCode::SERVICE_UNAVAILABLE
+                        | StatusCode::GATEWAY_TIMEOUT
+                ) =>
+            {
+                NodeState::Gone
+            }
+            Self::Rpc { code: RpcCode::IN_WARMUP, .. } => NodeState::Syncing,
+            Self::Config(_)
+            | Self::Unauthorized { .. }
+            | Self::Http { .. }
+            | Self::Rpc { .. }
+            | Self::Protocol { .. }
+            | Self::Decode { .. } => NodeState::Refuses,
+        }
+    }
+
     pub(crate) fn from_object(method: &str, object: RpcErrorObject) -> Self {
         Self::Rpc { method: method.to_owned(), code: object.code, message: object.message }
     }
@@ -284,6 +340,54 @@ mod tests {
             RpcError::Unauthorized { method: "m".into(), status: StatusCode::UNAUTHORIZED };
         assert!(!unauthorized.is_retryable());
         assert!(!RpcError::Config("x".into()).is_retryable());
+    }
+
+    #[test]
+    fn a_node_that_does_not_answer_is_gone() {
+        let timeout = RpcError::Timeout { method: "m".into(), timeout: Duration::from_secs(1) };
+        let closed = RpcError::ConnectionClosed { method: "m".into(), hint: "h" };
+        let transport = RpcError::Transport { method: "m".into(), source: "reset".into() };
+        for error in [timeout, closed, transport] {
+            assert_eq!(error.node_state(), NodeState::Gone, "{error}");
+        }
+        for status in
+            [StatusCode::BAD_GATEWAY, StatusCode::SERVICE_UNAVAILABLE, StatusCode::GATEWAY_TIMEOUT]
+        {
+            assert_eq!(http(status).node_state(), NodeState::Gone, "{status}");
+        }
+    }
+
+    #[test]
+    fn a_node_that_answers_with_a_fixed_error_refuses() {
+        let unauthorized =
+            RpcError::Unauthorized { method: "m".into(), status: StatusCode::FORBIDDEN };
+        let protocol = RpcError::Protocol { method: "m".into(), detail: "d".into() };
+        let decode = RpcError::Decode {
+            method: "m".into(),
+            source: serde_json::from_str::<u32>("x").unwrap_err(),
+        };
+        let fixed = [
+            rpc(RpcCode::INVALID_PARAMETER),
+            rpc(RpcCode::METHOD_NOT_FOUND),
+            rpc_with_message(RpcCode::MISC, RpcError::ABOVE_TIP_MESSAGE),
+            http(StatusCode::INTERNAL_SERVER_ERROR),
+            http(StatusCode::NOT_FOUND),
+            http(StatusCode::TOO_MANY_REQUESTS),
+            unauthorized,
+            RpcError::Config("x".into()),
+            protocol,
+            decode,
+        ];
+        for error in fixed {
+            assert_eq!(error.node_state(), NodeState::Refuses, "{error}");
+        }
+    }
+
+    #[test]
+    fn a_node_in_warm_up_is_syncing() {
+        assert_eq!(rpc(RpcCode::IN_WARMUP).node_state(), NodeState::Syncing);
+        assert_eq!(NodeState::Syncing.to_string(), "is syncing");
+        assert_eq!(NodeState::Gone.to_string(), "is gone");
     }
 
     #[test]
