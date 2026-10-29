@@ -21,7 +21,7 @@ use ztreamer_index::{
     test_utils::range_meta_row,
 };
 use ztreamer_protocol::{
-    proto::BlockId,
+    proto::{BlockId, Empty, compact_tx_streamer_client::CompactTxStreamerClient},
     replicate::{ListRangesRequest, replicator_client::ReplicatorClient},
 };
 use ztreamer_remote::test_utils::{MockChain, MockNode, Reply};
@@ -222,15 +222,23 @@ async fn listed_ranges(grpc: SocketAddr, count: usize) -> Vec<u32> {
     timeout(Duration::from_secs(30), poll).await.expect("the Replicator lists the ranges")
 }
 
+/// A fresh replica imports the snapshot and follows the chain. `GetLightdInfo` reports the
+/// version of the `getinfo` answer of the node.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_fresh_replica_imports_three_epochs_then_follows_the_chain() {
     let snapshot = Snapshot::new().await;
     let (_chain, node) = snapshot.node().await;
     let dir = tempfile::tempdir().unwrap();
 
-    let latest = serve_until_tip(&dir, &snapshot, &node).await;
+    let (latest, info) = serve_until(&dir, &snapshot, &node, async |grpc| {
+        let mut client = CompactTxStreamerClient::connect(format!("http://{grpc}")).await.unwrap();
+        client.get_lightd_info(Empty {}).await.unwrap().into_inner()
+    })
+    .await;
 
     assert_eq!(latest.hash, snapshot.blocks.last().unwrap().hash().0);
+    assert_eq!(info.zcashd_build, "v2.3.0+10.gc66d6ca.modified");
+    assert_eq!(info.zcashd_subversion, "/Zebra:2.3.0/");
     let index = Index::open_existing(dir.path(), 1 << 30).unwrap();
     assert_eq!(index.state().unwrap().verified_through(), Some(SEALED));
     assert_eq!(range_meta_row(&index, 12_000).state, VerifyState::Verified);

@@ -13,7 +13,6 @@ use std::{ops::ControlFlow, sync::Arc};
 use eyre::{Result, WrapErr};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
-use ztreamer_embedded as node;
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
@@ -108,6 +107,7 @@ impl Launcher {
             return Ok(ControlFlow::Break(()));
         }
 
+        let version = components.node_version().await?;
         let follower = HeadFollower::new(Arc::clone(stage.index), state);
         let compact = CompactService::with_backend(
             Arc::clone(stage.index),
@@ -116,7 +116,7 @@ impl Launcher {
             wallet,
         )
         .with_ping_enabled(self.config.servers.ping_very_insecure)
-        .with_node_version(node::NodeClient::version());
+        .with_node_version(version);
         let caught_up = CaughtUp { follower, compact, head };
         Ok(if caught_up.reconcile(stage).await?.is_break() {
             ControlFlow::Break(())

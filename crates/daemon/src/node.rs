@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
 use ztreamer_index::index::{BlockId, Index, range_meta::NodeId};
-use ztreamer_service::CompactService;
+use ztreamer_service::{CompactService, NodeVersion};
 use ztreamer_sync::{head::CanonicalBlockSource, pipeline::FinalizedBlockSource};
 
 use crate::{SyncConfig, lifecycle::TaskSet};
@@ -33,14 +33,14 @@ pub(crate) trait Node {
     async fn boot(self, tasks: &TaskSet) -> Result<ControlFlow<(), Self::Components>>;
 }
 
-/// What a booted node is composed of: the source of each stage, the wallet backend and the id of
-/// the node.
+/// What a booted node is composed of: the source of each stage, the wallet backend, and the id
+/// and the version of the node.
 ///
 /// # Implementation guide
 ///
 /// The launcher calls the methods in this order: [`Self::historical`] in the historical stage;
-/// [`Self::wallet`] and [`Self::tail`] in the catch-up stage; [`Self::id`] and
-/// [`Self::start_following`] in the serve stage.
+/// [`Self::wallet`], [`Self::tail`] and [`Self::node_version`] in the catch-up stage; [`Self::id`]
+/// and [`Self::start_following`] in the serve stage.
 pub(crate) trait NodeComponents {
     /// The source of the historical stage.
     type Historical: HistoricalSource;
@@ -63,6 +63,9 @@ pub(crate) trait NodeComponents {
         tip: IndexTip,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), Tail<Self::Finalized, Self::Head>>>;
+
+    /// The version of the node that `GetLightdInfo` reports.
+    async fn node_version(&self) -> Result<NodeVersion>;
 
     /// The node in `verified_by` of the `range_meta` rows that the wallet backend answers.
     fn id(&self) -> NodeId;

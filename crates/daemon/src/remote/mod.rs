@@ -19,7 +19,7 @@ use ztreamer_remote::{
     Auth, NodeChain, NodeUrl, RemoteBackend, RemoteHeadSource, RemoteTailSource, RpcClient,
     RpcCode, ZakuraClient,
 };
-use ztreamer_service::CompactService;
+use ztreamer_service::{CompactService, NodeVersion};
 
 use crate::{
     lifecycle::TaskSet,
@@ -245,6 +245,17 @@ impl NodeComponents for RemoteComponents {
             finalized: RemoteTailSource::new(client.clone(), Handle::current()),
             head: RemoteHeadSource::new(client.clone()),
         }))
+    }
+
+    /// The `build` and the `subversion` of the `getinfo` answer of the node.
+    async fn node_version(&self) -> Result<NodeVersion> {
+        let info = self
+            .node
+            .client
+            .get_info()
+            .await
+            .wrap_err("read the version of the remote zakura node")?;
+        Ok(NodeVersion { build: info.build().clone(), subversion: info.subversion().clone() })
     }
 
     fn id(&self) -> NodeId {
