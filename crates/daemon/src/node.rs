@@ -116,6 +116,12 @@ impl IndexTip {
         Ok(Self(state.durable_tip()))
     }
 
+    /// The tip `tip`, for a test.
+    #[cfg(test)]
+    pub(crate) const fn at(tip: BlockId) -> Self {
+        Self(Some(tip))
+    }
+
     /// The height of the tip. `None` for an empty index.
     pub(crate) fn height(self) -> Option<u32> {
         self.0.map(|tip| tip.height)
