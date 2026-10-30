@@ -4,6 +4,11 @@ default:
 build:
     cargo build --release -p ztreamerd
 
+# Fastest portable build: target/maxperf/ztreamerd. For a build that runs only on CPUs like this
+# host's, add RUSTFLAGS="-C target-cpu=native".
+maxperf:
+    cargo build --locked --profile maxperf -p ztreamerd
+
 test:
     cargo test --workspace --locked
 
