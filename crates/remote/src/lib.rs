@@ -67,7 +67,7 @@ pub mod frontier;
 mod head;
 mod methods;
 mod node_chain;
-pub mod node_sync;
+mod node_sync;
 mod node_url;
 mod tail;
 #[cfg(any(test, feature = "test-utils"))]
