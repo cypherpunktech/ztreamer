@@ -6,13 +6,13 @@ use tempfile::TempDir;
 use tokio::sync::Notify;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_chain::{
-    codec::{RangeDecoder, encode_range},
-    test_utils::raw_block,
+    codec::{RANGE_SIZE, RangeDecoder, encode_range},
+    test_utils::{raw_block, shielded_transactions},
     types::RawIndexBlock,
 };
 use ztreamer_index::{
     index::range_meta::{Attested, VerifyState},
-    test_utils::{range_meta_row, sealed_range_blob},
+    test_utils::{populate, range_meta_row, sealed_range_blob},
 };
 use ztreamer_snapshot::{
     manifest_entry::{MAX_RANGES, ManifestEntry},
@@ -105,6 +105,12 @@ impl Import {
         let dir = tempfile::tempdir().unwrap();
         let target = Arc::new(SourceIndex::open(&dir));
         Self { source, snapshot, server, target, _dir: dir }
+    }
+
+    /// Seals the target with the blocks of the source through `sealed`, with ten mutable blocks
+    /// and no `range_meta` row, as the tail of an earlier start leaves it.
+    fn seal_target_through(&self, sealed: u32) {
+        populate(&self.target, &SourceIndex::records(sealed + 11), Some(sealed));
     }
 
     /// The blob at `start` with a wrong tree size at its record 500.
@@ -337,6 +343,60 @@ async fn a_stopped_import_keeps_a_prefix_and_a_restart_fetches_only_the_rest() {
     assert_eq!((report.epochs, report.ranges), (2, 15));
     assert_eq!(import.blob_requests() - requests_before_restart, 15);
     import.assert_target_has_source_blobs();
+}
+
+/// The tail of an earlier start sealed the target inside the second epoch (11,999) or at its
+/// start (9,999), with mutable blocks and no rows. The import starts at the tip and fetches only
+/// the ranges after it. The part of the second epoch keeps the epoch end of the rule.
+#[tokio::test]
+async fn an_import_starts_at_a_sealed_tip_with_mutable_blocks_and_no_row() {
+    for sealed in [11_999, 9_999] {
+        let import = Import::new(RANGES).await;
+        import.seal_target_through(sealed);
+
+        let report = import.run().await.unwrap();
+
+        let after_tip = (RANGES - (sealed + 1) / RANGE_SIZE) as usize;
+        assert_eq!((report.epochs, report.ranges), (2, after_tip), "sealed {sealed}");
+        assert_eq!(import.blob_requests(), after_tip);
+        let state = import.target.state().unwrap();
+        assert_eq!(state.durable_tip().map(|tip| tip.height), Some(24_999));
+        for start in (0..RANGES).map(|range| range * RANGE_SIZE) {
+            let blob = import.target.latest().unwrap().sealed_range(start).unwrap();
+            assert_eq!(blob, import.source.index.latest().unwrap().sealed_range(start).unwrap());
+        }
+        for start in (sealed + 1..24_999).step_by(RANGE_SIZE as usize) {
+            let imported = range_meta_row(&import.target, start).entry;
+            let source = range_meta_row(&import.source.index, start).entry;
+            assert_eq!(imported, source, "range {start}");
+        }
+        assert!(range_meta_row(&import.target, 19_000).entry.epoch_end);
+    }
+}
+
+/// The manifest entry at the sealed tip does not have the tree sizes of the tip block. The
+/// import stops before a fetch, and the node decides which side is wrong.
+#[tokio::test]
+async fn a_manifest_entry_that_disagrees_with_the_sealed_tip_stops_the_import() {
+    let import = Import::new(RANGES).await;
+    let mut records = SourceIndex::records(10_010);
+    records[5_000].transactions.push(shielded_transactions()[0].clone());
+    populate(&import.target, &records, Some(9_999));
+
+    // The node has the tip block of the index: the source is wrong.
+    let error = import.run().await.unwrap_err();
+    assert!(matches!(error, ImportError::SealedTip { height: 9_999 }), "{error:?}");
+
+    // The node has another block at the tip: a deep reorg replaced the sealed ranges.
+    let mut attestor = Arc::into_inner(import.fake_attestor(None)).unwrap();
+    attestor.answers.get_mut(&9_999).unwrap().end_hash = block::Hash([9; 32]);
+    let (_stop, shutdown) = watch::channel(false);
+    let importer = import.importer(Arc::new(attestor), Network::Mainnet);
+    let error = importer.run(shutdown).await.unwrap_err();
+    assert!(matches!(error, ImportError::ReorgedTip { height: 9_999 }), "{error:?}");
+    assert_eq!(import.blob_requests(), 0);
+    let state = import.target.state().unwrap();
+    assert_eq!(state.durable_tip().map(|tip| tip.height), Some(10_009));
 }
 
 #[tokio::test]
