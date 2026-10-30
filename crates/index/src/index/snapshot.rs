@@ -147,6 +147,13 @@ impl<'index> IndexSnapshot<'index> {
         self.tables.range_meta.rows_from(&self.txn, start)
     }
 
+    /// The end height of the `range_meta` rows that follow each other from range 0, also when a
+    /// row is [`VerifyState::Rejected`](super::range_meta::VerifyState::Rejected). Returns `None`
+    /// if range 0 has no row.
+    pub fn range_meta_filled_through(&self) -> Result<Option<u32>, IndexError> {
+        self.tables.range_meta.contiguous_rows_end(&self.txn)
+    }
+
     /// Checks sealed-range summaries and every mutable suffix row without rescanning sealed blocks.
     pub fn verify_continuity(&self) -> Result<(), IndexError> {
         let txn = &self.txn;

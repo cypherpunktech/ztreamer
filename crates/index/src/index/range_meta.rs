@@ -40,7 +40,7 @@ use heed::{
 };
 use zakura_chain::{block, ironwood, orchard, sapling};
 
-use super::IndexError;
+use super::{IndexError, RANGE_SIZE};
 use ztreamer_chain::codec::{CodecError, Reader, put_bytes, put_count, take_bool};
 use ztreamer_snapshot::{
     manifest_entry::ManifestEntry,
@@ -250,6 +250,20 @@ impl RangeMetaTable {
         start: u32,
     ) -> Result<Vec<RangeMeta>, IndexError> {
         self.0.range(txn, &(start..))?.map(|entry| Ok(RangeMeta::decode(entry?.1)?)).collect()
+    }
+
+    /// The end height of the rows that follow each other from range 0. Returns `None` if range 0
+    /// has no row.
+    pub(crate) fn contiguous_rows_end(&self, txn: &RoTxn<'_>) -> Result<Option<u32>, IndexError> {
+        let mut end = None;
+        for (expected, entry) in (0..).step_by(RANGE_SIZE as usize).zip(self.0.iter(txn)?) {
+            let (start, _) = entry?;
+            if start != expected {
+                break;
+            }
+            end = Some(start + RANGE_SIZE - 1);
+        }
+        Ok(end)
     }
 
     /// The start heights of every row, in height order.

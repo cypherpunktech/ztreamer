@@ -101,9 +101,10 @@ impl Replicator for ReplicatorService {
         _request: Request<Empty>,
     ) -> Result<Response<ExportInfo>, Status> {
         let generation = self.generation()?;
-        let state = self
+        let (state, filled_through) = self
             .read(move |index| {
-                index.snapshot(generation).map(|index_snapshot| index_snapshot.state())
+                let index_snapshot = index.snapshot(generation)?;
+                Ok((index_snapshot.state(), index_snapshot.range_meta_filled_through()?))
             })
             .await?;
         Ok(Response::new(ExportInfo {
@@ -111,6 +112,7 @@ impl Replicator for ReplicatorService {
             genesis_hash: self.network.genesis_hash().0.to_vec(),
             manifest_version: MANIFEST_VERSION,
             sealed_through: state.sealed_through(),
+            filled_through,
         }))
     }
 
