@@ -23,11 +23,13 @@ const RANGES: u32 = 12;
 impl ResumeRule {
     /// Each received byte is progress, and the waits are short. The test blobs are smaller
     /// than [`RESUME_PROGRESS_BYTES`].
-    const TEST: Self = Self {
-        progress_bytes: 1,
-        first_wait: Duration::from_millis(1),
-        max_wait_without_bytes: MAX_WAIT_WITHOUT_BYTES,
-    };
+    const TEST: Self = Self { progress_bytes: 1, first_wait: Duration::from_millis(1) };
+}
+
+impl Fetcher {
+    fn with_test_resume_rule(source: Box<dyn RangeSource>) -> Self {
+        Self { source, resume_rule: ResumeRule::TEST }
+    }
 }
 
 /// A source that sends the first `bytes` bytes of `blob` after the offset of each request,
@@ -59,29 +61,6 @@ impl RangeSource for FailingSource {
     }
 }
 
-/// A source that opens each stream, then sends no byte and does not end. It records the offset
-/// of each request.
-#[derive(Debug)]
-struct SilentSource {
-    offsets: Arc<Mutex<Vec<u64>>>,
-}
-
-#[async_trait]
-impl RangeSource for SilentSource {
-    async fn manifest(&self) -> Result<Manifest, FetchError> {
-        unimplemented!("the tests read blobs only")
-    }
-
-    async fn fetch_blob(
-        &self,
-        _entry: &ManifestEntry,
-        offset: u64,
-    ) -> Result<BlobStream, FetchError> {
-        self.offsets.lock().unwrap().push(offset);
-        Ok(Box::pin(tokio_stream::pending()))
-    }
-}
-
 struct Http {
     source: SourceIndex,
     snapshot: Snapshot,
@@ -103,7 +82,7 @@ impl Http {
     fn fetcher(&self, seed: [u8; 32]) -> Fetcher {
         let key = SigningKey::from_bytes(&seed).verifying_key();
         let source = HttpSource::new(self.server.base.clone(), key).unwrap();
-        Fetcher::with_resume_rule(Box::new(source), ResumeRule::TEST)
+        Fetcher::with_test_resume_rule(Box::new(source))
     }
 
     fn blob(&self, start: u32) -> Vec<u8> {
@@ -216,7 +195,7 @@ async fn failing_source(
     let blob = Bytes::from(http.blob(1_000));
     let offsets = Arc::default();
     let source = FailingSource { blob: blob.clone(), bytes, status, offsets: Arc::clone(&offsets) };
-    (Fetcher::with_resume_rule(Box::new(source), ResumeRule::TEST), entry, blob, offsets)
+    (Fetcher::with_test_resume_rule(Box::new(source)), entry, blob, offsets)
 }
 
 #[tokio::test]
@@ -247,34 +226,6 @@ async fn transfers_with_no_progress_stop_after_the_resume_limit() {
     assert!(matches!(&error, FetchError::Grpc(status) if status.code() == Code::Unavailable));
     let requests = MAX_RESUMES_WITHOUT_PROGRESS as usize + 1;
     assert_eq!(*offsets.lock().unwrap(), vec![0; requests]);
-}
-
-#[tokio::test]
-async fn a_stream_that_sends_no_byte_stops_the_fetch_with_no_resume() {
-    let entry = SourceIndex::new(2).await.entries()[1].clone();
-    let offsets = Arc::default();
-    let source = SilentSource { offsets: Arc::clone(&offsets) };
-    let fetcher = Fetcher::with_resume_rule(Box::new(source), ResumeRule::TEST);
-    tokio::time::pause();
-    let start = Instant::now();
-    // The timer fires on a tick of 1 ms after the deadline.
-    let at_the_limit = MAX_WAIT_WITHOUT_BYTES..=MAX_WAIT_WITHOUT_BYTES + Duration::from_millis(1);
-
-    let error = fetcher.blob(&entry).await.unwrap_err();
-
-    assert!(
-        matches!(
-            error,
-            FetchError::Stalled { start_height: 1_000, offset: 0, waited }
-                if at_the_limit.contains(&waited)
-        ),
-        "{error:?}"
-    );
-    assert!(at_the_limit.contains(&start.elapsed()), "{:?}", start.elapsed());
-    assert_eq!(*offsets.lock().unwrap(), [0]);
-    assert!(!error.is_transfer());
-    assert!(error.to_string().contains("received no byte for 300 s"), "{error}");
-    assert!(error.to_string().contains("use another --replicate-from source"), "{error}");
 }
 
 #[test]
@@ -358,11 +309,7 @@ impl Peer {
         let source = SourceIndex::new(RANGES).await;
         let server = PeerServer::start(&source, stream_limit).await;
         let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
-        Self {
-            source,
-            server,
-            fetcher: Fetcher::with_resume_rule(Box::new(peer), ResumeRule::TEST),
-        }
+        Self { source, server, fetcher: Fetcher::with_test_resume_rule(Box::new(peer)) }
     }
 
     /// Fetches the blobs of the first ten ranges at the same time, and checks each one.
@@ -428,29 +375,6 @@ async fn a_cut_peer_stream_resumes_when_the_peer_releases_its_place() {
     let half = blob.len() as u64 / 2;
     assert_eq!(peer.server.requests(), [(2_000, 0), (2_000, half)]);
     assert!(peer.server.refusals() > 0);
-}
-
-#[tokio::test]
-async fn a_peer_that_refuses_every_stream_stops_the_fetch() {
-    let source = SourceIndex::new(RANGES).await;
-    let server = PeerServer::start(&source, 0).await;
-    let peer = PeerSource::connect(server.endpoint.clone()).await.unwrap();
-    let max_wait_without_bytes = Duration::from_millis(300);
-    let rule = ResumeRule { max_wait_without_bytes, ..ResumeRule::TEST };
-    let fetcher = Fetcher::with_resume_rule(Box::new(peer), rule);
-
-    let error = fetcher.blob(&source.entries()[2]).await.unwrap_err();
-
-    assert!(
-        matches!(
-            error,
-            FetchError::Stalled { start_height: 2_000, offset: 0, waited }
-                if waited >= max_wait_without_bytes
-        ),
-        "{error:?}"
-    );
-    assert!(server.refusals() > 1, "{} refusals", server.refusals());
-    assert_eq!(server.requests(), []);
 }
 
 /// Twelve ranges: the filler closes an epoch only at range 9. The first export has the first
