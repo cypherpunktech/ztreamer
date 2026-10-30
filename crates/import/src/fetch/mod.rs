@@ -15,6 +15,9 @@
 //!   streams at a time. When the peer refuses a stream with `RESOURCE_EXHAUSTED`, it waits and
 //!   asks again: a busy peer is not a failed peer.
 //!
+//! A blob request of either source that sends no byte for [`MAX_WAIT_WITHOUT_BYTES`] is
+//! [`FetchError::Stalled`].
+//!
 //! [`Fetcher`] reads complete blobs from a source. It continues a cut transfer from the last
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
 //! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
@@ -53,6 +56,9 @@ pub const MAX_RESUMES_WITHOUT_PROGRESS: u32 = 5;
 /// and a blob of `n` bytes needs at most `n / RESUME_PROGRESS_BYTES` resumes with progress.
 pub const RESUME_PROGRESS_BYTES: usize = 1 << 20;
 
+/// The longest time that a blob request waits for its stream to open or for its next chunk.
+pub const MAX_WAIT_WITHOUT_BYTES: Duration = Duration::from_secs(5 * 60);
+
 /// The `GetRange` streams that one [`PeerSource`] opens at a time. It is the stream limit of the
 /// Replicator service of ztreamer (`MAX_RANGE_STREAMS`). A peer with a lower limit refuses the
 /// streams above it, and [`PeerSource`] asks again.
@@ -90,6 +96,10 @@ pub type BlobStream = Pin<Box<dyn Stream<Item = Result<Bytes, FetchError>> + Sen
 
 /// The limit of the blob requests of one source that are in work at the same time. The clones of
 /// a limit share it.
+///
+/// A request that holds a place must progress: its open and each next chunk wait at most
+/// [`MAX_WAIT_WITHOUT_BYTES`], then the request is [`FetchError::Stalled`]. Thus the wait for a
+/// place needs no limit.
 #[derive(Clone, Debug)]
 struct RequestLimit(Arc<Semaphore>);
 
@@ -111,10 +121,12 @@ impl RequestLimit {
             .acquire_owned()
             .await
             .expect("the places of a request limit are never closed");
-        let chunks = open.await?;
-        Ok(Box::pin(chunks.map(move |chunk| {
+        let chunks = tokio::time::timeout(MAX_WAIT_WITHOUT_BYTES, open)
+            .await
+            .map_err(|_| FetchError::Stalled)??;
+        Ok(Box::pin(chunks.timeout(MAX_WAIT_WITHOUT_BYTES).map(move |chunk| {
             let _ = &place;
-            chunk
+            chunk.unwrap_or(Err(FetchError::Stalled))
         })))
     }
 }
@@ -193,6 +205,12 @@ pub enum FetchError {
         #[source]
         mismatch: BlobMismatch,
     },
+    /// The source sent no byte for [`MAX_WAIT_WITHOUT_BYTES`]. The fetch does not resume.
+    #[error(
+        "source sent no byte for {} s; if this repeats, use another --replicate-from source",
+        MAX_WAIT_WITHOUT_BYTES.as_secs()
+    )]
+    Stalled,
 }
 
 impl FetchError {
@@ -562,11 +580,16 @@ impl PeerSource {
     }
 
     /// Connects to the Replicator service at `endpoint`, with the receive windows
-    /// [`PEER_STREAM_WINDOW_BYTES`] and [`PEER_CONNECTION_WINDOW_BYTES`].
+    /// [`PEER_STREAM_WINDOW_BYTES`] and [`PEER_CONNECTION_WINDOW_BYTES`]. HTTP/2 keepalive pings
+    /// close the connection to a dead peer in about 50 s: its streams then fail and resume.
     pub async fn connect(endpoint: Uri) -> Result<Self, FetchError> {
         let channel = Channel::builder(endpoint.clone())
             .initial_stream_window_size(PEER_STREAM_WINDOW_BYTES)
             .initial_connection_window_size(PEER_CONNECTION_WINDOW_BYTES)
+            .connect_timeout(Duration::from_secs(10))
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .keep_alive_timeout(Duration::from_secs(20))
+            .keep_alive_while_idle(true)
             .connect()
             .await?;
         Ok(Self::new(endpoint, channel))
@@ -575,7 +598,7 @@ impl PeerSource {
     /// Opens the `GetRange` stream of the range at `start_height` from byte `offset`.
     ///
     /// A `RESOURCE_EXHAUSTED` refusal is back-pressure: the peer runs its limit of streams. The
-    /// request waits with [`RefusalBackoff`] and asks again, with no limit on the attempts. A
+    /// request waits with [`RefusalBackoff`] and asks again, until [`MAX_WAIT_WITHOUT_BYTES`]. A
     /// stream that stopped can still hold its place on the peer for a short time after the
     /// client drops it, thus a resume can get this refusal too.
     async fn open_range_stream(
