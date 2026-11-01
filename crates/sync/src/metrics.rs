@@ -1,9 +1,10 @@
 //! The metrics of the historical pass. `scripts/benchmark-stages.py` reads each of them.
 //!
 //! Each metric name and its help text is a constant in this file, and [`DESCRIBE`] gives the help
-//! text to the recorder once. Other modules record only through the types of this file. A type
-//! of handles takes its handles once, on the thread that makes it, so that a test can catch the
-//! samples of the pipeline workers with a local recorder.
+//! text to the recorder once. Other modules record only through the types of this file.
+//!
+//! A type of handles takes its handles once, on the thread that makes it. Thus a test with a
+//! local recorder catches the samples of the pipeline workers.
 
 use std::{sync::LazyLock, time::Duration};
 
@@ -75,8 +76,8 @@ impl PipelineMetrics {
     }
 }
 
-/// Records the bytes and the stage times of one segment when it drops, also when the segment
-/// failed.
+/// Records the bytes and the stage times of one segment when it drops. It records them also
+/// when the segment fails.
 pub(crate) struct SegmentMetrics<'a> {
     metrics: &'a PipelineMetrics,
     pub stats: WorkerStats,

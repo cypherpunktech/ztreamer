@@ -85,21 +85,14 @@ async fn streams_cross_range_descending_and_fetches_transparent_data() {
         tonic::Code::Unavailable
     );
 
+    // The backend has no block, so each transparent fetch fails. The stream ends at the first
+    // error.
     let mut transparent = descending;
     transparent.pool_types = vec![proto::PoolType::Transparent as i32];
-    assert_eq!(
-        ctx.service
-            .get_block_range(Request::new(transparent))
-            .await
-            .unwrap()
-            .into_inner()
-            .next()
-            .await
-            .unwrap()
-            .unwrap_err()
-            .code(),
-        tonic::Code::Unavailable
-    );
+    let mut stream =
+        ctx.service.get_block_range(Request::new(transparent)).await.unwrap().into_inner();
+    assert_eq!(stream.next().await.unwrap().unwrap_err().code(), tonic::Code::Unavailable);
+    assert!(stream.next().await.is_none());
     assert_eq!(
         CompactTxStreamer::send_transaction(
             &ctx.service,

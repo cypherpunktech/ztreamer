@@ -17,7 +17,7 @@ impl MetricsEndpoint {
     }
 
     /// Installs the global recorder and starts the HTTP listener on the Tokio runtime of the
-    /// caller. It fails when the address is in use or a recorder is already installed.
+    /// caller. It fails when the address is in use, or when the process has a recorder.
     pub(crate) fn start(self) -> Result<()> {
         let Self(address) = self;
         PrometheusBuilder::new()

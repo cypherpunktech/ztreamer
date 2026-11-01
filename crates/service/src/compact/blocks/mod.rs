@@ -1,7 +1,5 @@
 //! Block and block-range requests, served from the volatile head and the compact index.
 
-mod end_at_error;
-
 use std::sync::Arc;
 
 use tokio_stream::StreamExt;
@@ -11,7 +9,6 @@ use ztreamer_chain::codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock
 use ztreamer_index::index::IndexError;
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
-use self::end_at_error::EndAtError;
 use super::{CompactService, RpcStream, ensure_ready, reorganized};
 use crate::project::{PoolSelection, add_transparent_txs, project_block};
 
@@ -45,34 +42,16 @@ impl CompactService {
         request: proto::BlockRange,
         nullifiers: bool,
     ) -> Result<RpcStream<EncodedCompactBlock>, Status> {
-        Ok(Box::pin(EndAtError::new(self.encoded_range_inner(request, nullifiers).await?)))
-    }
-
-    async fn encoded_range_inner(
-        &self,
-        request: proto::BlockRange,
-        nullifiers: bool,
-    ) -> Result<RpcStream<EncodedCompactBlock>, Status> {
         let pools = PoolSelection::from_request(&request.pool_types)?;
         if !nullifiers && pools.is_all() {
             self.range_as(request, |record: EncodedBlockRecord| record.block).await
         } else {
-            Ok(Box::pin(
-                self.range_inner(request, nullifiers).await?.map(|block| block.map(Into::into)),
-            ))
+            Ok(Box::pin(self.range(request, nullifiers).await?.map(|block| block.map(Into::into))))
         }
     }
 
     /// Streams decoded blocks with the requested pool/nullifier projection.
     pub async fn range(
-        &self,
-        request: proto::BlockRange,
-        nullifiers: bool,
-    ) -> Result<RpcStream<proto::CompactBlock>, Status> {
-        Ok(Box::pin(EndAtError::new(self.range_inner(request, nullifiers).await?)))
-    }
-
-    async fn range_inner(
         &self,
         request: proto::BlockRange,
         nullifiers: bool,
@@ -87,25 +66,40 @@ impl CompactService {
             return Ok(blocks);
         }
         let backend = Arc::clone(&self.backend);
+        let mut failed = false;
         // Transparent data is deliberately fetched on demand, outside the compact index.
         // Obviously this is extremely slow. Transparent scanning is not a recommended use case.
-        Ok(Box::pin(blocks.then(move |block| {
-            let backend = Arc::clone(&backend);
-            async move {
-                let mut block = block?;
-                let hash = block::Hash(
-                    block
-                        .hash
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Status::internal("invalid compact block hash"))?,
-                );
-                let full =
-                    backend.block(hash).await?.ok_or_else(|| reorganized(block.height as u32))?;
-                add_transparent_txs(&mut block, &full.transactions);
-                Ok(block)
-            }
-        })))
+        Ok(Box::pin(
+            blocks
+                .then(move |block| {
+                    let backend = Arc::clone(&backend);
+                    async move {
+                        let mut block = block?;
+                        let hash = block::Hash(
+                            block
+                                .hash
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| Status::internal("invalid compact block hash"))?,
+                        );
+                        let full = backend
+                            .block(hash)
+                            .await?
+                            .ok_or_else(|| reorganized(block.height as u32))?;
+                        add_transparent_txs(&mut block, &full.transactions);
+                        Ok(block)
+                    }
+                })
+                // A failed fetch does not stop the next fetch. Stop the stream at its first
+                // error, as the index stream does.
+                .map_while(move |block| {
+                    if failed {
+                        return None;
+                    }
+                    failed = block.is_err();
+                    Some(block)
+                }),
+        ))
     }
 
     async fn range_as<T: StoredBlock + Send + 'static, B: Send + 'static>(

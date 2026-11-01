@@ -72,10 +72,12 @@ impl WriteStage {
 }
 
 /// Measures the stages of one [`Index::write`](crate::index::Index::write). It takes its handles
-/// when the write starts. [`WriteTimer::finish`] records the times and the seal reads after the
-/// commit. A write that fails records nothing here, because its transaction writes nothing: the
-/// pipeline commit metric counts it with the outcome `error`. A stage that did not run, for
-/// example a seal, has no sample.
+/// when the write starts. [`WriteTimer::finish`] records the stage times and the seal reads after
+/// the commit.
+///
+/// A write that fails records nothing here, because its transaction writes nothing. The pipeline
+/// commit metric counts it with the outcome `error`. A stage that did not run, for example a
+/// seal, has no sample.
 pub(crate) struct WriteTimer {
     stages: [Histogram; WRITE_STAGES],
     seal_read_counter: Counter,

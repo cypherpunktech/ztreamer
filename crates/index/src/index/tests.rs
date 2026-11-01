@@ -739,8 +739,8 @@ fn seals_a_range_that_is_complete_in_mutable_rows() {
     index.latest().unwrap().verify_continuity().unwrap();
 }
 
-/// The write stages that one write records, each with one sample. The write registers each
-/// stage, so a stage that did not run has no sample.
+/// The write stages that one write records, each with one sample. The write makes a handle
+/// for each stage. The handle of a stage that did not run has no sample.
 fn write_stages(index: &Index, batch: WriteBatch) -> Vec<String> {
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 
