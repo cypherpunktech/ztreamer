@@ -18,6 +18,7 @@ use super::*;
 use crate::{
     DaemonConfig,
     launcher::Launcher,
+    telemetry::GrpcSpan,
     test_utils::{free_addr, node_with_chain_name, remote_config, remote_mode},
 };
 
@@ -53,7 +54,8 @@ fn node(config: &DaemonConfig) -> RemoteNode {
 /// Runs the daemon with no signal, until it stops by itself.
 async fn run(config: DaemonConfig) -> Result<()> {
     let node = node(&config);
-    let daemon = Launcher::new(config, Server::builder()).run(node, future::pending());
+    let daemon = Launcher::new(config, Server::builder().layer(GrpcSpan::layer()))
+        .run(node, future::pending());
     timeout(Duration::from_secs(30), daemon).await.expect("the daemon stops by itself")
 }
 
@@ -76,10 +78,13 @@ impl Daemon {
         let node = node(&config);
         let signal = CancellationToken::new();
         let received = signal.clone().cancelled_owned();
-        let daemon = Launcher::new(config, Server::builder()).run(node, async move {
-            received.await;
-            Ok(())
-        });
+        let daemon = Launcher::new(config, Server::builder().layer(GrpcSpan::layer())).run(
+            node,
+            async move {
+                received.await;
+                Ok(())
+            },
+        );
         Self { signal, task: tokio::spawn(daemon) }
     }
 

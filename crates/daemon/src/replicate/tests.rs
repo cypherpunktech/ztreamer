@@ -32,6 +32,7 @@ use crate::{
     DaemonConfig,
     launcher::Launcher,
     remote::RemoteNode,
+    telemetry::GrpcSpan,
     test_utils::{free_addr, latest_block_at, node_with_chain_name, remote_config, remote_mode},
 };
 
@@ -156,7 +157,7 @@ async fn daemon(
         Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..remote.replica() };
     let client = remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap();
     let node = RemoteNode::new(client, replica);
-    Launcher::new(config, Server::builder()).run(node, signal).await
+    Launcher::new(config, Server::builder().layer(GrpcSpan::layer())).run(node, signal).await
 }
 
 /// Runs the replica with no signal until it stops by itself, and gives the error. Asserts that

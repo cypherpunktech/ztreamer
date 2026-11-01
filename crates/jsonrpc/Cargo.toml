@@ -31,3 +31,4 @@ webpki-roots = "1"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }
