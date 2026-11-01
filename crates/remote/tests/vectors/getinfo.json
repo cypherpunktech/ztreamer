@@ -1,0 +1,14 @@
+{
+    "version": 2030010,
+    "build": "v2.3.0+10.gc66d6ca.modified",
+    "subversion": "/Zebra:2.3.0/",
+    "protocolversion": 170120,
+    "blocks": 2930822,
+    "connections": 75,
+    "difficulty": 68556523.91969073,
+    "testnet": false,
+    "paytxfee": 0.0,
+    "relayfee": 1e-6,
+    "errors": "no errors",
+    "errorstimestamp": 1762881920
+}

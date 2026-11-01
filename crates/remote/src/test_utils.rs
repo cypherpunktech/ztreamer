@@ -199,8 +199,8 @@ fn json_response(status: StatusCode, body: Value) -> Response<Full<Bytes>> {
 
 /// A best chain that a [`MockNode`] serves, with the answers and the wire error codes of zakura.
 ///
-/// [`Self::reply`] answers [`Method::GetBlockchainInfo`], [`Method::GetBlockHash`] and
-/// [`Method::GetBlock`] with verbosity 0. Params that do not decode
+/// [`Self::reply`] answers [`Method::GetInfo`], [`Method::GetBlockchainInfo`],
+/// [`Method::GetBlockHash`] and [`Method::GetBlock`] with verbosity 0. Params that do not decode
 /// get "invalid params". Other requests get "method not found". Clones share the chain, thus a
 /// test can change the chain while the node runs.
 ///
@@ -253,6 +253,9 @@ impl MockChain {
             return METHOD_NOT_FOUND;
         };
         match method {
+            Method::GetInfo => Reply::Result(
+                serde_json::from_str(include_str!("../tests/vectors/getinfo.json")).unwrap(),
+            ),
             Method::GetBlockchainInfo => state.blockchain_info(),
             Method::GetBlockHash => match serde_json::from_value::<(u32,)>(params) {
                 Ok((height,)) => state.at(height).map_or(ABOVE_TIP, |(hash, _)| hash_reply(*hash)),
@@ -272,7 +275,8 @@ impl MockChain {
 
 impl Method {
     /// All the methods.
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
+        Self::GetInfo,
         Self::GetBlockchainInfo,
         Self::GetBlockCount,
         Self::GetBlockHash,
