@@ -3,6 +3,8 @@
 //! Compiled for this crate's own tests and for other crates that enable the `test-utils`
 //! feature in their `[dev-dependencies]`.
 
+mod spans;
+
 use std::sync::Arc;
 
 use zakura_chain::{
@@ -23,6 +25,8 @@ use crate::{
     parser::parse_block,
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
+
+pub use self::spans::capture_spans;
 
 /// A deterministic block hash: the big-endian height in the first four bytes, zeros after.
 pub fn hash(height: u32) -> block::Hash {

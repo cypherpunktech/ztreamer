@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 thiserror = "2"
 tokio = { version = "1", features = ["rt"] }
+tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+ztreamer-chain = { path = "../chain", features = ["test-utils"] }

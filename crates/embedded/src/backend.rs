@@ -76,7 +76,8 @@ where
     T: Send + 'static,
     E: std::fmt::Display + Send + 'static,
 {
-    tokio::task::spawn_blocking(call)
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || span.in_scope(call))
         .await
         .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?
         .map_err(|error| BackendError::Unavailable(error.to_string()))
@@ -229,10 +230,13 @@ impl StateBackend for InProcessBackend {
     ) -> Result<transaction::Hash, BackendError> {
         let node = self.node()?.clone();
         let runtime = tokio::runtime::Handle::current();
+        let span = tracing::Span::current();
         let submitted = tokio::task::spawn_blocking(move || {
-            runtime
-                .block_on(node.submit_transaction(transaction))
-                .map_err(|error| error.to_string())
+            span.in_scope(|| {
+                runtime
+                    .block_on(node.submit_transaction(transaction))
+                    .map_err(|error| error.to_string())
+            })
         })
         .await
         .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?;

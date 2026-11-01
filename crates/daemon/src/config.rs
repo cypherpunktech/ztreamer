@@ -54,10 +54,12 @@ impl IndexConfig {
     pub(crate) async fn open(&self, network: &Network) -> Result<Arc<Index>> {
         let (path, map_size) = (self.dir.clone(), self.map_size.get());
         let (name, genesis_hash) = (network.to_string(), network.genesis_hash());
-        let index =
-            tokio::task::spawn_blocking(move || Index::open(path, map_size, &name, genesis_hash))
-                .await
-                .wrap_err("index open task panicked")??;
+        let span = tracing::Span::current();
+        let index = tokio::task::spawn_blocking(move || {
+            span.in_scope(|| Index::open(path, map_size, &name, genesis_hash))
+        })
+        .await
+        .wrap_err("index open task panicked")??;
         Ok(Arc::new(index))
     }
 

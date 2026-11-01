@@ -4907,6 +4907,8 @@ version = "0.1.0"
 dependencies = [
  "thiserror",
  "tokio",
+ "tracing",
+ "ztreamer-chain",
 ]
 
 [[package]]
@@ -4915,7 +4917,10 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "prost",
+ "serde_json",
  "thiserror",
+ "tracing",
+ "tracing-subscriber",
  "zakura-chain",
  "zakura-test",
  "ztreamer-chain",
@@ -4974,6 +4979,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
+ "tracing",
  "zakura",
  "zakura-chain",
  "zakura-node-services",
@@ -5178,6 +5184,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tracing",
  "zakura-chain",
  "zakura-rpc",
  "zakura-sapling-crypto",
