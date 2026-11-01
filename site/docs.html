@@ -35,6 +35,10 @@
 <tr><td>--tls-cert FILE</td><td>PEM certificate chain for gRPC TLS. Requires <code>--tls-key</code>.</td></tr>
 <tr><td>--tls-key FILE</td><td>PEM private key for gRPC TLS. Requires <code>--tls-cert</code>.</td></tr>
 <tr><td>--metrics-listen ADDR</td><td>Prometheus. <s>127.0.0.1:9999</s></td></tr>
+<tr><td>--log-filter DIRECTIVES</td><td>Log filter, <code>RUST_LOG</code> syntax. Also <code>RUST_LOG</code>. <s>info</s></td></tr>
+<tr><td>--log-format FORMAT</td><td><code>text</code> or <code>json</code>. <s>text</s></td></tr>
+<tr><td>--otlp-endpoint URL</td><td>OTLP/gRPC trace collector. Also <code>OTEL_EXPORTER_OTLP_ENDPOINT</code>.</td></tr>
+<tr><td>--otlp-filter DIRECTIVES</td><td>Filter of the sent spans. <s>the log filter</s></td></tr>
 <tr><td>--fetch-workers N</td><td>Historical fetch workers. <s>min(cores, 8)</s></td></tr>
 <tr><td>--source-segment-blocks N</td><td>Consecutive blocks per fetch worker. <s>256</s></td></tr>
 <tr><td>--max-pending-bytes N</td><td>Bytes awaiting ordered ingestion. <s>256 MiB</s></td></tr>
@@ -42,7 +46,7 @@
 <tr><td>--ping-very-insecure</td><td>Answer <code>Ping</code>. Testing only.</td></tr>
 <tr><td>--index-only</td><td>Build the index and exit.</td></tr>
 </table>
-<p>Logging is <code>RUST_LOG</code>, default <code>info</code>. Ctrl-C and SIGTERM shut down in order: index writer, then Zakura.</p>
+<p>ztreamerd sets the tracing and the metrics of Zakura. It refuses a Zakura configuration with a <code>[tracing]</code> or <code>[metrics]</code> section. Ctrl-C and SIGTERM shut down in order: index writer, then Zakura.</p>
 
 <h2>protocol</h2>
 <p>All <code>CompactTxStreamer</code> methods are implemented. <code>GetBlock</code> intentionally omits transparent data, and <code>Ping</code> is opt-in.</p>

@@ -16,6 +16,7 @@ mod node;
 mod remote;
 mod replicate;
 mod tasks;
+mod telemetry;
 #[cfg(test)]
 mod test_utils;
 
@@ -23,3 +24,4 @@ pub use config::{DaemonConfig, IndexConfig, Mode, ServerConfig, SyncConfig, TlsF
 pub use daemon::run_daemon;
 pub use remote::RemoteConfig;
 pub use replicate::ReplicaSource;
+pub use telemetry::{LogFormat, OtlpConfig, TelemetryConfig, TelemetryGuard, init_telemetry};

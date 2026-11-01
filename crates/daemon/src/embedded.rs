@@ -4,7 +4,7 @@
 
 use std::{ops::ControlFlow, path::PathBuf, sync::Arc};
 
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr, ensure, eyre};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zakura_chain::parameters::Network;
@@ -28,11 +28,13 @@ pub(crate) struct EmbeddedNode {
 
 impl EmbeddedNode {
     /// Loads the Zakura configuration of `zakura_config`. Zakura defaults and `ZAKURA_*`
-    /// variables apply.
+    /// variables apply. It fails when the configuration sets the tracing or the metrics of
+    /// Zakura: see [`reject_zakura_telemetry`].
     pub(crate) fn load(zakura_config: Option<PathBuf>) -> Result<Self> {
         let config = ZakuradConfig::load(zakura_config)
             .map_err(|error| eyre!(error))
             .wrap_err("load Zakura configuration")?;
+        reject_zakura_telemetry(&config)?;
         Ok(Self { config })
     }
 
@@ -165,5 +167,51 @@ impl HistoricalSource for FinalizedHistory {
     async fn fill(self, stage: &StageContext<'_>) -> Result<ControlFlow<()>> {
         let pass = IndexPass { kind: PassKind::Historical, source: self.0 };
         Ok(pass.run(stage).await?.map_continue(|_| ()))
+    }
+}
+
+/// Fails when `config` changes the `[tracing]` or the `[metrics]` section from its default.
+/// `ztreamerd` installs the one subscriber and the one recorder of the process, and Zakura
+/// records to them. Thus Zakura does not read these sections, and a value there has no effect.
+fn reject_zakura_telemetry(config: &ZakuradConfig) -> Result<()> {
+    ensure!(
+        config.tracing == Default::default(),
+        "the Zakura configuration sets [tracing], but ztreamerd does not read it: use \
+         --log-filter, --log-format and --otlp-endpoint"
+    );
+    ensure!(
+        config.metrics == Default::default(),
+        "the Zakura configuration sets [metrics], but ztreamerd does not read it: use \
+         --metrics-listen"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(toml: &str) -> Result<EmbeddedNode> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zakurad.toml");
+        std::fs::write(&path, toml).unwrap();
+        EmbeddedNode::load(Some(path))
+    }
+
+    #[test]
+    fn loads_a_configuration_with_no_telemetry_section() {
+        load("[network]\nnetwork = \"Testnet\"\n").unwrap();
+    }
+
+    #[test]
+    fn rejects_a_tracing_section() {
+        let error = load("[tracing]\nfilter = \"debug\"\n").unwrap_err();
+        assert!(error.to_string().contains("[tracing]"), "{error:#}");
+    }
+
+    #[test]
+    fn rejects_a_metrics_section() {
+        let error = load("[metrics]\nendpoint_addr = \"127.0.0.1:9000\"\n").unwrap_err();
+        assert!(error.to_string().contains("[metrics]"), "{error:#}");
     }
 }
