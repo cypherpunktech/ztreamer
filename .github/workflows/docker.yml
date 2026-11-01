@@ -3,7 +3,7 @@ name: Docker
 on:
   push:
     branches: [master]
-    # The build inputs of the image (see .dockerignore) and this file.
+    # These paths are the build inputs of the image (see .dockerignore) and this file.
     paths:
       - 'Dockerfile'
       - '.dockerignore'
@@ -12,7 +12,6 @@ on:
       - 'bin/**'
       - 'crates/**'
       - '.github/workflows/docker.yml'
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -26,7 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
-      # Builds the image and discards it: this job only shows that the Dockerfile builds.
+      # This step builds the image and does not keep it. The job only shows that the Dockerfile
+      # builds.
       - uses: docker/build-push-action@v7
         with:
           context: .
