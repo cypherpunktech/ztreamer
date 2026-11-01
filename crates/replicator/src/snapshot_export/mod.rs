@@ -21,26 +21,6 @@ use ztreamer_snapshot::{
 
 use crate::snapshot_writer::{SnapshotWriteError, SnapshotWriter};
 
-/// Why an export stopped.
-#[derive(Debug, thiserror::Error)]
-pub enum SnapshotExportError {
-    /// The index read failed.
-    #[error(transparent)]
-    Index(#[from] IndexError),
-    /// The index has no sealed range.
-    #[error("the index has no sealed range")]
-    NoSealedRange,
-    /// The range at genesis has no `range_meta` row.
-    #[error("the index has no range_meta row for the range at genesis")]
-    NoGenesisRow,
-    /// The rows do not make a valid manifest.
-    #[error("the range_meta rows do not make a valid manifest")]
-    Manifest(#[source] ManifestError),
-    /// The write of the snapshot directory failed.
-    #[error(transparent)]
-    Write(#[from] SnapshotWriteError),
-}
-
 /// What one export wrote.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapshotExport {
@@ -91,6 +71,26 @@ impl SnapshotExport {
             );
         }
     }
+}
+
+/// Why an export stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotExportError {
+    /// The index read failed.
+    #[error(transparent)]
+    Index(#[from] IndexError),
+    /// The index has no sealed range.
+    #[error("the index has no sealed range")]
+    NoSealedRange,
+    /// The range at genesis has no `range_meta` row.
+    #[error("the index has no range_meta row for the range at genesis")]
+    NoGenesisRow,
+    /// The rows do not make a valid manifest.
+    #[error("the range_meta rows do not make a valid manifest")]
+    Manifest(#[source] ManifestError),
+    /// The write of the snapshot directory failed.
+    #[error(transparent)]
+    Write(#[from] SnapshotWriteError),
 }
 
 /// The `range_meta` entries from genesis to the first sealed range without a row.

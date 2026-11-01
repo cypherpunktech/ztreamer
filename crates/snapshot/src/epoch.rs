@@ -3,7 +3,7 @@
 //! `z_gettreestate` takes 0.2 to 2.6 s per call. One call per range is too slow, so the replica
 //! asks for the tree roots once per epoch, at the end of its last range. The epoch rule keeps
 //! each epoch small enough to rebuild in one pass: an epoch closes after [`MAX_RANGES`] ranges,
-//! or at the first range that makes the epoch add [`MAX_COMMITMENTS`] note commitments. The
+//! or at the first range that makes the epoch add [`MAX_COMMITMENTS`] note commitments or more. The
 //! last range of the manifest also closes an epoch. Mainnet has about 400 epochs.
 //!
 //! An [`Epoch`] only groups manifest entries. `ztreamer_import::proof::EpochProof` checks
@@ -43,7 +43,7 @@ impl<'a> Epoch<'a> {
     }
 
     /// Returns `true` if the epoch rule closes the epoch at its last range: the epoch has
-    /// [`MAX_RANGES`] ranges, or it adds [`MAX_COMMITMENTS`] note commitments.
+    /// [`MAX_RANGES`] ranges, or it adds [`MAX_COMMITMENTS`] note commitments or more.
     ///
     /// Returns `false` for a shorter last epoch of a manifest. Only the end of the manifest
     /// closes that epoch, and a longer manifest continues it.

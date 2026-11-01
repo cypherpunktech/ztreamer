@@ -42,7 +42,7 @@ use ztreamer_snapshot::manifest_entry::{BlobMismatch, MANIFEST_VERSION, Manifest
 
 use crate::importer::MAX_BLOB_BYTES_BEFORE_INSTALL;
 use ztreamer_snapshot::{
-    layout::{ManifestPointer, PointerError, RangePath, SignatureFile},
+    layout::{ManifestPath, ManifestPointer, PointerError, RangePath, SignatureFile},
     manifest::{Manifest, ManifestError},
 };
 
@@ -458,14 +458,14 @@ impl HttpSource {
         Ok(self.get(path, 0).await?.into_body().collect().await?.to_bytes())
     }
 
-    /// Reads `path` and its signature file, and verifies the signature with the key of the
-    /// caller.
-    async fn signed(&self, path: &str) -> Result<Bytes, FetchError> {
-        let bytes = self.read(path).await?;
-        let signature = self.read(&SignatureFile::path_of(path)).await?;
+    /// Reads the manifest at `path` and its signature file, and verifies the signature with
+    /// the key of the caller.
+    async fn signed(&self, path: &ManifestPath) -> Result<Bytes, FetchError> {
+        let bytes = self.read(&path.to_string()).await?;
+        let signature = self.read(&path.signature_path()).await?;
         SignatureFile::try_from(&signature[..])
             .and_then(|signature| signature.verify(&bytes, &self.key))
-            .map_err(|_| FetchError::Signature { path: path.to_owned() })?;
+            .map_err(|_| FetchError::Signature { path: path.to_string() })?;
         Ok(bytes)
     }
 
@@ -479,7 +479,7 @@ impl HttpSource {
 impl RangeSource for HttpSource {
     async fn manifest(&self) -> Result<Manifest, FetchError> {
         let latest = self.latest().await?;
-        let bytes = self.signed(&latest.manifest.to_string()).await?;
+        let bytes = self.signed(&latest.manifest).await?;
         let manifest = Manifest::from_json(std::str::from_utf8(&bytes)?)?;
         if manifest.sealed_through() != latest.sealed_through {
             let (latest, manifest) = (latest.sealed_through, manifest.sealed_through());

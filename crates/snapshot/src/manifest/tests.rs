@@ -84,7 +84,7 @@ fn json_uses_the_field_names_and_encodings_of_the_plan() {
 
 /// Twelve rows with the flags of the epoch rule: the rule closes an epoch at row 9 only.
 #[test]
-fn contiguous_entries_stop_at_the_first_gap_and_close_the_last_epoch() {
+fn entries_to_gap_stop_at_the_first_gap_and_close_the_last_epoch() {
     let mut rows = entries_from_genesis(&[TreeSizes::default(); 12]);
     rows[11].epoch_end = false;
     rows.remove(7);
@@ -99,7 +99,7 @@ fn contiguous_entries_stop_at_the_first_gap_and_close_the_last_epoch() {
 }
 
 #[test]
-fn contiguous_entries_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
+fn entries_to_gap_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
     let rows = entries_from_genesis(&[TreeSizes::default(); 12]);
     let mut forced = rows.clone();
     forced[11].epoch_end = false;
@@ -112,11 +112,13 @@ fn contiguous_entries_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
 }
 
 #[test]
-fn contiguous_entries_that_do_not_start_at_genesis_are_refused() {
+fn entries_to_gap_that_do_not_start_at_genesis_are_refused_with_the_start() {
     let rows = entries_from_genesis(&[TreeSizes::default(); 3]);
 
     let error = Manifest::from_entries_to_gap("Mainnet", hash(0), rows[1..].to_vec()).unwrap_err();
 
+    assert!(matches!(error, ManifestError::Start { index: 0, start_height: 1_000 }), "{error:?}");
+    let error = Manifest::from_entries_to_gap("Mainnet", hash(0), Vec::new()).unwrap_err();
     assert!(matches!(error, ManifestError::Empty), "{error:?}");
 }
 

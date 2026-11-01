@@ -56,6 +56,11 @@ impl ManifestPath {
     pub fn to_path(&self) -> PathBuf {
         PathBuf::from(self.to_string())
     }
+
+    /// The path of the [`SignatureFile`](super::SignatureFile) of the manifest, with `/`.
+    pub fn signature_path(&self) -> String {
+        super::SignatureFile::path_of(&self.to_string())
+    }
 }
 
 impl fmt::Display for ManifestPath {
@@ -141,6 +146,7 @@ mod tests {
         assert_eq!(path.published_at(), DateTime::from_timestamp(1_792_972_805, 0).unwrap());
         assert_eq!(path.to_string().parse(), Ok(path));
         assert_eq!(path.to_path(), PathBuf::from("manifests/2026-10-26T000005Z.json"));
+        assert_eq!(path.signature_path(), "manifests/2026-10-26T000005Z.json.sig");
     }
 
     #[test]

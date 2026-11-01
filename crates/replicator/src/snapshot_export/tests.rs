@@ -79,7 +79,7 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
     let latest: ManifestPointer = serde_json::from_value(json["latest"].clone()).unwrap();
     assert_eq!(latest, ManifestPointer { manifest: manifest_path, sealed_through: 2_999 });
     assert!(!out.path().join("latest.json.sig").exists());
-    assert!(out.path().join(format!("{manifest_path}.sig")).exists());
+    assert!(out.path().join(manifest_path.signature_path()).exists());
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn a_second_export_writes_no_range_file_again() {
     // The export does not read a file with the name and the length of its entry. A file
     // with another length is written again.
     let [same_length, short] = [&entries[0], &entries[1]].map(|entry| {
-        let path = out.path().join(RangePath::from(entry).to_string());
+        let path = out.path().join(RangePath::from(entry).to_path());
         let mut bytes = fs::read(&path).unwrap();
         bytes[100] ^= 1;
         (path, bytes)
@@ -127,7 +127,7 @@ fn signatures_verify_with_the_signing_key() {
     assert_eq!(latest.manifest.to_string(), "manifests/2026-10-26T000000Z.json");
     // `latest.json` holds its own signature.
     assert!(!out.path().join(SignatureFile::path_of(ManifestPointer::PATH)).exists());
-    let signature = fs::read(out.path().join(SignatureFile::path_of(&report.manifest.to_string())));
+    let signature = fs::read(out.path().join(report.manifest.signature_path()));
     let signature = SignatureFile::try_from(&signature.unwrap()[..]).unwrap();
     let bytes = fs::read(out.path().join(report.manifest.to_path())).unwrap();
     signature.verify(&bytes, &key).unwrap();

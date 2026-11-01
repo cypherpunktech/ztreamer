@@ -39,37 +39,6 @@ pub struct SnapshotWriter {
     key: SigningKey,
 }
 
-/// What [`SnapshotWriter::export`] wrote.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Exported {
-    /// The path of the manifest.
-    pub manifest: ManifestPath,
-    /// The number of range files that the export wrote. The other range files were present,
-    /// with the length of their entry.
-    pub written: usize,
-}
-
-/// Why a [`SnapshotWriter`] stopped.
-#[derive(Debug, thiserror::Error)]
-pub enum SnapshotWriteError {
-    /// A file operation failed.
-    #[error("write the snapshot directory")]
-    Io(#[from] io::Error),
-    /// The index read failed.
-    #[error("read the index")]
-    Index(#[from] IndexError),
-    /// The index has no blob for the sealed range at this start height.
-    #[error("sealed range {0} is not in the index")]
-    MissingRange(u32),
-    /// The blob of the range at this start height does not have the length or the digest of
-    /// its entry.
-    #[error("the blob of sealed range {0} does not match its manifest entry")]
-    BlobMismatch(u32, #[source] BlobMismatch),
-    /// A manifest with this path is present.
-    #[error("{0} exists, and a manifest is never replaced")]
-    ManifestExists(ManifestPath),
-}
-
 impl SnapshotWriter {
     /// A writer for the snapshot directory at `root`, which signs with `key`.
     pub fn new(root: impl Into<PathBuf>, key: SigningKey) -> Self {
@@ -153,7 +122,7 @@ impl SnapshotWriter {
         let bytes = serde_json::to_vec(manifest).expect("a Manifest always serializes");
         self.put(path.to_path(), &bytes)?;
         let signature = SignatureFile::sign(&bytes, &self.key);
-        self.put(SignatureFile::path_of(&path.to_string()), signature.to_hex().as_bytes())?;
+        self.put(path.signature_path(), signature.to_hex().as_bytes())?;
         let pointer =
             ManifestPointer { manifest: *path, sealed_through: manifest.sealed_through() };
         self.put(ManifestPointer::PATH, &pointer.to_signed_json(&self.key))
@@ -170,6 +139,37 @@ impl SnapshotWriter {
         file.sync_all()?;
         fs::rename(temp, path)
     }
+}
+
+/// What [`SnapshotWriter::export`] wrote.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Exported {
+    /// The path of the manifest.
+    pub manifest: ManifestPath,
+    /// The number of range files that the export wrote. The other range files were present,
+    /// with the length of their entry.
+    pub written: usize,
+}
+
+/// Why a [`SnapshotWriter`] stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotWriteError {
+    /// A file operation failed.
+    #[error("write the snapshot directory")]
+    Io(#[from] io::Error),
+    /// The index read failed.
+    #[error("read the index")]
+    Index(#[from] IndexError),
+    /// The index has no blob for the sealed range at this start height.
+    #[error("sealed range {0} is not in the index")]
+    MissingRange(u32),
+    /// The blob of the range at this start height does not have the length or the digest of
+    /// its entry.
+    #[error("the blob of sealed range {0} does not match its manifest entry")]
+    BlobMismatch(u32, #[source] BlobMismatch),
+    /// A manifest with this path is present.
+    #[error("{0} exists, and a manifest is never replaced")]
+    ManifestExists(ManifestPath),
 }
 
 #[cfg(test)]

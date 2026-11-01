@@ -112,7 +112,7 @@ async fn a_bad_signature_refuses_the_manifest() {
     let manifest = &http.snapshot.manifest_path;
     let bytes = std::fs::read(http.snapshot.dir.path().join(manifest.to_path())).unwrap();
     let other = SignatureFile::sign(&bytes, &SigningKey::from_bytes(&[9; 32]));
-    let signature = http.snapshot.dir.path().join(SignatureFile::path_of(&manifest.to_string()));
+    let signature = http.snapshot.dir.path().join(manifest.signature_path());
     std::fs::write(signature, other.to_hex()).unwrap();
     let error = http.fetcher(SEED).manifest().await.unwrap_err();
     assert!(

@@ -74,8 +74,9 @@ impl Manifest {
     }
 
     /// The manifest of the `range_meta` entries of an index, for `network` with the genesis
-    /// block hash. `entries` are in height order from genesis. The manifest takes the entries
-    /// that follow each other from genesis, and stops at the first gap. It sets `epoch_end` on
+    /// block hash. `entries` are in height order from genesis. The manifest takes the first
+    /// entry and the entries that follow it, and stops at the first gap. A first entry that
+    /// does not start at genesis gives [`ManifestError::Start`]. It sets `epoch_end` on
     /// its last entry, because [`Epochs`] closes an epoch at the last entry of a manifest. The
     /// other entries keep their flag, and [`Manifest::new`] checks it with the epoch rule.
     ///
@@ -98,9 +99,9 @@ impl Manifest {
     ) -> Result<Self, ManifestError> {
         let mut entries: Vec<_> = entries
             .into_iter()
-            .scan(0, |next_start, entry| {
-                (entry.start_height == *next_start).then(|| {
-                    *next_start = entry.end_height.saturating_add(1);
+            .scan(None, |next_start: &mut Option<u32>, entry| {
+                next_start.is_none_or(|start| start == entry.start_height).then(|| {
+                    *next_start = Some(entry.end_height.saturating_add(1));
                     entry
                 })
             })
@@ -128,7 +129,7 @@ impl Manifest {
 
     /// The last height of the last sealed range.
     pub fn sealed_through(&self) -> u32 {
-        self.entries.last().map_or(0, |entry| entry.end_height)
+        self.entries.last().expect("Manifest::new refuses a manifest with no entries").end_height
     }
 
     /// One entry per sealed range, in height order from genesis.
