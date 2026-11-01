@@ -1,4 +1,4 @@
-# Only the build inputs of ztreamerd enter the build context.
+# Only the build inputs of ztreamerd go into the build context.
 *
 !Cargo.toml
 !Cargo.lock

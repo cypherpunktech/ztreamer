@@ -19,14 +19,14 @@ cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamer
 
 ### Docker
 
-The image runs ztreamerd as a user without privileges, and it has no shell. The volume `/var/lib/ztreamer` holds the index and, in the embedded mode, the zakura state.
+The image runs ztreamerd as a user without privileges. It has no shell. The volume `/var/lib/ztreamer` holds the index. In the embedded mode, it also holds the zakura state.
 
 ```console
 docker build -t ztreamer .
 docker run -d --name ztreamer -v ztreamer:/var/lib/ztreamer -p 9067:9067 -p 8233:8233 ztreamer
 ```
 
-The arguments of `docker run` replace the default command. Keep the listen flags: without them, ztreamerd listens on loopback, which the host cannot reach.
+The arguments of `docker run` replace the default command. Keep the listen flags. Without them, ztreamerd listens on loopback, and the host cannot connect.
 
 ```console
 docker run -d --name ztreamer -v ztreamer:/var/lib/ztreamer -p 9067:9067 ztreamer \
@@ -34,7 +34,7 @@ docker run -d --name ztreamer -v ztreamer:/var/lib/ztreamer -p 9067:9067 ztreame
   --remote-rpc https://user:password@host:8232 --replicate-from https://snapshot.example
 ```
 
-To give the embedded node a zakura configuration, mount the file and pass `--zakura-config`. The build is portable to every x86-64 and aarch64 CPU. The build arguments are `PROFILE` (default `maxperf`) and `RUSTFLAGS`: `--build-arg RUSTFLAGS="-C target-cpu=native"` gives a build that runs only on CPUs like the build host's.
+To give the embedded node a zakura configuration, mount the file and add `--zakura-config FILE`. The build runs on all x86-64 and aarch64 CPUs. The build arguments are `PROFILE` (default `maxperf`) and `RUSTFLAGS`. To make a build for the CPU type of the build host only, add `--build-arg RUSTFLAGS="-C target-cpu=native"`.
 
 ## Modes
 
