@@ -4,12 +4,15 @@ use std::{array::TryFromSliceError, str::FromStr};
 
 use hex::{FromHex, FromHexError};
 use sapling_crypto::Node as SaplingNode;
+use serde::{Deserialize, Serialize};
+use serde_with::{hex::Hex, serde_as};
 use zakura_chain::{ironwood, orchard, sapling, subtree::NoteCommitmentSubtreeIndex};
 
 use ztreamer_chain::codec::{CodecError, Reader, put_count};
 
-/// A note commitment pool.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// A note commitment pool. The JSON form is the [`Pool::as_str`] name.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Pool {
     /// The Sapling pool.
     Sapling,
@@ -144,12 +147,52 @@ impl FromStr for NodeBytes {
 }
 
 /// The root of one completed note commitment subtree.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// The JSON form is `{ "pool": "sapling", "index": 934, "root": "<32 bytes hex>" }`. Serde
+/// refuses root bytes that are not a node of the pool.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "SubtreeRootJson", into = "SubtreeRootJson")]
 pub struct SubtreeRoot {
     /// The subtree's index in its pool's tree.
     pub index: NoteCommitmentSubtreeIndex,
     /// The subtree root. Its variant names the pool.
     pub root: SubtreeNode,
+}
+
+impl TryFrom<SubtreeRootJson> for SubtreeRoot {
+    type Error = InvalidSubtreeRoot;
+
+    fn try_from(
+        SubtreeRootJson { pool, index, root }: SubtreeRootJson,
+    ) -> Result<Self, Self::Error> {
+        pool.node(root)
+            .map(|root| Self { index: NoteCommitmentSubtreeIndex(index), root })
+            .ok_or(InvalidSubtreeRoot { pool, index })
+    }
+}
+
+/// The JSON form of a [`SubtreeRoot`], before serde checks the root bytes.
+#[serde_as]
+#[derive(Deserialize, Serialize)]
+struct SubtreeRootJson {
+    pool: Pool,
+    index: u16,
+    #[serde_as(as = "Hex")]
+    root: NodeBytes,
+}
+
+impl From<SubtreeRoot> for SubtreeRootJson {
+    fn from(SubtreeRoot { index, root }: SubtreeRoot) -> Self {
+        Self { pool: root.pool(), index: index.0, root: root.to_bytes() }
+    }
+}
+
+/// The root bytes are not a node of the pool.
+#[derive(Debug, thiserror::Error)]
+#[error("{pool:?} subtree root {index} is not a node of its pool")]
+struct InvalidSubtreeRoot {
+    pool: Pool,
+    index: u16,
 }
 
 /// The tree roots a node reported for one height. A root is `None` when the pool was not active
