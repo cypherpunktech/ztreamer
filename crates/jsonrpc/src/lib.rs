@@ -36,5 +36,5 @@ mod https;
 
 pub use auth::{Auth, Secret};
 pub use client::{Retries, RetryPolicy, RpcClient, RpcConfig};
-pub use error::{RpcCode, RpcError, RpcErrorObject};
+pub use error::{NodeState, RpcCode, RpcError, RpcErrorObject};
 pub use https::HttpsClient;

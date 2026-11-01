@@ -67,6 +67,7 @@ pub mod frontier;
 mod head;
 mod methods;
 mod node_chain;
+mod node_sync;
 mod node_url;
 mod tail;
 #[cfg(any(test, feature = "test-utils"))]
@@ -77,8 +78,10 @@ pub use fetch_at_height::FetchAtHeightError;
 pub use head::RemoteHeadSource;
 pub use methods::{Method, ZakuraClient};
 pub use node_chain::{NodeChain, UnknownChain};
+pub use node_sync::{NodeSyncWait, NodeWaitError};
 pub use node_url::{NodeUrl, NodeUrlError};
 pub use tail::RemoteTailSource;
 pub use ztreamer_jsonrpc::{
-    Auth, HttpsClient, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError, RpcErrorObject, Secret,
+    Auth, HttpsClient, NodeState, RetryPolicy, RpcClient, RpcCode, RpcConfig, RpcError,
+    RpcErrorObject, Secret,
 };

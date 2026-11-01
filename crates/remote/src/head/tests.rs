@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use crate::{
     RpcClient, RpcCode,
@@ -9,7 +15,7 @@ use tokio::sync::watch;
 use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
 use ztreamer_chain::test_utils::grow_chain;
 use ztreamer_sync::{
-    head::{HeadFollower, HeadFollowerConfig},
+    head::{HeadFollower, HeadFollowerConfig, HeadFollowerError},
     pipeline::PipelineConfig,
 };
 
@@ -76,7 +82,7 @@ async fn a_height_above_the_tip_of_the_node_is_no_block() {
     assert!(source.block(6).await.unwrap().is_none());
     assert_eq!(source.block_hash(5).await.unwrap(), Some(blocks[5].hash()));
     assert_eq!(source.block_hash(6).await.unwrap(), None);
-    assert!(matches!(source.block_hash(7).await, Err(HeadError::Remote(_))));
+    assert!(matches!(source.block_hash(7).await, Err(HeadError::RemoteFatal(_))));
 }
 
 #[tokio::test]
@@ -178,6 +184,72 @@ async fn follow_head_reaches_a_moving_tip() {
 
     shutdown.send(true).unwrap();
     follower.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn follow_head_stops_on_a_gone_node() {
+    let ctx = EphemeralService::empty().await;
+    let blocks = chain(12);
+    let node_chain = MockChain::new(&blocks);
+    let gone = Arc::new(AtomicBool::new(false));
+    let mock = MockNode::start({
+        let gone = Arc::clone(&gone);
+        move |_, request| match gone.load(Ordering::SeqCst) {
+            true => Reply::Close,
+            false => node_chain.reply(request),
+        }
+    })
+    .await;
+    let source = RemoteHeadSource::new(ZakuraClient::new(RpcClient::new(mock.config()).unwrap()));
+    let (_shutdown, receiver) = watch::channel(false);
+    let config = HeadFollowerConfig {
+        poll_interval: Duration::from_millis(1),
+        attempt_timeout: Duration::from_secs(1),
+        freshness_timeout: Duration::from_secs(1),
+    };
+    let follower = tokio::spawn({
+        let follower = ctx.follower.clone();
+        async move { follower.follow_head(source, PipelineConfig::default(), config, receiver).await }
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while visible_tip(&ctx.follower) != Some(id(&blocks[12])) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    gone.store(true, Ordering::SeqCst);
+    let stopped = tokio::time::timeout(Duration::from_secs(5), follower).await;
+
+    let error = stopped.expect("the follower stops by itself").unwrap().unwrap_err();
+    let url = mock.url().to_string();
+    let cause = std::error::Error::source(&error).unwrap().to_string();
+    assert!(cause.contains(&format!("remote zakura {url} is gone: ")), "{cause}");
+}
+
+#[tokio::test]
+async fn follow_head_stops_on_a_node_that_does_not_answer() {
+    let ctx = EphemeralService::empty().await;
+    let mock = MockNode::start(|_, _| {
+        Reply::Delay(Duration::from_secs(60), Box::new(Reply::Result(json!(null))))
+    })
+    .await;
+    let source = RemoteHeadSource::new(ZakuraClient::new(RpcClient::new(mock.config()).unwrap()))
+        .with_call_timeout(Duration::from_millis(100));
+    let (_shutdown, receiver) = watch::channel(false);
+    let config = HeadFollowerConfig {
+        poll_interval: Duration::from_millis(1),
+        attempt_timeout: Duration::from_millis(400),
+        freshness_timeout: Duration::from_millis(400),
+    };
+
+    let follow = ctx.follower.follow_head(source, PipelineConfig::default(), config, receiver);
+    let error = tokio::time::timeout(Duration::from_secs(5), follow).await.unwrap().unwrap_err();
+
+    assert!(matches!(error, HeadFollowerError::Source(_)), "{error}");
+    let cause = std::error::Error::source(&error).unwrap().to_string();
+    assert!(cause.contains("is gone: ") && cause.contains("timed out after 100ms"), "{cause}");
 }
 
 /// The requests that `mock` received after the first `from` requests, and how many of them

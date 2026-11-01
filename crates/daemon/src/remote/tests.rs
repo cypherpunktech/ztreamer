@@ -1,7 +1,7 @@
 use std::{future, time::Duration};
 
 use serde_json::json;
-use tokio::{task::JoinHandle, time::timeout};
+use tokio::time::timeout;
 use tonic::transport::Server;
 use zakura_chain::{
     block::{Block, Height},
@@ -10,9 +10,11 @@ use zakura_chain::{
 use zakura_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
 use ztreamer_chain::test_utils::grow_chain;
 use ztreamer_remote::{
-    Secret,
+    RpcCode, Secret,
     test_utils::{MockChain, MockNode, Reply},
 };
+
+use ztreamer_index::index::BlockId;
 
 use super::*;
 use crate::{
@@ -61,37 +63,6 @@ async fn run(config: DaemonConfig) -> Result<()> {
 async fn durable_tip(dir: &tempfile::TempDir) -> Option<u32> {
     let index = config(dir, "http://127.0.0.1:1").index.open(&Network::Mainnet).await.unwrap();
     index.state().unwrap().durable_tip().map(|tip| tip.height)
-}
-
-/// A daemon on a free gRPC port until [`Self::stop`] sends the signal.
-struct Daemon {
-    signal: CancellationToken,
-    task: JoinHandle<Result<()>>,
-}
-
-impl Daemon {
-    fn start(dir: &tempfile::TempDir, url: &str) -> Self {
-        let mut config = config(dir, url);
-        config.servers.grpc_listen = free_addr();
-        let node = node(&config);
-        let signal = CancellationToken::new();
-        let received = signal.clone().cancelled_owned();
-        let daemon = Launcher::new(config, Server::builder()).run(node, async move {
-            received.await;
-            Ok(())
-        });
-        Self { signal, task: tokio::spawn(daemon) }
-    }
-
-    /// Sends the signal. The daemon must stop without an error.
-    async fn stop(self) {
-        self.signal.cancel();
-        timeout(Duration::from_secs(10), self.task)
-            .await
-            .expect("the daemon stops after the signal")
-            .unwrap()
-            .unwrap();
-    }
 }
 
 /// True when the node got no `getblock` request.
@@ -195,7 +166,7 @@ async fn waits_for_the_end_of_the_warm_up() {
     let node = node(&config(&dir, &mock.url().to_string()));
 
     let shutdown = CancellationToken::new();
-    let info = node.blockchain_info_when_up(&shutdown);
+    let info = node.blockchain_info_at_height(0, &shutdown);
     let info = timeout(Duration::from_secs(30), info).await.unwrap().unwrap();
 
     let ControlFlow::Continue(info) = info else { panic!("no shutdown was sent") };
@@ -204,16 +175,44 @@ async fn waits_for_the_end_of_the_warm_up() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn waits_for_an_unreachable_node_until_the_signal() {
+async fn an_unreachable_node_stops_the_boot() {
     let dir = tempfile::tempdir().unwrap();
-    let mut daemon = Daemon::start(&dir, &format!("http://{}", free_addr()));
+    let url = format!("http://{}/", free_addr());
 
-    // The client gives up a call after about 1.4 s of retries. The daemon then waits and calls
-    // again, thus it is still running after 3 s.
-    assert!(timeout(Duration::from_secs(3), &mut daemon.task).await.is_err());
-    daemon.stop().await;
+    // The client gives up a call after about 1.4 s of retries. Then the daemon stops.
+    let error = run(config(&dir, &url)).await.unwrap_err();
 
-    assert_eq!(durable_tip(&dir).await, None);
+    assert_eq!(error.to_string(), "read the chain of the remote zakura node");
+    let cause = error.chain().nth(1).unwrap().to_string();
+    assert!(cause.starts_with(&format!("remote zakura {url} is gone: ")), "{error:?}");
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "no index is made");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_catch_up_waits_for_the_node_to_reach_the_index_tip() {
+    let dir = tempfile::tempdir().unwrap();
+    let node_chain = MockChain::new(&chain(4));
+    let mock = MockNode::start({
+        let node_chain = node_chain.clone();
+        move |_, request| node_chain.reply(request)
+    })
+    .await;
+    let node = node(&config(&dir, &mock.url().to_string()));
+    let info = node.client.get_blockchain_info().await.unwrap();
+    let components = RemoteComponents { node, network: Network::Mainnet, info };
+    let shutdown = CancellationToken::new();
+    let tip = IndexTip::at(BlockId::new(8, zakura_chain::block::Hash([0; 32])));
+
+    let grow = async {
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        node_chain.set_blocks(&chain(8));
+    };
+    let (tail, ()) = tokio::join!(components.tail(tip, &shutdown), grow);
+
+    assert!(matches!(tail.unwrap(), ControlFlow::Continue(_)));
+    let seen = mock.seen();
+    let info_calls = seen.iter().filter(|seen| seen.body["method"] == "getblockchaininfo").count();
+    assert!(info_calls >= 3, "the catch-up asked again while the node was behind: {info_calls}");
 }
 
 #[test]

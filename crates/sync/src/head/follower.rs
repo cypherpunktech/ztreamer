@@ -37,10 +37,13 @@ impl Default for HeadFollowerConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum HeadFollowerError {
     #[error("head follower durations are invalid")]
     Config,
+    /// The head source cannot recover ([`HeadSyncError::stops_follower`]).
+    #[error("head source failed")]
+    Source(#[source] HeadSyncError),
 }
 
 /// Keeps the index at the canonical head of a node, and publishes a [`ServingSnapshot`] after
@@ -162,7 +165,12 @@ impl HeadFollower {
         Ok(state)
     }
 
-    /// Polls Zakura until `shutdown` becomes true. Source errors are retried.
+    /// Polls Zakura until `shutdown` becomes true.
+    ///
+    /// A failed attempt marks the tip stale ([`Self::mark_source_failure`]), and the next poll
+    /// tries again. Thus a source that answers but is behind stays stale, and readiness is false
+    /// after `freshness_timeout`. It stops with an error on a source that cannot recover
+    /// ([`HeadSyncError::stops_follower`]).
     pub async fn follow_head(
         &self,
         mut source: impl CanonicalBlockSource,
@@ -205,11 +213,7 @@ impl HeadFollower {
                 }
             };
             let result = tokio::select! {
-                result = tokio::time::timeout(config.attempt_timeout, attempt) => {
-                    result
-                        .map_err(|_| "Zakura head attempt timed out".to_owned())
-                        .and_then(|result| result.map_err(|error| error.to_string()))
-                }
+                result = tokio::time::timeout(config.attempt_timeout, attempt) => result,
                 changed = shutdown.changed() => {
                     if changed.is_err() || *shutdown.borrow() {
                         return Ok(());
@@ -217,9 +221,15 @@ impl HeadFollower {
                     continue;
                 }
             };
-            if let Err(error) = result {
-                self.mark_source_failure(error, config.freshness_timeout);
-            }
+            let error = match result {
+                Ok(Ok(_)) => continue,
+                Ok(Err(error)) if error.stops_follower() => {
+                    return Err(HeadFollowerError::Source(error));
+                }
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => "Zakura head attempt timed out".to_owned(),
+            };
+            self.mark_source_failure(error, config.freshness_timeout);
         }
     }
 }
@@ -238,6 +248,55 @@ mod tests {
         async fn block(&mut self, height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
             Ok(self.0.get(height as usize).cloned())
         }
+    }
+
+    /// A source whose each read fails with the error of `fail`.
+    struct FailingSource {
+        fail: fn() -> HeadError,
+    }
+
+    #[tonic::async_trait]
+    impl CanonicalBlockSource for FailingSource {
+        async fn block(&mut self, _height: u32) -> Result<Option<RawIndexBlock>, HeadError> {
+            Err((self.fail)())
+        }
+    }
+
+    const FAST: HeadFollowerConfig = HeadFollowerConfig {
+        poll_interval: Duration::from_millis(1),
+        attempt_timeout: Duration::from_millis(50),
+        freshness_timeout: Duration::from_millis(100),
+    };
+
+    /// Follows `source` from an index at height 0 for at most one second.
+    async fn follow(source: FailingSource) -> Option<Result<(), HeadFollowerError>> {
+        let dir = tempfile::tempdir().unwrap();
+        let index = Arc::new(open_index(dir.path()));
+        let head = HeadFollower::new(Arc::clone(&index), index.state().unwrap());
+        let (_shutdown, receiver) = watch::channel(false);
+        let follow = head.follow_head(source, PipelineConfig::default(), FAST, receiver);
+        tokio::time::timeout(Duration::from_secs(1), follow).await.ok()
+    }
+
+    #[tokio::test]
+    async fn follower_stops_on_a_gone_node() {
+        let gone = || HeadError::RemoteFatal("remote zakura is gone".into());
+        let result = follow(FailingSource { fail: gone }).await;
+
+        let error = result.expect("the follower stops by itself").unwrap_err();
+        assert!(matches!(error, HeadFollowerError::Source(ref source) if source.stops_follower()));
+        let causes: Vec<_> =
+            std::iter::successors(Some(&error as &dyn std::error::Error), |e| e.source())
+                .map(ToString::to_string)
+                .collect();
+        assert!(causes.iter().any(|cause| cause.contains("remote zakura is gone")), "{causes:?}");
+    }
+
+    #[tokio::test]
+    async fn follower_tries_again_on_a_syncing_node() {
+        let syncing = || HeadError::Remote("remote zakura is syncing".into());
+        let result = follow(FailingSource { fail: syncing }).await;
+        assert!(result.is_none(), "the follower runs until the shutdown");
     }
 
     #[tokio::test]

@@ -18,7 +18,7 @@ use ztreamer_index::index::{
 use ztreamer_snapshot::manifest_entry::{Frontiers, MAX_RANGES, ManifestEntry};
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
-use crate::proof::EpochProof;
+use crate::{attest::EpochError, proof::EpochProof};
 use ztreamer_snapshot::{
     epoch::{Epoch, Epochs},
     manifest::Manifest,
@@ -166,8 +166,9 @@ impl EpochImport {
         Ok((ranges, proof))
     }
 
-    /// Runs [`EpochProof::attest`] and [`SamplePlan::sample`] for the epoch at `at` at the same time,
-    /// and makes the [`VerifyState::Verified`] rows.
+    /// Waits for the node to reach the end of the epoch at `at`. Then runs [`EpochProof::attest`]
+    /// and [`SamplePlan::sample`] for the epoch at the same time, and makes the
+    /// [`VerifyState::Verified`] rows.
     async fn attest_and_sample(
         &self,
         at: usize,
@@ -176,10 +177,14 @@ impl EpochImport {
     ) -> Result<VerifiedRows, ImportError> {
         let epoch = self.manifest_epoch(at);
         let node = &self.importer.node;
+        let in_epoch = |source| ImportError::from_epoch_error(epoch.end_height(), source);
+        // A syncing node has no answer above its tip.
+        let height = epoch.end_height();
+        let reached = node.attestor.wait_for_height(height).await;
+        reached.map_err(|source| in_epoch(EpochError::Node { height, source }))?;
         let attest = proof.attest(&epoch, &*node.attestor);
         let sample = self.importer.config.verify_sample.sample(&epoch, &ranges, &*node.sampler);
         let (attested, sampled) = tokio::join!(attest, sample);
-        let in_epoch = |source| ImportError::from_epoch_error(epoch.end_height(), source);
         let (attested, sampled) = (attested.map_err(in_epoch)?, sampled.map_err(in_epoch)?);
 
         let verified_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
