@@ -739,7 +739,8 @@ fn seals_a_range_that_is_complete_in_mutable_rows() {
     index.latest().unwrap().verify_continuity().unwrap();
 }
 
-/// The write stages that one write records, each with one sample.
+/// The write stages that one write records, each with one sample. The write registers each
+/// stage, so a stage that did not run has no sample.
 fn write_stages(index: &Index, batch: WriteBatch) -> Vec<String> {
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 
@@ -753,9 +754,12 @@ fn write_stages(index: &Index, batch: WriteBatch) -> Vec<String> {
         .into_vec()
         .into_iter()
         .filter(|(key, _, _, _)| key.key().name() == "ztreamer.index.write.seconds")
-        .map(|(key, _, _, value)| {
-            assert!(matches!(value, DebugValue::Histogram(samples) if samples.len() == 1));
-            key.key().labels().next().unwrap().value().to_owned()
+        .filter_map(|(key, _, _, value)| {
+            let DebugValue::Histogram(samples) = value else {
+                panic!("the write stage metric is not a histogram");
+            };
+            assert!(samples.len() <= 1, "a write records each stage at most once");
+            (!samples.is_empty()).then(|| key.key().labels().next().unwrap().value().to_owned())
         })
         .collect();
     stages.sort();

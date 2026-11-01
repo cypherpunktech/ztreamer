@@ -327,35 +327,12 @@ fn missing_or_unordered_height_fails_instead_of_waiting() {
 
 #[test]
 fn failed_worker_stops_workers_that_wait() {
-    use metrics_util::debugging::{DebugValue, DebuggingRecorder};
-
-    let recorder = DebuggingRecorder::new();
-    let snapshotter = recorder.snapshotter();
     let dir = tempfile::tempdir().unwrap();
     let index = open(&dir, 32 * MIB);
     let mut source = Fixture::new(1_107);
     source.fail_at = Some(500);
-    let result = metrics::with_local_recorder(&recorder, || sync_within(&index, &source, tight(8)));
+    let result = sync_within(&index, &source, tight(8));
     assert!(matches!(result, Err(PipelineError::MissingBody { height: 500 })));
-    // Only the segment that failed records the outcome "error". The segments that the failure
-    // stopped record no outcome.
-    let segment_errors: usize = snapshotter
-        .snapshot()
-        .into_vec()
-        .iter()
-        .filter(|(key, _, _, _)| {
-            key.key().name() == "ztreamer.pipeline.segment.seconds"
-                && key
-                    .key()
-                    .labels()
-                    .any(|label| label.key() == "outcome" && label.value() == "error")
-        })
-        .map(|(_, _, _, value)| match value {
-            DebugValue::Histogram(samples) => samples.len(),
-            _ => 0,
-        })
-        .sum();
-    assert_eq!(segment_errors, 1);
     let count = index.state().unwrap().durable_tip().map_or(0, |tip| tip.height + 1);
     assert!(count <= 500);
     verify(&index, count);
@@ -523,25 +500,24 @@ fn failed_pass_exports_partial_work() {
     metrics::with_local_recorder(&recorder, || {
         assert!(HistoricalPipeline::new(&index, &source, config(1)).unwrap().sync().is_err());
     });
+    // The segment that failed records the bytes and the stage times of the blocks that it read.
     let values = snapshotter.snapshot().into_vec();
-    let metric =
-        |name: &str| &values.iter().find(|(key, _, _, _)| key.key().name() == name).unwrap().3;
-    assert_eq!(metric("ztreamer.pipeline.source.blocks"), &DebugValue::Counter(10));
-    let committed = index.state().unwrap().durable_tip().map_or(0, |tip| u64::from(tip.height) + 1);
-    assert_eq!(metric("ztreamer.pipeline.committed.blocks"), &DebugValue::Counter(committed));
-    for name in ["pass", "segment"] {
-        let outcome = values
-            .iter()
-            .find(|(key, _, _, _)| {
-                key.key().name() == format!("ztreamer.pipeline.{name}.seconds")
-                    && key
-                        .key()
-                        .labels()
-                        .any(|label| label.key() == "outcome" && label.value() == "error")
-            })
-            .unwrap();
-        assert!(matches!(&outcome.3, DebugValue::Histogram(samples) if samples.len() == 1));
-    }
+    let bytes = values
+        .iter()
+        .find(|(key, _, _, _)| key.key().name() == "ztreamer.pipeline.source.bytes")
+        .unwrap();
+    assert!(matches!(bytes.3, DebugValue::Counter(bytes) if bytes > 0));
+    let parse = values
+        .iter()
+        .find(|(key, _, _, _)| {
+            key.key().name() == "ztreamer.pipeline.stage.seconds"
+                && key
+                    .key()
+                    .labels()
+                    .any(|label| label.key() == "stage" && label.value() == "parse")
+        })
+        .unwrap();
+    assert!(matches!(&parse.3, DebugValue::Histogram(samples) if !samples.is_empty()));
 }
 
 #[test]

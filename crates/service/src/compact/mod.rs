@@ -13,8 +13,6 @@ use zakura_chain::{
 
 use ztreamer_backend::StateBackend;
 
-use crate::metrics::ServiceMetrics;
-
 use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock};
 use ztreamer_index::index::Index;
 use ztreamer_protocol::{RpcStream, proto};
@@ -48,7 +46,6 @@ pub struct CompactService {
     node_version: Arc<NodeVersion>,
     range_streams: Arc<Semaphore>,
     ping_enabled: bool,
-    metrics: Arc<ServiceMetrics>,
 }
 
 impl std::fmt::Debug for CompactService {
@@ -70,7 +67,6 @@ impl CompactService {
         backend: impl StateBackend,
     ) -> Self {
         let chain_name = chain_name.into();
-        let metrics = Arc::new(ServiceMetrics::new());
         Self {
             index,
             snapshots,
@@ -79,7 +75,6 @@ impl CompactService {
             node_version: Arc::default(),
             range_streams: Arc::new(Semaphore::new(MAX_RANGE_STREAMS)),
             ping_enabled: false,
-            metrics,
         }
     }
 

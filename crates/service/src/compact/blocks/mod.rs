@@ -1,6 +1,8 @@
 //! Block and block-range requests, served from the volatile head and the compact index.
 
-use std::{sync::Arc, time::Instant};
+mod end_at_error;
+
+use std::sync::Arc;
 
 use tokio_stream::StreamExt;
 use tonic::Status;
@@ -9,6 +11,7 @@ use ztreamer_chain::codec::{EncodedBlockRecord, ProtobufBlockRecord, StoredBlock
 use ztreamer_index::index::IndexError;
 use ztreamer_protocol::{EncodedCompactBlock, proto};
 
+use self::end_at_error::EndAtError;
 use super::{CompactService, RpcStream, ensure_ready, reorganized};
 use crate::project::{PoolSelection, add_transparent_txs, project_block};
 
@@ -42,8 +45,7 @@ impl CompactService {
         request: proto::BlockRange,
         nullifiers: bool,
     ) -> Result<RpcStream<EncodedCompactBlock>, Status> {
-        let guard = self.metrics.range();
-        guard.response(self.encoded_range_inner(request, nullifiers).await)
+        Ok(Box::pin(EndAtError::new(self.encoded_range_inner(request, nullifiers).await?)))
     }
 
     async fn encoded_range_inner(
@@ -67,8 +69,7 @@ impl CompactService {
         request: proto::BlockRange,
         nullifiers: bool,
     ) -> Result<RpcStream<proto::CompactBlock>, Status> {
-        let guard = self.metrics.range();
-        guard.response(self.range_inner(request, nullifiers).await)
+        Ok(Box::pin(EndAtError::new(self.range_inner(request, nullifiers).await?)))
     }
 
     async fn range_inner(
@@ -130,10 +131,10 @@ impl CompactService {
         {
             return Err(Status::unavailable("canonical head source is stale"));
         }
-        let admission_started = Instant::now();
-        let permit = Arc::clone(&self.range_streams).acquire_owned().await;
-        self.metrics.admission(admission_started.elapsed());
-        let permit = permit.map_err(|_| Status::unavailable("range stream pool is closed"))?;
+        let permit = Arc::clone(&self.range_streams)
+            .acquire_owned()
+            .await
+            .map_err(|_| Status::unavailable("range stream pool is closed"))?;
         let index = Arc::clone(&self.index);
         let ascending = start <= end;
         let durable_tip = snapshot.durable_tip.map(|tip| tip.height);
