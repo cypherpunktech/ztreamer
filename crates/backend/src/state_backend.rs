@@ -1,4 +1,5 @@
-//! [`StateBackend`]: the chain-state reads that ztreamer needs from a node.
+//! [`StateBackend`]: the chain-state reads that ztreamer needs from a node, and the values that
+//! they return.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -12,12 +13,14 @@ use zakura_chain::{
     block::{self, Block},
     ironwood, orchard,
     parameters::Network,
+    sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
+use ztreamer_snapshot::{manifest_entry::Frontiers, pool::PoolRoots};
 
-use crate::{AddressUtxo, BackendError, MinedTransaction, TreeState};
+use crate::BackendError;
 
 /// Chain state and node access for the service, behind one interface.
 ///
@@ -96,3 +99,59 @@ pub trait StateBackend: Send + Sync + 'static {
 
 /// Completed note commitment subtrees of one pool, by subtree index.
 pub type Subtrees<Node> = BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<Node>>;
+
+/// A transaction in the best chain and the height it was mined at.
+#[derive(Clone, Debug)]
+pub struct MinedTransaction {
+    /// The transaction.
+    pub transaction: Arc<Transaction>,
+    /// The height of the block that holds it.
+    pub height: block::Height,
+}
+
+/// The three note commitment trees at one block. A tree is `None` when the pool was not active
+/// at that block.
+#[derive(Clone, Debug, Default)]
+pub struct TreeState {
+    /// Sapling tree.
+    pub sapling: Option<Arc<sapling::tree::NoteCommitmentTree>>,
+    /// Orchard tree.
+    pub orchard: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    /// Ironwood tree.
+    pub ironwood: Option<Arc<ironwood::tree::NoteCommitmentTree>>,
+}
+
+/// Each frontier in the `zcashd` RPC encoding, or empty when the pool is not active.
+impl From<&TreeState> for Frontiers {
+    fn from(trees: &TreeState) -> Self {
+        Self {
+            sapling: trees.sapling.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+            orchard: trees.orchard.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+            ironwood: trees.ironwood.as_ref().map(|tree| tree.to_rpc_bytes()).unwrap_or_default(),
+        }
+    }
+}
+
+/// Each tree root, or `None` when the pool is not active.
+impl From<&TreeState> for PoolRoots {
+    fn from(trees: &TreeState) -> Self {
+        Self {
+            sapling: trees.sapling.as_ref().map(|tree| tree.root()),
+            orchard: trees.orchard.as_ref().map(|tree| tree.root()),
+            ironwood: trees.ironwood.as_ref().map(|tree| tree.root()),
+        }
+    }
+}
+
+/// One unspent transparent output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddressUtxo {
+    /// The address the output pays to.
+    pub address: transparent::Address,
+    /// The transaction and index that identify the output.
+    pub outpoint: transparent::OutPoint,
+    /// The output's value and lock script.
+    pub output: transparent::Output,
+    /// The height the transaction was mined at.
+    pub height: block::Height,
+}

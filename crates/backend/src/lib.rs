@@ -14,10 +14,8 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod answers;
 mod error;
 mod state_backend;
 
-pub use answers::{AddressUtxo, MinedTransaction, TreeState};
 pub use error::BackendError;
-pub use state_backend::{StateBackend, Subtrees};
+pub use state_backend::{AddressUtxo, MinedTransaction, StateBackend, Subtrees, TreeState};
