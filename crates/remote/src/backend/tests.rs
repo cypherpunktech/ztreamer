@@ -1,6 +1,9 @@
 use std::{
-    collections::BTreeMap,
-    sync::atomic::{AtomicBool, Ordering},
+    collections::{BTreeMap, HashSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use super::*;
@@ -8,11 +11,23 @@ use crate::{
     RpcClient, RpcCode,
     test_utils::{MockNode, Reply},
 };
+use sapling_crypto::Node as SaplingNode;
 use serde_json::{Value, json};
+use zakura_chain::{
+    amount::{Amount, NonNegative},
+    block::Block,
+    orchard, sapling,
+    serialization::{ZcashDeserializeInto as _, ZcashSerialize as _},
+    subtree::NoteCommitmentSubtreeData,
+    transaction::Transaction,
+    transparent,
+};
 use zakura_rpc::client::{
-    Commitments, GetBlockchainInfoResponse, GetTreestateResponse, HexData, TransactionObject, Utxo,
+    Commitments, GetBlockchainInfoResponse, GetTreestateResponse, HexData, TransactionObject,
+    Treestate, Utxo,
 };
 use zakura_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES};
+use ztreamer_backend::{AddressUtxo, StateBackend};
 
 /// The mainnet answers that `connect` and the tip reads need, for a node with tip `tip`.
 fn chain_reply(method: &str, tip: u32) -> Option<Reply> {
