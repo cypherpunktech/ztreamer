@@ -38,8 +38,8 @@ use shielded_pool::Pool;
 
 pub use error::RemoteConnectError;
 
-/// The tree states that the cache can hold. A tree state is at most three frontiers of 32
-/// nodes, approximately 3.5 KiB, so the full cache is approximately 14 MiB.
+/// The maximum number of tree states in the cache. A tree state is at most three frontiers of
+/// 32 nodes, approximately 3.5 KiB. Thus the full cache is approximately 14 MiB.
 const TREE_CACHE_ENTRIES: NonZeroUsize = NonZeroUsize::new(4_096).unwrap();
 
 /// Chain state from a remote zakura node.
@@ -106,7 +106,7 @@ impl RemoteBackend {
         self.mempool.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Completed subtrees of `P` from `start`, at most `limit` of them.
+    /// Returns the completed subtrees of `P` from `start`. Returns at most `limit` subtrees.
     async fn subtrees<P: Pool>(
         &self,
         start: NoteCommitmentSubtreeIndex,
@@ -121,7 +121,7 @@ impl RemoteBackend {
         )
     }
 
-    /// The `getrawtransaction` answer for `id` with verbose 1. `None` when the node does not
+    /// Calls `getrawtransaction` for `id` with verbose 1. Returns `None` if the node does not
     /// have the transaction.
     async fn fetch_transaction(
         &self,
@@ -134,8 +134,8 @@ impl RemoteBackend {
         }
     }
 
-    /// A mempool transaction, from the cache or the node. `None` when the transaction left the
-    /// mempool or was mined after `getrawmempool`.
+    /// Returns a mempool transaction from the cache or the node. Returns `None` if the
+    /// transaction left the mempool after `getrawmempool`, for example in a new block.
     ///
     /// The cache key is the mined id, so the cache keeps the first authorizing data that the
     /// node gave for a version 5 transaction.

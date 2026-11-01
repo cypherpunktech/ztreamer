@@ -13,7 +13,7 @@ pub enum RemoteConnectError {
     /// The node runs a different chain.
     #[error("remote zakura runs chain {found:?}, the index needs {expected:?}")]
     WrongChain {
-        /// The BIP70 name of the index's network.
+        /// The BIP70 name of the network of the index.
         expected: String,
         /// The chain name that the node gave.
         found: String,
@@ -21,7 +21,7 @@ pub enum RemoteConnectError {
     /// The node has a different genesis block.
     #[error("remote zakura has genesis block {found}, the index needs {expected}")]
     WrongGenesis {
-        /// The genesis hash of the index's network.
+        /// The genesis hash of the network of the index.
         expected: block::Hash,
         /// The genesis hash that the node gave.
         found: block::Hash,

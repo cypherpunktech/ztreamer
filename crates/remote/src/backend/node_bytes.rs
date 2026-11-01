@@ -12,8 +12,8 @@ pub(crate) trait FromNodeBytes: ZcashDeserialize + Send + 'static {
     /// The name of the value in errors.
     const WHAT: &'static str;
 
-    /// Deserializes `bytes` on a blocking thread, because a large block takes milliseconds. The
-    /// thread runs in the tracing span of the caller.
+    /// Deserializes `bytes` on a blocking thread, because a large block can use some
+    /// milliseconds of CPU time. The thread runs in the tracing span of the caller.
     fn from_node_bytes(bytes: Vec<u8>) -> impl Future<Output = Result<Self, BackendError>> + Send {
         let span = tracing::Span::current();
         async move {

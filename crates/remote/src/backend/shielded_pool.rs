@@ -11,9 +11,11 @@ use ztreamer_snapshot::pool::{self, NodeBytes, SubtreeNode};
 
 /// A shielded pool: its [`pool::Pool`] and its root type.
 pub(crate) trait Pool {
+    /// The pool in the snapshot format.
     const POOL: pool::Pool;
     /// The name of the pool in `z_getsubtreesbyindex`.
     const NAME: &'static str = Self::POOL.as_str();
+    /// The type of a subtree root in the pool.
     type Node: Clone + Send + Sync + 'static;
 
     /// Returns the root in `node`. Returns `None` if `node` is a root of a different pool.
@@ -22,8 +24,8 @@ pub(crate) trait Pool {
     /// Parses a `z_getsubtreesbyindex` answer that must start at `start`.
     ///
     /// The node prints each subtree root in the stored byte order, for all pools. This is
-    /// different from the Sapling tree root (`finalRoot` of `z_gettreestate`), which the node
-    /// prints reversed.
+    /// different from the Sapling tree root (`finalRoot` of `z_gettreestate`). The node prints
+    /// that root in the reverse byte order.
     fn parse_subtrees(
         response: GetSubtreesByIndexResponse,
         start: NoteCommitmentSubtreeIndex,

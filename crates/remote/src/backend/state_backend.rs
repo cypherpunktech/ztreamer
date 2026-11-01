@@ -35,7 +35,7 @@ use super::{
     shielded_pool::{IronwoodPool, OrchardPool, SaplingPool},
 };
 
-/// The most `getrawtransaction` calls in flight for one mempool read.
+/// The maximum number of `getrawtransaction` calls at the same time for one mempool read.
 const MEMPOOL_FETCHES: usize = 16;
 
 #[tonic::async_trait]
@@ -141,8 +141,8 @@ impl StateBackend for RemoteBackend {
         if heights.end().0 == 0 {
             return Ok(Vec::new());
         }
-        // The node also moves a start above its tip down to the tip. Read the tip first: the tip
-        // of the node does not go down, so the node then keeps the start as it is. A start of 0
+        // The node also changes a start above its tip to the tip. Thus read the tip first. The
+        // tip of the node does not decrease, so the node then keeps the start. A start of 0
         // cannot be above the tip.
         if heights.start().0 > 0
             && *heights.start() > self.node.get_block_count().await.map_err(NodeCallError)?
@@ -225,7 +225,7 @@ impl StateBackend for RemoteBackend {
             })
             .buffer_unordered(MEMPOOL_FETCHES)
             // A failed call for one transaction does not fail the read. That transaction is not
-            // in the cache, so the next read asks for it again.
+            // in the cache, so the next read requests it again.
             .filter_map(|(id, fetched)| {
                 future::ready(match fetched {
                     Err(BackendError::Unavailable(error)) => {
@@ -248,8 +248,8 @@ impl StateBackend for RemoteBackend {
         })?;
         match self.node.send_raw_transaction(&bytes).await {
             Ok(sent) => Ok(sent.hash()),
-            // Warm-up and a method that the listener does not serve are about the node, not
-            // about the transaction.
+            // Warm-up and a method that the listener does not serve are node errors, not
+            // transaction errors.
             Err(error) if error.is_retryable() || error.is_method_not_found() => {
                 Err(NodeCallError(error).into())
             }

@@ -9,13 +9,15 @@ use ztreamer_backend::BackendError;
 
 /// A note commitment tree that `z_gettreestate` prints, and the type of its root.
 pub(crate) trait RpcTree: FromRpc {
+    /// The type of the tree root.
     type Root: FromRpc + PartialEq;
 
+    /// Returns the root of the tree.
     fn tree_root(&self) -> Self::Root;
 
-    /// Reads the tree from `finalState` of one pool of a `z_gettreestate` answer. `None` when
-    /// the node leaves it out, which it does before the pool activates. When the node also gives
-    /// `finalRoot`, the root of the tree must be equal to it.
+    /// Reads the tree from `finalState` of one pool of a `z_gettreestate` answer. Returns
+    /// `None` if `finalState` is not in the answer. The node does not send it before the pool
+    /// activation. If the node also sends `finalRoot`, the tree root must be equal to it.
     fn from_treestate(
         pool: &str,
         treestate: &Treestate,

@@ -16,7 +16,8 @@ pub(crate) struct FetchedTransaction {
 }
 
 impl FetchedTransaction {
-    /// Reads the answer of the node for `id`. The answer must be verbose.
+    /// Reads the answer of the node for `id`. Returns [`BackendError::Unexpected`] if the answer
+    /// is not verbose.
     pub(crate) fn from_response(
         id: transaction::Hash,
         response: GetRawTransactionResponse,
@@ -29,8 +30,9 @@ impl FetchedTransaction {
         Ok(Self { id, object })
     }
 
-    /// The best-chain height of the transaction. `None` for a mempool transaction. A height of
-    /// -1 is a side chain, which is not the best chain either.
+    /// Returns the best-chain height of the transaction, or `None` for a mempool transaction.
+    /// The node gives the height -1 for a side chain. That is not the best chain, so the
+    /// result is also `None`.
     pub(crate) fn height(&self) -> Option<block::Height> {
         self.object.height().and_then(|height| u32::try_from(height).ok()).map(block::Height)
     }
