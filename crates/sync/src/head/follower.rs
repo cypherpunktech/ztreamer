@@ -4,7 +4,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::watch;
-use tracing::{Instrument, field::Empty};
+use tracing::{Instrument, debug, field::Empty, info, warn};
 use ztreamer_chain::codec::CompactBlockRecord;
 use ztreamer_index::index::{Index, IndexState};
 
@@ -171,6 +171,8 @@ impl HeadFollower {
 
         let mut interval = tokio::time::interval(config.poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // The source failed on the last attempt. A change of this state is an event.
+        let mut failing = false;
         loop {
             tokio::select! {
                 _ = interval.tick() => {}
@@ -185,7 +187,8 @@ impl HeadFollower {
             let attempt = async {
                 if self.snapshot().ready {
                     match self.sync_head(&mut source, pipeline).await {
-                        Err(HeadSyncError::DeepReorg { .. }) => {
+                        Err(HeadSyncError::DeepReorg { height }) => {
+                            warn!(height, "deep reorg below the volatile head; recovering");
                             self.recover_deep_reorg(&mut source, pipeline).await
                         }
                         result => result,
@@ -216,10 +219,21 @@ impl HeadFollower {
                     continue;
                 }
             };
-            if let Err(error) = result {
-                poll.record("otel.status_code", "ERROR");
-                poll.record("otel.status_description", error.as_str());
-                self.mark_source_failure(error, config.freshness_timeout);
+            match result {
+                Err(error) => {
+                    poll.record("otel.status_code", "ERROR");
+                    poll.record("otel.status_description", error.as_str());
+                    if std::mem::replace(&mut failing, true) {
+                        debug!(%error, "head source still fails");
+                    } else {
+                        warn!(%error, "head source failed; retrying");
+                    }
+                    self.mark_source_failure(error, config.freshness_timeout);
+                }
+                Ok(_) if std::mem::replace(&mut failing, false) => {
+                    info!("head source answers again")
+                }
+                Ok(_) => {}
             }
         }
     }

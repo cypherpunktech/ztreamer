@@ -18,5 +18,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     // The guard drops after the daemon stops, and sends the spans that wait.
     let _telemetry = init_telemetry(cli.telemetry())?;
+    // The error is also an event, thus the JSON log and the trace export have it.
     cli.run()
+        .inspect_err(|error| tracing::error!(error = format!("{error:#}"), "ztreamerd stopped"))
 }

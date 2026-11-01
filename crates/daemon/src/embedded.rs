@@ -6,7 +6,7 @@ use std::{ops::ControlFlow, path::PathBuf, sync::Arc};
 
 use eyre::{Result, WrapErr, ensure, eyre};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{debug, info};
 use zakura_chain::parameters::Network;
 use zakurad::config::ZakuradConfig;
 use ztreamer_embedded::{FinalizedDb, InProcessBackend, NodeClient};
@@ -53,8 +53,9 @@ impl EmbeddedNode {
         }
         info!(tip = ?client.tip(), "Zakura is near the chain tip");
 
+        info!("waiting for Zakura's first finalized block");
         while client.database().tip().is_none() {
-            info!("waiting for Zakura's first finalized block");
+            debug!("Zakura has no finalized block yet");
             tokio::select! {
                 _ = shutdown.cancelled() => return Ok(ControlFlow::Break(())),
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}

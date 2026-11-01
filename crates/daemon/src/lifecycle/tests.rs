@@ -18,6 +18,7 @@ use tokio::{sync::oneshot, time::timeout};
 use zakura_chain::block::Height as BlockHeight;
 use zakura_network::zakura::{Peer, Service, Stream, ZakuraConnId, ZakuraPeerId};
 use zakurad::{config::ZakuradConfig, node::CustomService};
+use ztreamer_chain::test_utils::capture_spans;
 use ztreamer_embedded::NodeClient;
 
 use super::*;
@@ -159,26 +160,41 @@ async fn signal_failure_still_drains_main_and_tasks() {
     assert!(task_cleaned.load(SeqCst) && main_cleaned.get());
 }
 
-#[tokio::test]
-async fn task_errors_come_in_start_order() {
-    let supervisor = Supervisor::new(CancellationToken::new());
-    let (second_failed_tx, second_failed_rx) = oneshot::channel::<()>();
-    supervisor.tasks().spawn("first", "first stopped", async {
-        // Fail only after the second task failed.
-        let _ = second_failed_rx.await;
-        Err(eyre!("first failed"))
+/// The result is the error of the first task in start order. The shutdown event names the task
+/// that stopped first, and the error that the result does not give is an event.
+#[test]
+fn task_errors_come_in_start_order() {
+    // One thread: the second task stops before the first task runs again.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (error, lines) = capture_spans(|| {
+        runtime.block_on(async {
+            let supervisor = Supervisor::new(CancellationToken::new());
+            let (second_failed_tx, second_failed_rx) = oneshot::channel::<()>();
+            supervisor.tasks().spawn("first", "first stopped", async {
+                // Fail only after the second task failed.
+                let _ = second_failed_rx.await;
+                Err(eyre!("first failed"))
+            });
+            supervisor.tasks().spawn("second", "second stopped", async {
+                drop(second_failed_tx);
+                Err(eyre!("second failed"))
+            });
+            let shutdown = supervisor.tasks().shutdown().clone();
+            let main = async move {
+                shutdown.cancelled().await;
+                Ok(())
+            };
+            run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err()
+        })
     });
-    supervisor.tasks().spawn("second", "second stopped", async {
-        drop(second_failed_tx);
-        Err(eyre!("second failed"))
-    });
-    let shutdown = supervisor.tasks().shutdown().clone();
-    let main = async move {
-        shutdown.cancelled().await;
-        Ok(())
-    };
-    let error = run_within_five_seconds(supervisor, future::pending(), main).await.unwrap_err();
     assert_eq!(error.to_string(), "first failed");
+    let event = |message: &str, key: &str, value: &str| {
+        lines
+            .iter()
+            .any(|line| line["fields"]["message"] == message && line["fields"][key] == value)
+    };
+    assert!(event("shutting down node and application", "cause", "second"));
+    assert!(event("a second error stopped the daemon", "error", "second failed"));
 }
 
 #[tokio::test]
