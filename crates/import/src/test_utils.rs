@@ -54,7 +54,10 @@ use ztreamer_snapshot::manifest_entry::{BlobDigest, ManifestEntry};
 use ztreamer_sync::head::ServingSnapshot;
 
 use ztreamer_replicator::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
-use ztreamer_snapshot::{layout::RangePath, manifest::Manifest};
+use ztreamer_snapshot::{
+    layout::{ManifestPath, RangePath},
+    manifest::Manifest,
+};
 
 /// The seed of the key that signs a [`Snapshot`].
 pub const SEED: [u8; 32] = [7; 32];
@@ -157,7 +160,7 @@ pub struct Snapshot {
     /// The last manifest.
     pub manifest: Manifest,
     /// The path of the manifest that `latest.json` names, relative to [`Self::dir`].
-    pub manifest_path: String,
+    pub manifest_path: ManifestPath,
     /// The time of the last manifest. Each new manifest is one day after the last manifest.
     published_at: DateTime<Utc>,
     /// The snapshot directory.
@@ -188,7 +191,7 @@ impl Snapshot {
 
     /// The file of the blob of `entry`.
     pub fn range_path(&self, entry: &ManifestEntry) -> PathBuf {
-        self.dir.path().join(RangePath::from(entry).as_str())
+        self.dir.path().join(RangePath::from(entry))
     }
 
     /// Writes `entries` as a new manifest, one day after the last manifest.

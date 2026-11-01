@@ -4,7 +4,7 @@
 use std::{
     fs::{self, File},
     io::{self, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, Utc};
@@ -14,7 +14,7 @@ use ztreamer_index::index::{Index, IndexError};
 use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
 use ztreamer_snapshot::{
-    layout::{Latest, RangePath, SignatureFile},
+    layout::{ManifestPath, ManifestPointer, RangePath, SignatureFile},
     manifest::Manifest,
 };
 
@@ -42,8 +42,8 @@ pub struct SnapshotWriter {
 /// What [`SnapshotWriter::export`] wrote.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Exported {
-    /// The path of the manifest, relative to the snapshot directory.
-    pub manifest: String,
+    /// The path of the manifest.
+    pub manifest: ManifestPath,
     /// The number of range files that the export wrote. The other range files were present,
     /// with the length of their entry.
     pub written: usize,
@@ -67,7 +67,7 @@ pub enum SnapshotWriteError {
     BlobMismatch(u32, #[source] BlobMismatch),
     /// A manifest with this path is present.
     #[error("{0} exists, and a manifest is never replaced")]
-    ManifestExists(String),
+    ManifestExists(ManifestPath),
 }
 
 impl SnapshotWriter {
@@ -111,12 +111,15 @@ impl SnapshotWriter {
         entry
             .check_blob(blob)
             .map_err(|mismatch| SnapshotWriteError::BlobMismatch(entry.start_height, mismatch))?;
-        Ok(self.put(RangePath::from(entry).as_str(), blob)?)
+        Ok(self.put(RangePath::from(entry), blob)?)
     }
 
     /// The path of the manifest for `now`. It refuses the path if a file has it.
-    pub fn new_manifest_path(&self, now: DateTime<Utc>) -> Result<String, SnapshotWriteError> {
-        let path = format!("manifests/{}.json", now.format("%Y-%m-%dT%H%M%SZ"));
+    pub fn new_manifest_path(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<ManifestPath, SnapshotWriteError> {
+        let path = ManifestPath::at(now);
         if self.root.join(&path).exists() {
             return Err(SnapshotWriteError::ManifestExists(path));
         }
@@ -127,7 +130,7 @@ impl SnapshotWriter {
     /// file with a different length, it logs a warning and returns `false`. Then the caller
     /// writes the file again.
     fn has_range(&self, entry: &ManifestEntry) -> io::Result<bool> {
-        let path = self.root.join(RangePath::from(entry).as_str());
+        let path = self.root.join(RangePath::from(entry));
         match fs::metadata(&path) {
             Ok(file) if file.is_file() && file.len() == entry.blob_len => Ok(true),
             Ok(_) => {
@@ -142,19 +145,23 @@ impl SnapshotWriter {
     /// Writes the manifest at `path`, then its signature, then `latest.json`. For a short time,
     /// the manifest is present without its signature. But `latest.json` points at the manifest
     /// only after the signature is present.
-    pub fn put_manifest_and_latest(&self, path: &str, manifest: &Manifest) -> io::Result<()> {
+    pub fn put_manifest_and_latest(
+        &self,
+        path: &ManifestPath,
+        manifest: &Manifest,
+    ) -> io::Result<()> {
         let bytes = serde_json::to_vec(manifest).expect("a Manifest always serializes");
         self.put(path, &bytes)?;
         let signature = SignatureFile::sign(&bytes, &self.key);
-        self.put(&SignatureFile::path_of(path), signature.to_hex().as_bytes())?;
-        let latest =
-            Latest { manifest: path.to_owned(), sealed_through: manifest.sealed_through() };
-        self.put(Latest::PATH, &latest.to_file(&self.key))
+        self.put(SignatureFile::path_of(path.as_str()), signature.to_hex().as_bytes())?;
+        let pointer =
+            ManifestPointer { manifest: path.clone(), sealed_through: manifest.sealed_through() };
+        self.put(ManifestPointer::PATH, &pointer.to_signed_json(&self.key))
     }
 
     /// Writes `bytes` to a temporary file next to `relative`. Then it renames the temporary file
     /// to `relative`.
-    fn put(&self, relative: &str, bytes: &[u8]) -> io::Result<()> {
+    fn put(&self, relative: impl AsRef<Path>, bytes: &[u8]) -> io::Result<()> {
         let path = self.root.join(relative);
         fs::create_dir_all(path.parent().expect("a file below the root has a parent"))?;
         let temp = path.with_added_extension("tmp");
@@ -168,13 +175,13 @@ impl SnapshotWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ztreamer_snapshot::test_utils::synthetic_entries;
+    use ztreamer_snapshot::test_utils::entries_from_genesis;
 
     #[test]
     fn a_blob_that_does_not_match_its_entry_is_not_written() {
         let dir = tempfile::tempdir().unwrap();
         let writer = SnapshotWriter::new(dir.path(), SigningKey::from_bytes(&[7; 32]));
-        let mut entry = synthetic_entries(&[Default::default()]).pop().unwrap();
+        let mut entry = entries_from_genesis(&[Default::default()]).pop().unwrap();
         entry.blob_len = 5;
 
         let error = writer.put_range(&entry, b"other").unwrap_err();
@@ -183,6 +190,6 @@ mod tests {
             matches!(error, SnapshotWriteError::BlobMismatch(0, BlobMismatch::Digest)),
             "{error:?}"
         );
-        assert!(!dir.path().join(RangePath::from(&entry).as_str()).exists());
+        assert!(!dir.path().join(RangePath::from(&entry)).exists());
     }
 }

@@ -18,7 +18,7 @@ use ztreamer_snapshot::{
 
 use super::*;
 use crate::{proof::EpochProof, range::Check};
-use ztreamer_snapshot::{epoch::Epochs, test_utils::synthetic_entries};
+use ztreamer_snapshot::{epoch::Epochs, test_utils::entries_from_genesis};
 
 const SUBTREE: NoteCommitmentSubtreeIndex = NoteCommitmentSubtreeIndex(5);
 
@@ -91,7 +91,7 @@ impl Attestor for FakeAttestor {
 /// the root of the empty tree for each pool.
 async fn attest(attestor: &FakeAttestor) -> Result<Vec<Attested>, EpochError> {
     let completed = SubtreeRoot { index: SUBTREE, root: sapling_node(1) };
-    let mut entries = synthetic_entries(&[TreeSizes { sapling: 1, ..TreeSizes::default() }; 3]);
+    let mut entries = entries_from_genesis(&[TreeSizes { sapling: 1, ..TreeSizes::default() }; 3]);
     entries[1].subtree_roots = vec![completed];
     let proof = EpochProof {
         end_frontiers: Frontiers::default(),

@@ -60,7 +60,7 @@ pub(crate) trait Pool {
                     .root
                     .parse::<NodeBytes>()
                     .ok()
-                    .and_then(|bytes| Self::POOL.node(bytes))
+                    .and_then(|bytes| Self::POOL.read_node(bytes))
                     .and_then(Self::root_from_node)
                     .ok_or_else(|| bad_root(&subtree.root))?;
                 let data = NoteCommitmentSubtreeData::new(subtree.end_height, root);

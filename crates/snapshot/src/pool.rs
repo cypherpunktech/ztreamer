@@ -37,7 +37,7 @@ impl Pool {
 
     /// Reads a subtree root of this pool from `bytes`. Returns `None` if the bytes are not a
     /// node of the pool.
-    pub fn node(self, NodeBytes(bytes): NodeBytes) -> Option<SubtreeNode> {
+    pub fn read_node(self, NodeBytes(bytes): NodeBytes) -> Option<SubtreeNode> {
         match self {
             Self::Sapling => Option::from(SaplingNode::from_bytes(bytes)).map(SubtreeNode::Sapling),
             Self::Orchard => orchard::tree::Node::try_from(bytes).ok().map(SubtreeNode::Orchard),
@@ -85,7 +85,7 @@ impl SubtreeNode {
         }
     }
 
-    /// The bytes of the subtree root. [`Pool::node`] reads them.
+    /// The bytes of the subtree root. [`Pool::read_node`] reads them.
     pub fn to_bytes(self) -> NodeBytes {
         NodeBytes(match self {
             Self::Sapling(node) => node.to_bytes(),
@@ -102,14 +102,14 @@ impl SubtreeNode {
     fn decode_from(reader: &mut Reader<'_>) -> Result<Self, CodecError> {
         let tag = reader.u8()?;
         let bytes = NodeBytes(reader.array()?);
-        Pool::from_tag(tag).and_then(|pool| pool.node(bytes)).ok_or(CodecError::InvalidRecord)
+        Pool::from_tag(tag).and_then(|pool| pool.read_node(bytes)).ok_or(CodecError::InvalidRecord)
     }
 }
 
 /// A subtree root as 32 bytes, in the byte order of its pool. `z_getsubtreesbyindex`, the
 /// `range_meta` layout, the Replicator message and the JSON manifest use this order.
 ///
-/// The bytes are not checked. [`Pool::node`] checks them and returns a [`SubtreeNode`].
+/// The bytes are not checked. [`Pool::read_node`] checks them and returns a [`SubtreeNode`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NodeBytes([u8; 32]);
 
@@ -165,7 +165,7 @@ impl TryFrom<SubtreeRootJson> for SubtreeRoot {
     fn try_from(
         SubtreeRootJson { pool, index, root }: SubtreeRootJson,
     ) -> Result<Self, Self::Error> {
-        pool.node(root)
+        pool.read_node(root)
             .map(|root| Self { index: NoteCommitmentSubtreeIndex(index), root })
             .ok_or(InvalidSubtreeRoot { pool, index })
     }

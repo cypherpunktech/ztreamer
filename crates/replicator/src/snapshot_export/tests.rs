@@ -6,7 +6,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use ztreamer_chain::test_utils::record;
 use ztreamer_index::test_utils::{populate, range_meta_row, sealed_range_blob};
-use ztreamer_snapshot::layout::{Latest, RangePath, SignatureFile};
+use ztreamer_snapshot::layout::{ManifestPath, ManifestPointer, RangePath, SignatureFile};
 
 use super::*;
 use crate::test_utils::index_with_rows;
@@ -44,15 +44,11 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
 
     let report = export(&index, &out, 0);
 
-    let manifest_path = "manifests/2026-10-26T000000Z.json";
+    let manifest_path =
+        ManifestPath::try_from("manifests/2026-10-26T000000Z.json".to_owned()).unwrap();
     assert_eq!(
         report,
-        SnapshotExport {
-            manifest: manifest_path.to_owned(),
-            ranges: 3,
-            written: 3,
-            missing_rows: 0
-        }
+        SnapshotExport { manifest: manifest_path.clone(), ranges: 3, written: 3, missing_rows: 0 }
     );
     for entry in &entries {
         let start = entry.start_height;
@@ -62,7 +58,7 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
         assert_eq!(file, sealed_range_blob(&index, start));
     }
 
-    let bytes = fs::read(out.path().join(manifest_path)).unwrap();
+    let bytes = fs::read(out.path().join(&manifest_path)).unwrap();
     let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
     let expected =
         Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), closed(entries.clone())).unwrap();
@@ -81,8 +77,8 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
     let json: Value =
         serde_json::from_slice(&fs::read(out.path().join("latest.json")).unwrap()).unwrap();
     assert!(json.get("signature").is_some());
-    let latest: Latest = serde_json::from_value(json["latest"].clone()).unwrap();
-    assert_eq!(latest, Latest { manifest: manifest_path.to_owned(), sealed_through: 2_999 });
+    let latest: ManifestPointer = serde_json::from_value(json["latest"].clone()).unwrap();
+    assert_eq!(latest, ManifestPointer { manifest: manifest_path.clone(), sealed_through: 2_999 });
     assert!(!out.path().join("latest.json.sig").exists());
     assert!(out.path().join(format!("{manifest_path}.sig")).exists());
 }
@@ -108,7 +104,7 @@ fn a_second_export_writes_no_range_file_again() {
     assert_eq!((report.ranges, report.written), (3, 1));
     assert_eq!(fs::read(&same_length.0).unwrap(), same_length.1);
     assert_eq!(fs::read(&short.0).unwrap(), sealed_range_blob(&index, 1_000));
-    assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
+    assert_eq!(report.manifest.as_str(), "manifests/2026-10-27T000000Z.json");
     assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
     // Two manifests, each with its signature.
     assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 4);
@@ -127,12 +123,12 @@ fn signatures_verify_with_the_signing_key() {
 
     let report = export(&index, &out, 0);
 
-    let latest = fs::read(out.path().join(Latest::PATH)).unwrap();
-    let latest = Latest::from_file(&latest, &key).unwrap();
-    assert_eq!(latest.manifest, "manifests/2026-10-26T000000Z.json");
+    let latest = fs::read(out.path().join(ManifestPointer::PATH)).unwrap();
+    let latest = ManifestPointer::from_signed_json(&latest, &key).unwrap();
+    assert_eq!(latest.manifest.as_str(), "manifests/2026-10-26T000000Z.json");
     // `latest.json` holds its own signature.
-    assert!(!out.path().join(SignatureFile::path_of(Latest::PATH)).exists());
-    let signature = fs::read(out.path().join(SignatureFile::path_of(&report.manifest)));
+    assert!(!out.path().join(SignatureFile::path_of(ManifestPointer::PATH)).exists());
+    let signature = fs::read(out.path().join(SignatureFile::path_of(report.manifest.as_str())));
     let signature = SignatureFile::try_from(&signature.unwrap()[..]).unwrap();
     let bytes = fs::read(out.path().join(&report.manifest)).unwrap();
     signature.verify(&bytes, &key).unwrap();

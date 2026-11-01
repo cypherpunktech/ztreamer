@@ -39,7 +39,7 @@ use crate::{
 /// A snapshot manifest that obeys the rules in the module docs.
 ///
 /// The fields are private. Each way to get a manifest checks the rules: [`Manifest::new`],
-/// [`Manifest::from_contiguous_entries`], [`Manifest::from_json`] and serde. Thus a `Manifest`
+/// [`Manifest::from_entries_to_gap`], [`Manifest::from_json`] and serde. Thus a `Manifest`
 /// is always valid, and it has at least one entry.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(try_from = "ManifestJson<'static>")]
@@ -88,10 +88,10 @@ impl Manifest {
     /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
     ///
     /// fn manifest(genesis: block::Hash, rows: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
-    ///     Manifest::from_contiguous_entries("Mainnet", genesis, rows)
+    ///     Manifest::from_entries_to_gap("Mainnet", genesis, rows)
     /// }
     /// ```
-    pub fn from_contiguous_entries(
+    pub fn from_entries_to_gap(
         network: impl Into<String>,
         genesis_hash: block::Hash,
         entries: impl IntoIterator<Item = ManifestEntry>,
@@ -144,7 +144,7 @@ impl Manifest {
     /// Checks that:
     ///
     /// - there is at least one entry;
-    /// - the entries are one aligned range each, contiguous from genesis, with tree sizes that
+    /// - the entries are one aligned range each, adjacent from genesis, with tree sizes that
     ///   do not decrease, and with no pool that becomes inactive;
     /// - `epoch_end` agrees with [`Epochs`].
     fn check_entries(&self) -> Result<(), ManifestError> {
@@ -165,7 +165,7 @@ impl Manifest {
         let expected_start =
             previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
         if expected_start != Some(entry.start_height) {
-            return Err(ManifestError::Discontiguous { index, start_height: entry.start_height });
+            return Err(ManifestError::Start { index, start_height: entry.start_height });
         }
         if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
             return Err(ManifestError::RangeLength { index });
@@ -249,7 +249,7 @@ pub enum ManifestError {
     },
     /// The entry does not start one height after the previous entry, or at genesis.
     #[error("entry {index} starts at {start_height}, not after the previous entry")]
-    Discontiguous {
+    Start {
         /// The position of the entry in the manifest.
         index: usize,
         /// The start height of the entry.

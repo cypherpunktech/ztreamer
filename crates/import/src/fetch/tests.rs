@@ -107,15 +107,18 @@ async fn a_bad_signature_refuses_the_manifest() {
     let http = Http::new().await;
     // `latest.json` holds the key of `SEED`. A source must not trust it.
     let error = http.fetcher([8; 32]).manifest().await.unwrap_err();
-    assert!(matches!(error, FetchError::Latest(LatestError::Signature)), "{error:?}");
+    assert!(matches!(error, FetchError::Latest(PointerError::Signature)), "{error:?}");
 
     let manifest = &http.snapshot.manifest_path;
     let bytes = std::fs::read(http.snapshot.dir.path().join(manifest)).unwrap();
     let other = SignatureFile::sign(&bytes, &SigningKey::from_bytes(&[9; 32]));
-    let signature = http.snapshot.dir.path().join(SignatureFile::path_of(manifest));
+    let signature = http.snapshot.dir.path().join(SignatureFile::path_of(manifest.as_str()));
     std::fs::write(signature, other.to_hex()).unwrap();
     let error = http.fetcher(SEED).manifest().await.unwrap_err();
-    assert!(matches!(&error, FetchError::Signature { path } if path == manifest), "{error:?}");
+    assert!(
+        matches!(&error, FetchError::Signature { path } if path == manifest.as_str()),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]

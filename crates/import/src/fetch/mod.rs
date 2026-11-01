@@ -4,13 +4,13 @@
 //! a byte offset. The two implementations are:
 //!
 //! - [`HttpSource`] reads a snapshot directory that `ztreamerd export-snapshot` wrote, below a
-//!   base URL, in the layout of [`ztreamer_snapshot::layout`]. It reads [`Latest`], then the manifest
+//!   base URL, in the layout of [`ztreamer_snapshot::layout`]. It reads [`ManifestPointer`], then the manifest
 //!   that it names, and verifies the Ed25519 signature of each with a key that the caller
 //!   gives. It does not use the key in `latest.json`: a source that can change the files can
 //!   also change that key. It reads a blob from its [`RangePath`] with an HTTP `Range` request.
 //!   It sends at most `HTTP_BLOB_REQUESTS` (32) blob requests at a time.
 //! - [`PeerSource`] asks a ztreamer that serves the Replicator gRPC service. It builds the
-//!   manifest from `ListRanges` with [`Manifest::from_contiguous_entries`], as
+//!   manifest from `ListRanges` with [`Manifest::from_entries_to_gap`], as
 //!   `ztreamerd export-snapshot` does. It opens at most [`PEER_RANGE_STREAMS`] `GetRange`
 //!   streams at a time. When the peer refuses a stream with `RESOURCE_EXHAUSTED`, it waits and
 //!   asks again: a busy peer is not a failed peer.
@@ -42,7 +42,7 @@ use ztreamer_snapshot::manifest_entry::{BlobMismatch, MANIFEST_VERSION, Manifest
 
 use crate::importer::MAX_BLOB_BYTES_BEFORE_INSTALL;
 use ztreamer_snapshot::{
-    layout::{Latest, LatestError, RangePath, SignatureFile},
+    layout::{ManifestPointer, PointerError, RangePath, SignatureFile},
     manifest::{Manifest, ManifestError},
 };
 
@@ -169,7 +169,7 @@ pub enum FetchError {
     /// `latest.json` does not parse, has no signature, or its signature does not verify with
     /// the key of the caller.
     #[error(transparent)]
-    Latest(#[from] LatestError),
+    Latest(#[from] PointerError),
     /// `latest.json` and the manifest that it names give another sealed height.
     #[error("latest.json is sealed through {latest}, its manifest through {manifest}")]
     LatestHeight {
@@ -470,8 +470,8 @@ impl HttpSource {
     }
 
     /// Reads `latest.json` and verifies its signature with the key of the caller.
-    async fn latest(&self) -> Result<Latest, FetchError> {
-        Ok(Latest::from_file(&self.read(Latest::PATH).await?, &self.key)?)
+    async fn latest(&self) -> Result<ManifestPointer, FetchError> {
+        Ok(ManifestPointer::from_signed_json(&self.read(ManifestPointer::PATH).await?, &self.key)?)
     }
 }
 
@@ -479,7 +479,7 @@ impl HttpSource {
 impl RangeSource for HttpSource {
     async fn manifest(&self) -> Result<Manifest, FetchError> {
         let latest = self.latest().await?;
-        let bytes = self.signed(&latest.manifest).await?;
+        let bytes = self.signed(latest.manifest.as_str()).await?;
         let manifest = Manifest::from_json(std::str::from_utf8(&bytes)?)?;
         if manifest.sealed_through() != latest.sealed_through {
             let (latest, manifest) = (latest.sealed_through, manifest.sealed_through());
@@ -623,7 +623,7 @@ impl PeerSource {
 
 #[async_trait]
 impl RangeSource for PeerSource {
-    /// Builds the manifest from the listed ranges with [`Manifest::from_contiguous_entries`]: the
+    /// Builds the manifest from the listed ranges with [`Manifest::from_entries_to_gap`]: the
     /// ranges that follow each other from genesis, with `epoch_end` on the last one.
     async fn manifest(&self) -> Result<Manifest, FetchError> {
         let mut client = self.client.clone();
@@ -639,7 +639,7 @@ impl RangeSource for PeerSource {
         while let Some(entry) = listed.message().await? {
             entries.push(ManifestEntry::try_from(entry)?);
         }
-        Ok(Manifest::from_contiguous_entries(info.network, block::Hash(genesis_hash), entries)?)
+        Ok(Manifest::from_entries_to_gap(info.network, block::Hash(genesis_hash), entries)?)
     }
 
     async fn fetch_blob(

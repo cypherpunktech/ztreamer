@@ -54,7 +54,7 @@ pub struct ManifestEntry {
     pub blob_digest: BlobDigest,
     /// The length of the range blob in bytes.
     pub blob_len: u64,
-    /// Whether the range closes a verification epoch.
+    /// `true` if the range closes a verification epoch.
     pub epoch_end: bool,
 }
 

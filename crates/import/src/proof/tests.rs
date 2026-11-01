@@ -8,7 +8,7 @@ use ztreamer_chain::{
 use ztreamer_snapshot::manifest_entry::ManifestEntry;
 
 use super::*;
-use ztreamer_snapshot::{epoch::Epochs, test_utils::synthetic_entries};
+use ztreamer_snapshot::{epoch::Epochs, test_utils::entries_from_genesis};
 
 /// The Sapling tree size before the epoch under test: six commitments short of the end of
 /// subtree 15.
@@ -130,7 +130,7 @@ struct Fixture {
 /// [`Trees::append_one_by_one`].
 fn fixture(seed: u8, mut blocks: Vec<CompactBlockRecord>) -> Fixture {
     let mut sizes = TreeSizes { sapling: START_SAPLING, ..TreeSizes::default() };
-    let mut entries = synthetic_entries(&[sizes]);
+    let mut entries = entries_from_genesis(&[sizes]);
     let mut trees = Trees {
         sapling: start_tree(seed),
         orchard: Default::default(),
