@@ -6,14 +6,14 @@ use super::*;
 use crate::{
     manifest_entry::{BlobDigest, Frontiers},
     pool::{SubtreeNode, SubtreeRoot},
-    test_utils::synthetic_entries,
+    test_utils::entries_from_genesis,
 };
 
 /// A manifest with two entries. The first entry has frontiers and subtree roots in all three
 /// pools.
 fn two_entry_manifest() -> Manifest {
     let add = TreeSizes { sapling: 70_000, orchard: 3, ironwood: 0 };
-    let mut entries = synthetic_entries(&[add, add]);
+    let mut entries = entries_from_genesis(&[add, add]);
     entries[0].frontiers = Frontiers {
         sapling: vec![0x01, 0xab, 0x00],
         orchard: vec![0xcd; 40],
@@ -84,13 +84,13 @@ fn json_uses_the_field_names_and_encodings_of_the_plan() {
 
 /// Twelve rows with the flags of the epoch rule: the rule closes an epoch at row 9 only.
 #[test]
-fn contiguous_entries_stop_at_the_first_gap_and_close_the_last_epoch() {
-    let mut rows = synthetic_entries(&[TreeSizes::default(); 12]);
+fn entries_to_gap_stop_at_the_first_gap_and_close_the_last_epoch() {
+    let mut rows = entries_from_genesis(&[TreeSizes::default(); 12]);
     rows[11].epoch_end = false;
     rows.remove(7);
 
-    let manifest = Manifest::from_contiguous_entries("Mainnet", hash(0), rows.clone()).unwrap();
-    let prefix = Manifest::from_contiguous_entries("Mainnet", hash(0), rows[..7].to_vec()).unwrap();
+    let manifest = Manifest::from_entries_to_gap("Mainnet", hash(0), rows.clone()).unwrap();
+    let prefix = Manifest::from_entries_to_gap("Mainnet", hash(0), rows[..7].to_vec()).unwrap();
 
     assert_eq!(manifest, prefix);
     assert_eq!(manifest.sealed_through(), 6_999);
@@ -99,12 +99,12 @@ fn contiguous_entries_stop_at_the_first_gap_and_close_the_last_epoch() {
 }
 
 #[test]
-fn contiguous_entries_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
-    let rows = synthetic_entries(&[TreeSizes::default(); 12]);
+fn entries_to_gap_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
+    let rows = entries_from_genesis(&[TreeSizes::default(); 12]);
     let mut forced = rows.clone();
     forced[11].epoch_end = false;
 
-    let manifest = Manifest::from_contiguous_entries("Mainnet", hash(0), forced).unwrap();
+    let manifest = Manifest::from_entries_to_gap("Mainnet", hash(0), forced).unwrap();
 
     assert_eq!(manifest.entries(), rows);
     let epochs: Vec<_> = manifest.epochs().map(|epoch| epoch.end_height()).collect();
@@ -112,12 +112,13 @@ fn contiguous_entries_keep_the_epoch_ends_of_the_rule_before_the_last_entry() {
 }
 
 #[test]
-fn contiguous_entries_that_do_not_start_at_genesis_are_refused() {
-    let rows = synthetic_entries(&[TreeSizes::default(); 3]);
+fn entries_to_gap_that_do_not_start_at_genesis_are_refused_with_the_start() {
+    let rows = entries_from_genesis(&[TreeSizes::default(); 3]);
 
-    let error =
-        Manifest::from_contiguous_entries("Mainnet", hash(0), rows[1..].to_vec()).unwrap_err();
+    let error = Manifest::from_entries_to_gap("Mainnet", hash(0), rows[1..].to_vec()).unwrap_err();
 
+    assert!(matches!(error, ManifestError::Start { index: 0, start_height: 1_000 }), "{error:?}");
+    let error = Manifest::from_entries_to_gap("Mainnet", hash(0), Vec::new()).unwrap_err();
     assert!(matches!(error, ManifestError::Empty), "{error:?}");
 }
 
@@ -151,15 +152,15 @@ fn json_that_breaks_a_rule_is_refused() {
         (
             "entries out of order",
             |manifest| manifest.entries.to_mut().swap(0, 1),
-            |error| matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 }),
+            |error| matches!(error, ManifestError::Start { index: 0, start_height: 1_000 }),
         ),
         (
             "a gap",
             |manifest| {
-                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 3]));
+                manifest.entries = Cow::Owned(entries_from_genesis(&[TreeSizes::default(); 3]));
                 manifest.entries.to_mut().remove(1);
             },
-            |error| matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 }),
+            |error| matches!(error, ManifestError::Start { index: 1, start_height: 2_000 }),
         ),
         (
             "a wrong range length",
@@ -207,7 +208,7 @@ fn json_that_breaks_a_rule_is_refused() {
         (
             "no epoch end where the epoch closes",
             |manifest| {
-                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 12]));
+                manifest.entries = Cow::Owned(entries_from_genesis(&[TreeSizes::default(); 12]));
                 manifest.sealed_through = 11_999;
                 manifest.entries.to_mut()[9].epoch_end = false;
             },
@@ -217,7 +218,7 @@ fn json_that_breaks_a_rule_is_refused() {
         (
             "no epoch end at the last entry",
             |manifest| {
-                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 12]));
+                manifest.entries = Cow::Owned(entries_from_genesis(&[TreeSizes::default(); 12]));
                 manifest.sealed_through = 11_999;
                 manifest.entries.to_mut()[11].epoch_end = false;
             },

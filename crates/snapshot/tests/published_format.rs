@@ -16,7 +16,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use ztreamer_snapshot::{
-    layout::{Latest, SNAPSHOT_PUBKEY},
+    layout::{ManifestPointer, SNAPSHOT_PUBKEY},
     manifest::Manifest,
     manifest_entry::ManifestEntry,
     pool::Pool,
@@ -37,7 +37,7 @@ struct LatestObject<'a> {
 fn the_published_latest_verifies_and_writes_the_same_bytes() {
     let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
 
-    let latest = Latest::from_file(LATEST, &key).unwrap();
+    let latest = ManifestPointer::from_signed_json(LATEST, &key).unwrap();
 
     assert_eq!(latest.manifest.to_string(), "manifests/2026-11-01T104237Z.json");
     assert_eq!(latest.sealed_through, 3_536_999);

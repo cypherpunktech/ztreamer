@@ -1,9 +1,9 @@
-//! Verification epochs: groups of consecutive ranges that the node attests with one call.
+//! Verification epochs: groups of adjacent ranges that the node attests with one call.
 //!
 //! `z_gettreestate` takes 0.2 to 2.6 s per call. One call per range is too slow, so the replica
 //! asks for the tree roots once per epoch, at the end of its last range. The epoch rule keeps
 //! each epoch small enough to rebuild in one pass: an epoch closes after [`MAX_RANGES`] ranges,
-//! or at the first range that brings the note commitments it adds to [`MAX_COMMITMENTS`]. The
+//! or at the first range that makes the epoch add [`MAX_COMMITMENTS`] note commitments or more. The
 //! last range of the manifest also closes an epoch. Mainnet has about 400 epochs.
 //!
 //! An [`Epoch`] only groups manifest entries. `ztreamer_import::proof::EpochProof` checks
@@ -13,7 +13,7 @@ use std::iter::FusedIterator;
 
 use crate::manifest_entry::{MAX_COMMITMENTS, MAX_RANGES, ManifestEntry};
 
-/// Consecutive manifest entries that are verified together.
+/// Adjacent manifest entries that the replica verifies together.
 ///
 /// [`Epoch::part_after`] gives the last entries of an epoch, as an epoch of their own. An
 /// import uses it when the index is sealed inside an epoch.
@@ -43,7 +43,7 @@ impl<'a> Epoch<'a> {
     }
 
     /// Returns `true` if the epoch rule closes the epoch at its last range: the epoch has
-    /// [`MAX_RANGES`] ranges, or it adds [`MAX_COMMITMENTS`] note commitments.
+    /// [`MAX_RANGES`] ranges, or it adds [`MAX_COMMITMENTS`] note commitments or more.
     ///
     /// Returns `false` for a shorter last epoch of a manifest. Only the end of the manifest
     /// closes that epoch, and a longer manifest continues it.
@@ -143,7 +143,7 @@ mod tests {
     use ztreamer_chain::codec::TreeSizes;
 
     use super::*;
-    use crate::test_utils::synthetic_entries;
+    use crate::test_utils::entries_from_genesis;
 
     fn sapling(count: u32) -> TreeSizes {
         TreeSizes { sapling: count, ..TreeSizes::default() }
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn an_epoch_closes_at_ten_ranges() {
-        let entries = synthetic_entries(&[sapling(1_000); 25]);
+        let entries = entries_from_genesis(&[sapling(1_000); 25]);
         let epochs: Vec<_> = Epochs::new(&entries).collect();
 
         assert_eq!(lengths(&entries), [10, 10, 5]);
@@ -174,15 +174,15 @@ mod tests {
     #[test]
     fn an_epoch_closes_when_commitments_reach_the_cap() {
         // 400,000 per range: the third range brings the epoch to 1,200,000.
-        assert_eq!(lengths(&synthetic_entries(&[sapling(400_000); 7])), [3, 3, 1]);
+        assert_eq!(lengths(&entries_from_genesis(&[sapling(400_000); 7])), [3, 3, 1]);
 
         // The cap is reached exactly at the second range.
-        let entries = synthetic_entries(&[sapling(999_999), sapling(1), sapling(5)]);
+        let entries = entries_from_genesis(&[sapling(999_999), sapling(1), sapling(5)]);
         assert_eq!(lengths(&entries), [2, 1]);
         assert_eq!(commitments(Epochs::new(&entries).next().unwrap()), MAX_COMMITMENTS);
 
         // A heavy range closes the epoch that it joins.
-        let entries = synthetic_entries(&[sapling(10), sapling(1_060_000), sapling(10)]);
+        let entries = entries_from_genesis(&[sapling(10), sapling(1_060_000), sapling(10)]);
         assert_eq!(lengths(&entries), [2, 1]);
     }
 
@@ -193,17 +193,17 @@ mod tests {
         };
 
         // Ten ranges close by count. The last 5 ranges close only at the end of the entries.
-        assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 25])), [true, true, false]);
-        assert_eq!(closed(&synthetic_entries(&[sapling(1_000); 20])), [true, true]);
+        assert_eq!(closed(&entries_from_genesis(&[sapling(1_000); 25])), [true, true, false]);
+        assert_eq!(closed(&entries_from_genesis(&[sapling(1_000); 20])), [true, true]);
         // 1,200,000 commitments close by the cap. The last range adds 400,000 only.
-        assert_eq!(closed(&synthetic_entries(&[sapling(400_000); 7])), [true, true, false]);
+        assert_eq!(closed(&entries_from_genesis(&[sapling(400_000); 7])), [true, true, false]);
         // A last epoch that reaches the cap closes by the rule.
-        assert_eq!(closed(&synthetic_entries(&[sapling(10), sapling(1_060_000)])), [true]);
+        assert_eq!(closed(&entries_from_genesis(&[sapling(10), sapling(1_060_000)])), [true]);
     }
 
     #[test]
     fn a_part_after_a_range_end_keeps_the_rule_of_the_full_epoch() {
-        let entries = synthetic_entries(&[sapling(1_000); 25]);
+        let entries = entries_from_genesis(&[sapling(1_000); 25]);
         let epochs: Vec<_> = Epochs::new(&entries).collect();
 
         // 3 of the 10 ranges of the second epoch. The rule closes the full epoch, not the part.
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn a_part_after_the_epoch_end_or_another_height_is_none() {
-        let entries = synthetic_entries(&[sapling(1_000); 25]);
+        let entries = entries_from_genesis(&[sapling(1_000); 25]);
         let epochs: Vec<_> = Epochs::new(&entries).collect();
 
         assert_eq!(epochs[1].part_after(19_999), None);
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn commitments_count_all_three_pools() {
         let add = TreeSizes { sapling: 200_000, orchard: 200_000, ironwood: 100_000 };
-        let entries = synthetic_entries(&[add; 4]);
+        let entries = entries_from_genesis(&[add; 4]);
 
         assert_eq!(lengths(&entries), [2, 2]);
         assert_eq!(commitments(Epochs::new(&entries).nth(1).unwrap()), 1_000_000);

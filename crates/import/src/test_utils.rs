@@ -17,7 +17,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta};
 use ed25519_dalek::SigningKey;
 use futures_util::stream;
 use http::{Request, Response, StatusCode, Uri, header::RANGE};
@@ -54,7 +54,10 @@ use ztreamer_snapshot::manifest_entry::{BlobDigest, ManifestEntry};
 use ztreamer_sync::head::ServingSnapshot;
 
 use ztreamer_replicator::{RangeMetaFiller, ReplicatorService, snapshot_writer::SnapshotWriter};
-use ztreamer_snapshot::{layout::RangePath, manifest::Manifest};
+use ztreamer_snapshot::{
+    layout::{ManifestPath, RangePath},
+    manifest::Manifest,
+};
 
 /// The seed of the key that signs a [`Snapshot`].
 pub const SEED: [u8; 32] = [7; 32];
@@ -156,10 +159,9 @@ impl SourceIndex {
 pub struct Snapshot {
     /// The last manifest.
     pub manifest: Manifest,
-    /// The path of the manifest that `latest.json` names, relative to [`Self::dir`].
-    pub manifest_path: String,
-    /// The time of the last manifest. Each new manifest is one day after the last manifest.
-    published_at: DateTime<Utc>,
+    /// The path of the manifest that `latest.json` names. Each new manifest is one day after
+    /// the last manifest.
+    pub manifest_path: ManifestPath,
     /// The snapshot directory.
     pub dir: TempDir,
 }
@@ -172,7 +174,7 @@ impl Snapshot {
             Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), source.entries()).unwrap();
         let published_at = DateTime::from_timestamp(1_792_972_800, 0).unwrap();
         let exported = Self::writer(&dir).export(&source.index, &manifest, published_at).unwrap();
-        Self { manifest, manifest_path: exported.manifest, published_at, dir }
+        Self { manifest, manifest_path: exported.manifest, dir }
     }
 
     /// Writes `blob` as the blob of the range at `start`. Then it writes a new manifest with the
@@ -188,15 +190,15 @@ impl Snapshot {
 
     /// The file of the blob of `entry`.
     pub fn range_path(&self, entry: &ManifestEntry) -> PathBuf {
-        self.dir.path().join(RangePath::from(entry).as_str())
+        self.dir.path().join(RangePath::from(entry).to_path())
     }
 
     /// Writes `entries` as a new manifest, one day after the last manifest.
     fn publish(&mut self, entries: Vec<ManifestEntry>) {
         self.manifest = Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), entries).unwrap();
-        self.published_at += TimeDelta::days(1);
         let writer = Self::writer(&self.dir);
-        let path = writer.new_manifest_path(self.published_at).unwrap();
+        let published_at = self.manifest_path.published_at() + TimeDelta::days(1);
+        let path = writer.new_manifest_path(published_at).unwrap();
         writer.put_manifest_and_latest(&path, &self.manifest).unwrap();
         self.manifest_path = path;
     }
