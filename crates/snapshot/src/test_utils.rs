@@ -1,7 +1,7 @@
-//! Manifest entries shared by tests and benchmarks.
+//! Manifest entries for tests and benchmarks.
 //!
-//! Compiled for this crate's own tests and for other crates that enable the `test-utils`
-//! feature in their `[dev-dependencies]`.
+//! The tests of this crate use them. Another crate uses them when it enables the `test-utils`
+//! feature in its `[dev-dependencies]`.
 
 use sapling_crypto::Node as SaplingNode;
 use zakura_chain::{orchard, subtree::NoteCommitmentSubtreeIndex};
@@ -16,9 +16,9 @@ use crate::{
     pool::{SubtreeNode, SubtreeRoot},
 };
 
-/// Contiguous entries from genesis. Entry `i` adds `adds[i]` commitments to the trees, and the
+/// Adjacent entries from genesis. Entry `i` adds `adds[i]` commitments to the trees, and the
 /// `epoch_end` flags agree with [`Epochs`].
-pub fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
+pub fn entries_from_genesis(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
     let mut sizes = TreeSizes::default();
     let mut entries: Vec<_> = (0..)
         .zip(adds)
@@ -54,7 +54,7 @@ pub fn synthetic_entries(adds: &[TreeSizes]) -> Vec<ManifestEntry> {
 
 /// The entry of the range at `start` with every frontier and two subtree roots, of Sapling and
 /// Orchard.
-pub fn full_entry(start: u32) -> ManifestEntry {
+pub fn entry_with_frontiers(start: u32) -> ManifestEntry {
     ManifestEntry {
         range_version: 1,
         start_height: start,

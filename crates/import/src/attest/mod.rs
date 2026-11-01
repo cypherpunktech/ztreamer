@@ -297,7 +297,7 @@ impl Attestor for JsonRpcAttestor {
                     .root
                     .parse::<NodeBytes>()
                     .ok()
-                    .and_then(|bytes| pool.node(bytes))
+                    .and_then(|bytes| pool.read_node(bytes))
                     .ok_or(NodeError::SubtreeRoot { pool, index })
             })
             .collect()

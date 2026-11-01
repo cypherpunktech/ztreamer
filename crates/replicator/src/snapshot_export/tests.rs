@@ -6,7 +6,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use ztreamer_chain::test_utils::record;
 use ztreamer_index::test_utils::{populate, range_meta_row, sealed_range_blob};
-use ztreamer_snapshot::layout::{Latest, RangePath, SignatureFile};
+use ztreamer_snapshot::layout::{ManifestPath, ManifestPointer, RangePath, SignatureFile};
 
 use super::*;
 use crate::test_utils::index_with_rows;
@@ -44,25 +44,20 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
 
     let report = export(&index, &out, 0);
 
-    let manifest_path = "manifests/2026-10-26T000000Z.json";
+    let manifest_path = "manifests/2026-10-26T000000Z.json".parse::<ManifestPath>().unwrap();
     assert_eq!(
         report,
-        SnapshotExport {
-            manifest: manifest_path.to_owned(),
-            ranges: 3,
-            written: 3,
-            missing_rows: 0
-        }
+        SnapshotExport { manifest: manifest_path, ranges: 3, written: 3, missing_rows: 0 }
     );
     for entry in &entries {
         let start = entry.start_height;
         let name = format!("{start}-{}.bin", hex::encode(&entry.blob_digest.0[..4]));
-        assert_eq!(RangePath::from(entry).as_str(), format!("ranges/{name}"));
+        assert_eq!(RangePath::from(entry).to_string(), format!("ranges/{name}"));
         let file = fs::read(out.path().join("ranges").join(name)).unwrap();
         assert_eq!(file, sealed_range_blob(&index, start));
     }
 
-    let bytes = fs::read(out.path().join(manifest_path)).unwrap();
+    let bytes = fs::read(out.path().join(manifest_path.to_path())).unwrap();
     let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
     let expected =
         Manifest::new("Mainnet", Network::Mainnet.genesis_hash(), closed(entries.clone())).unwrap();
@@ -81,10 +76,10 @@ fn export_writes_content_addressed_ranges_a_manifest_and_latest() {
     let json: Value =
         serde_json::from_slice(&fs::read(out.path().join("latest.json")).unwrap()).unwrap();
     assert!(json.get("signature").is_some());
-    let latest: Latest = serde_json::from_value(json["latest"].clone()).unwrap();
-    assert_eq!(latest, Latest { manifest: manifest_path.to_owned(), sealed_through: 2_999 });
+    let latest: ManifestPointer = serde_json::from_value(json["latest"].clone()).unwrap();
+    assert_eq!(latest, ManifestPointer { manifest: manifest_path, sealed_through: 2_999 });
     assert!(!out.path().join("latest.json.sig").exists());
-    assert!(out.path().join(format!("{manifest_path}.sig")).exists());
+    assert!(out.path().join(manifest_path.signature_path()).exists());
 }
 
 #[test]
@@ -95,7 +90,7 @@ fn a_second_export_writes_no_range_file_again() {
     // The export does not read a file with the name and the length of its entry. A file
     // with another length is written again.
     let [same_length, short] = [&entries[0], &entries[1]].map(|entry| {
-        let path = out.path().join(RangePath::from(entry).as_str());
+        let path = out.path().join(RangePath::from(entry).to_path());
         let mut bytes = fs::read(&path).unwrap();
         bytes[100] ^= 1;
         (path, bytes)
@@ -108,7 +103,7 @@ fn a_second_export_writes_no_range_file_again() {
     assert_eq!((report.ranges, report.written), (3, 1));
     assert_eq!(fs::read(&same_length.0).unwrap(), same_length.1);
     assert_eq!(fs::read(&short.0).unwrap(), sealed_range_blob(&index, 1_000));
-    assert_eq!(report.manifest, "manifests/2026-10-27T000000Z.json");
+    assert_eq!(report.manifest.to_string(), "manifests/2026-10-27T000000Z.json");
     assert_eq!(fs::read_dir(out.path().join("ranges")).unwrap().count(), 3);
     // Two manifests, each with its signature.
     assert_eq!(fs::read_dir(out.path().join("manifests")).unwrap().count(), 4);
@@ -127,14 +122,14 @@ fn signatures_verify_with_the_signing_key() {
 
     let report = export(&index, &out, 0);
 
-    let latest = fs::read(out.path().join(Latest::PATH)).unwrap();
-    let latest = Latest::from_file(&latest, &key).unwrap();
-    assert_eq!(latest.manifest, "manifests/2026-10-26T000000Z.json");
+    let latest = fs::read(out.path().join(ManifestPointer::PATH)).unwrap();
+    let latest = ManifestPointer::from_signed_json(&latest, &key).unwrap();
+    assert_eq!(latest.manifest.to_string(), "manifests/2026-10-26T000000Z.json");
     // `latest.json` holds its own signature.
-    assert!(!out.path().join(SignatureFile::path_of(Latest::PATH)).exists());
-    let signature = fs::read(out.path().join(SignatureFile::path_of(&report.manifest)));
+    assert!(!out.path().join(SignatureFile::path_of(ManifestPointer::PATH)).exists());
+    let signature = fs::read(out.path().join(report.manifest.signature_path()));
     let signature = SignatureFile::try_from(&signature.unwrap()[..]).unwrap();
-    let bytes = fs::read(out.path().join(&report.manifest)).unwrap();
+    let bytes = fs::read(out.path().join(report.manifest.to_path())).unwrap();
     signature.verify(&bytes, &key).unwrap();
     assert!(signature.verify(b"other bytes", &key).is_err());
 }
@@ -148,7 +143,8 @@ fn export_stops_at_the_first_range_without_a_row() {
 
     assert_eq!((report.ranges, report.missing_rows), (1, 2));
     let manifest: Manifest =
-        serde_json::from_slice(&fs::read(out.path().join(&report.manifest)).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(out.path().join(report.manifest.to_path())).unwrap())
+            .unwrap();
     assert_eq!(manifest.entries(), closed(entries[..1].to_vec()));
     assert_eq!(manifest.sealed_through(), 999);
 }
@@ -164,7 +160,7 @@ fn export_closes_the_last_epoch_at_the_last_range() {
     let report = export(&index, &out, 0);
 
     assert_eq!((report.ranges, report.missing_rows), (12, 0));
-    let json = fs::read_to_string(out.path().join(report.manifest)).unwrap();
+    let json = fs::read_to_string(out.path().join(report.manifest.to_path())).unwrap();
     let manifest = Manifest::from_json(&json).unwrap();
     assert_eq!(manifest.entries(), closed(entries));
     assert_eq!(manifest.sealed_through(), 11_999);

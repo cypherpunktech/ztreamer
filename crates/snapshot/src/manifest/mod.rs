@@ -23,40 +23,206 @@
 //! `zcashd` RPC tree encoding. An empty string means that the pool is not active; an active pool
 //! with an empty tree has the encoding of the empty tree. A subtree root is the hex of the pool's
 //! byte order, as `z_getsubtreesbyindex` prints it.
-//!
-//! The entries convert to [`ManifestEntry`], so that the indexer stays free of serde.
+
+use std::borrow::Cow;
+
+use serde::{Deserialize, Serialize, Serializer};
+use serde_with::{DisplayFromStr, serde_as};
+use zakura_chain::block;
+use ztreamer_chain::codec::RANGE_SIZE;
 
 use crate::{
-    manifest_entry::{BlobDigest, Frontiers, MANIFEST_VERSION, ManifestEntry},
-    pool::{NodeBytes, Pool, SubtreeRoot},
+    epoch::Epochs,
+    manifest_entry::{MANIFEST_VERSION, ManifestEntry},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-use serde_with::{DeserializeAs, DisplayFromStr, SerializeAs, hex::Hex, serde_as};
-use zakura_chain::{block, subtree::NoteCommitmentSubtreeIndex};
-use ztreamer_chain::codec::{RANGE_SIZE, TreeSizes};
-
-use crate::epoch::Epochs;
 
 /// A snapshot manifest that obeys the rules in the module docs.
 ///
 /// The fields are private. Each way to get a manifest checks the rules: [`Manifest::new`],
-/// [`Manifest::from_contiguous_entries`], [`Manifest::from_json`] and serde. Thus a `Manifest`
-/// is always valid.
+/// [`Manifest::from_entries_to_gap`], [`Manifest::from_json`] and serde. Thus a `Manifest`
+/// is always valid, and it has at least one entry.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(try_from = "ManifestFields")]
-pub struct Manifest(ManifestFields);
-
-/// The fields of a manifest, before the rules are checked.
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct ManifestFields {
+#[serde(try_from = "ManifestJson<'static>")]
+pub struct Manifest {
     network: String,
-    #[serde_as(as = "DisplayFromStr")]
     genesis_hash: block::Hash,
-    sealed_through: u32,
-    manifest_version: u32,
-    #[serde_as(as = "Vec<EntryJson>")]
     entries: Vec<ManifestEntry>,
+}
+
+impl Manifest {
+    /// The manifest of `entries`, one per sealed range in height order from genesis, for
+    /// `network` with the genesis block hash. Its JSON form is at [`MANIFEST_VERSION`], with
+    /// `sealed_through` at the end of the last entry. It checks that the entries obey the rules.
+    ///
+    /// ```
+    /// use zakura_chain::block;
+    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
+    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
+    ///
+    /// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
+    ///     Manifest::new("Mainnet", genesis, entries)
+    /// }
+    /// ```
+    pub fn new(
+        network: impl Into<String>,
+        genesis_hash: block::Hash,
+        entries: Vec<ManifestEntry>,
+    ) -> Result<Self, ManifestError> {
+        let manifest = Self { network: network.into(), genesis_hash, entries };
+        manifest.check_entries()?;
+        Ok(manifest)
+    }
+
+    /// The manifest of the `range_meta` entries of an index, for `network` with the genesis
+    /// block hash. `entries` are in height order from genesis. The manifest takes the first
+    /// entry and the entries that follow it, and stops at the first gap. A first entry that
+    /// does not start at genesis gives [`ManifestError::Start`]. It sets `epoch_end` on
+    /// its last entry, because [`Epochs`] closes an epoch at the last entry of a manifest. The
+    /// other entries keep their flag, and [`Manifest::new`] checks it with the epoch rule.
+    ///
+    /// `ztreamerd export-snapshot` and a peer source make their manifests with this
+    /// constructor. Thus an export and a peer give the same manifest for the same rows.
+    ///
+    /// ```
+    /// use zakura_chain::block;
+    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
+    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
+    ///
+    /// fn manifest(genesis: block::Hash, rows: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
+    ///     Manifest::from_entries_to_gap("Mainnet", genesis, rows)
+    /// }
+    /// ```
+    pub fn from_entries_to_gap(
+        network: impl Into<String>,
+        genesis_hash: block::Hash,
+        entries: impl IntoIterator<Item = ManifestEntry>,
+    ) -> Result<Self, ManifestError> {
+        let mut entries: Vec<_> = entries
+            .into_iter()
+            .scan(None, |next_start: &mut Option<u32>, entry| {
+                next_start.is_none_or(|start| start == entry.start_height).then(|| {
+                    *next_start = Some(entry.end_height.saturating_add(1));
+                    entry
+                })
+            })
+            .collect();
+        if let Some(last) = entries.last_mut() {
+            last.epoch_end = true;
+        }
+        Self::new(network, genesis_hash, entries)
+    }
+
+    /// Parses a manifest and checks the rules.
+    pub fn from_json(json: &str) -> Result<Self, ManifestError> {
+        serde_json::from_str::<ManifestJson<'_>>(json)?.try_into()
+    }
+
+    /// The network name, for example `Mainnet`.
+    pub fn network(&self) -> &str {
+        &self.network
+    }
+
+    /// The hash of the genesis block.
+    pub const fn genesis_hash(&self) -> block::Hash {
+        self.genesis_hash
+    }
+
+    /// The last height of the last sealed range.
+    pub fn sealed_through(&self) -> u32 {
+        self.entries.last().expect("Manifest::new refuses a manifest with no entries").end_height
+    }
+
+    /// One entry per sealed range, in height order from genesis.
+    pub fn entries(&self) -> &[ManifestEntry] {
+        &self.entries
+    }
+
+    /// The verification epochs of the manifest.
+    pub fn epochs(&self) -> Epochs<'_> {
+        Epochs::new(&self.entries)
+    }
+
+    /// Checks that:
+    ///
+    /// - there is at least one entry;
+    /// - the entries are one aligned range each, adjacent from genesis, with tree sizes that
+    ///   do not decrease, and with no pool that becomes inactive;
+    /// - `epoch_end` agrees with [`Epochs`].
+    fn check_entries(&self) -> Result<(), ManifestError> {
+        if self.entries.is_empty() {
+            return Err(ManifestError::Empty);
+        }
+        self.entries
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, entry)| self.check_entry(index, entry))?;
+        self.check_epoch_ends()
+    }
+
+    /// Checks that entry `index` is one aligned range, and that it follows the entry before it
+    /// or starts at genesis.
+    fn check_entry(&self, index: usize, entry: &ManifestEntry) -> Result<(), ManifestError> {
+        let previous = index.checked_sub(1).map(|previous| &self.entries[previous]);
+        let expected_start =
+            previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
+        if expected_start != Some(entry.start_height) {
+            return Err(ManifestError::Start { index, start_height: entry.start_height });
+        }
+        if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
+            return Err(ManifestError::RangeLength { index });
+        }
+        let Some(previous) = previous else {
+            return Ok(());
+        };
+        if !entry.end_tree_sizes.follows(previous.end_tree_sizes) {
+            return Err(ManifestError::TreeSizes { index });
+        }
+        if !entry.frontiers.follows(&previous.frontiers) {
+            return Err(ManifestError::PoolInactive { index });
+        }
+        Ok(())
+    }
+
+    /// Checks that each entry has `epoch_end` set when it is the last entry of its epoch.
+    fn check_epoch_ends(&self) -> Result<(), ManifestError> {
+        Epochs::new(&self.entries)
+            .flat_map(|epoch| {
+                let last = epoch.entries().len() - 1;
+                epoch.entries().iter().enumerate().map(move |(at, entry)| (entry, at == last))
+            })
+            .enumerate()
+            .find(|(_, (entry, expected))| entry.epoch_end != *expected)
+            .map_or(Ok(()), |(index, (_, expected))| {
+                Err(ManifestError::EpochEnd { index, expected })
+            })
+    }
+}
+
+impl Serialize for Manifest {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ManifestJson::from(self).serialize(serializer)
+    }
+}
+
+impl TryFrom<ManifestJson<'_>> for Manifest {
+    type Error = ManifestError;
+
+    /// Checks that the version is [`MANIFEST_VERSION`], then the rules of [`Manifest::new`], then
+    /// that `sealed_through` is the last height of the last entry.
+    fn try_from(json: ManifestJson<'_>) -> Result<Self, ManifestError> {
+        if json.manifest_version != MANIFEST_VERSION {
+            return Err(ManifestError::Version { version: json.manifest_version });
+        }
+        let manifest = Self::new(json.network, json.genesis_hash, json.entries.into_owned())?;
+        let last_end = manifest.sealed_through();
+        if last_end != json.sealed_through {
+            return Err(ManifestError::SealedThrough {
+                sealed_through: json.sealed_through,
+                last_end,
+            });
+        }
+        Ok(manifest)
+    }
 }
 
 /// A manifest that does not parse or does not obey the rules in the module docs.
@@ -71,17 +237,20 @@ pub enum ManifestError {
         /// The version in the manifest.
         version: u32,
     },
+    /// The manifest has no entries.
+    #[error("the manifest has no entries")]
+    Empty,
     /// `sealed_through` is not the last height of the last entry.
-    #[error("sealed_through {sealed_through} is not the end of the last entry ({last_end:?})")]
+    #[error("sealed_through {sealed_through} is not the end of the last entry ({last_end})")]
     SealedThrough {
         /// The `sealed_through` of the manifest.
         sealed_through: u32,
-        /// The last height of the last entry, or `None` when the manifest has no entries.
-        last_end: Option<u32>,
+        /// The last height of the last entry.
+        last_end: u32,
     },
     /// The entry does not start one height after the previous entry, or at genesis.
     #[error("entry {index} starts at {start_height}, not after the previous entry")]
-    Discontiguous {
+    Start {
         /// The position of the entry in the manifest.
         index: usize,
         /// The start height of the entry.
@@ -116,317 +285,28 @@ pub enum ManifestError {
     },
 }
 
-impl Manifest {
-    /// The manifest of `entries`, one per sealed range in height order from genesis, for
-    /// `network` with the genesis block hash. It is at [`MANIFEST_VERSION`], with
-    /// `sealed_through` at the end of the last entry, and it obeys the rules.
-    ///
-    /// ```
-    /// use zakura_chain::block;
-    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
-    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
-    ///
-    /// fn manifest(genesis: block::Hash, entries: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
-    ///     Manifest::new("Mainnet", genesis, entries)
-    /// }
-    /// ```
-    pub fn new(
-        network: impl Into<String>,
-        genesis_hash: block::Hash,
-        entries: Vec<ManifestEntry>,
-    ) -> Result<Self, ManifestError> {
-        ManifestFields {
-            network: network.into(),
-            genesis_hash,
-            sealed_through: entries.last().map_or(0, |entry| entry.end_height),
-            manifest_version: MANIFEST_VERSION,
-            entries,
-        }
-        .try_into()
-    }
-
-    /// The manifest of the `range_meta` entries of an index, for `network` with the genesis
-    /// block hash. `entries` are in height order from genesis. The manifest takes the entries
-    /// that follow each other from genesis, and stops at the first gap. It sets `epoch_end` on
-    /// its last entry, because [`Epochs`] closes an epoch at the last entry of a manifest. The
-    /// other entries keep their flag, and [`Manifest::new`] checks it with the epoch rule.
-    ///
-    /// `ztreamerd export-snapshot` and a peer source make their manifests with this
-    /// constructor. Thus an export and a peer give the same manifest for the same rows.
-    ///
-    /// ```
-    /// use zakura_chain::block;
-    /// use ztreamer_snapshot::manifest_entry::ManifestEntry;
-    /// use ztreamer_snapshot::manifest::{Manifest, ManifestError};
-    ///
-    /// fn manifest(genesis: block::Hash, rows: Vec<ManifestEntry>) -> Result<Manifest, ManifestError> {
-    ///     Manifest::from_contiguous_entries("Mainnet", genesis, rows)
-    /// }
-    /// ```
-    pub fn from_contiguous_entries(
-        network: impl Into<String>,
-        genesis_hash: block::Hash,
-        entries: impl IntoIterator<Item = ManifestEntry>,
-    ) -> Result<Self, ManifestError> {
-        let mut entries: Vec<_> = entries
-            .into_iter()
-            .scan(0, |next_start, entry| {
-                (entry.start_height == *next_start).then(|| {
-                    *next_start = entry.end_height.saturating_add(1);
-                    entry
-                })
-            })
-            .collect();
-        if let Some(last) = entries.last_mut() {
-            last.epoch_end = true;
-        }
-        Self::new(network, genesis_hash, entries)
-    }
-
-    /// Parses a manifest and checks the rules.
-    pub fn from_json(json: &str) -> Result<Self, ManifestError> {
-        serde_json::from_str::<ManifestFields>(json)?.try_into()
-    }
-
-    /// The network name, for example `Mainnet`.
-    pub fn network(&self) -> &str {
-        &self.0.network
-    }
-
-    /// The hash of the genesis block.
-    pub const fn genesis_hash(&self) -> block::Hash {
-        self.0.genesis_hash
-    }
-
-    /// The last height of the last sealed range.
-    pub const fn sealed_through(&self) -> u32 {
-        self.0.sealed_through
-    }
-
-    /// One entry per sealed range, in height order from genesis.
-    pub fn entries(&self) -> &[ManifestEntry] {
-        &self.0.entries
-    }
-
-    /// The verification epochs of the manifest.
-    pub fn epochs(&self) -> Epochs<'_> {
-        Epochs::new(&self.0.entries)
-    }
-}
-
-impl Serialize for Manifest {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl TryFrom<ManifestFields> for Manifest {
-    type Error = ManifestError;
-
-    /// Checks that:
-    ///
-    /// - the version is [`MANIFEST_VERSION`];
-    /// - the entries are one aligned range each, contiguous from genesis, with tree sizes that
-    ///   do not decrease, and with no pool that becomes inactive;
-    /// - `sealed_through` is the last height of the last entry;
-    /// - `epoch_end` agrees with [`Epochs`].
-    fn try_from(fields: ManifestFields) -> Result<Self, ManifestError> {
-        if fields.manifest_version != MANIFEST_VERSION {
-            return Err(ManifestError::Version { version: fields.manifest_version });
-        }
-        fields
-            .entries
-            .iter()
-            .enumerate()
-            .try_for_each(|(index, entry)| fields.check_entry(index, entry))?;
-        let last_end = fields.entries.last().map(|entry| entry.end_height);
-        if last_end != Some(fields.sealed_through) {
-            return Err(ManifestError::SealedThrough {
-                sealed_through: fields.sealed_through,
-                last_end,
-            });
-        }
-        fields.check_epoch_ends()?;
-        Ok(Self(fields))
-    }
-}
-
-impl ManifestFields {
-    /// Checks that entry `index` is one aligned range, and that it follows the entry before it
-    /// or starts at genesis.
-    fn check_entry(&self, index: usize, entry: &ManifestEntry) -> Result<(), ManifestError> {
-        let previous = index.checked_sub(1).map(|previous| &self.entries[previous]);
-        let expected_start =
-            previous.map_or(Some(0), |previous| previous.end_height.checked_add(1));
-        if expected_start != Some(entry.start_height) {
-            return Err(ManifestError::Discontiguous { index, start_height: entry.start_height });
-        }
-        if entry.start_height.checked_add(RANGE_SIZE - 1) != Some(entry.end_height) {
-            return Err(ManifestError::RangeLength { index });
-        }
-        let Some(previous) = previous else {
-            return Ok(());
-        };
-        if !entry.end_tree_sizes.follows(previous.end_tree_sizes) {
-            return Err(ManifestError::TreeSizes { index });
-        }
-        if !entry.frontiers.follows(&previous.frontiers) {
-            return Err(ManifestError::PoolInactive { index });
-        }
-        Ok(())
-    }
-
-    /// Checks that each entry has `epoch_end` set when it is the last entry of its epoch.
-    fn check_epoch_ends(&self) -> Result<(), ManifestError> {
-        Epochs::new(&self.entries)
-            .flat_map(|epoch| {
-                let last = epoch.entries().len() - 1;
-                epoch.entries().iter().enumerate().map(move |(at, entry)| (entry, at == last))
-            })
-            .enumerate()
-            .find(|(_, (entry, expected))| entry.epoch_end != *expected)
-            .map_or(Ok(()), |(index, (_, expected))| {
-                Err(ManifestError::EpochEnd { index, expected })
-            })
-    }
-}
-
-/// The JSON form of a [`ManifestEntry`].
+/// The JSON form of a [`Manifest`], before the rules are checked. It borrows a manifest to
+/// serialize it, and owns its fields after it deserializes.
 #[serde_as]
 #[derive(Deserialize, Serialize)]
-struct EntryJson {
-    range_version: u8,
-    start_height: u32,
-    end_height: u32,
+struct ManifestJson<'a> {
+    network: Cow<'a, str>,
     #[serde_as(as = "DisplayFromStr")]
-    end_hash: block::Hash,
-    #[serde(with = "TreeSizesJson")]
-    end_tree_sizes: TreeSizes,
-    #[serde_as(as = "Hex")]
-    sapling_frontier: Vec<u8>,
-    #[serde_as(as = "Hex")]
-    orchard_frontier: Vec<u8>,
-    #[serde_as(as = "Hex")]
-    ironwood_frontier: Vec<u8>,
-    subtree_roots: Vec<SubtreeRootJson>,
-    #[serde_as(as = "Hex")]
-    blob_digest: [u8; 32],
-    blob_len: u64,
-    epoch_end: bool,
+    genesis_hash: block::Hash,
+    sealed_through: u32,
+    manifest_version: u32,
+    entries: Cow<'a, [ManifestEntry]>,
 }
 
-/// The JSON form of [`TreeSizes`].
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "TreeSizes")]
-struct TreeSizesJson {
-    sapling: u32,
-    orchard: u32,
-    ironwood: u32,
-}
-
-/// The JSON form of [`Pool`]: its [`Pool::as_str`] name.
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "Pool", rename_all = "lowercase")]
-enum PoolJson {
-    Sapling,
-    Orchard,
-    Ironwood,
-}
-
-/// The JSON form of a [`SubtreeRoot`].
-#[serde_as]
-#[derive(Deserialize, Serialize)]
-struct SubtreeRootJson {
-    #[serde(with = "PoolJson")]
-    pool: Pool,
-    index: u16,
-    #[serde_as(as = "Hex")]
-    root: NodeBytes,
-}
-
-/// The root bytes are not a field element of the pool.
-#[derive(Debug, thiserror::Error)]
-#[error("{pool:?} subtree root {index} is not a field element")]
-struct InvalidSubtreeRoot {
-    pool: Pool,
-    index: u16,
-}
-
-impl From<&ManifestEntry> for EntryJson {
-    fn from(entry: &ManifestEntry) -> Self {
+impl<'a> From<&'a Manifest> for ManifestJson<'a> {
+    fn from(manifest: &'a Manifest) -> Self {
         Self {
-            range_version: entry.range_version,
-            start_height: entry.start_height,
-            end_height: entry.end_height,
-            end_hash: entry.end_hash,
-            end_tree_sizes: entry.end_tree_sizes,
-            sapling_frontier: entry.frontiers.sapling.clone(),
-            orchard_frontier: entry.frontiers.orchard.clone(),
-            ironwood_frontier: entry.frontiers.ironwood.clone(),
-            subtree_roots: entry.subtree_roots.iter().map(SubtreeRootJson::from).collect(),
-            blob_digest: entry.blob_digest.0,
-            blob_len: entry.blob_len,
-            epoch_end: entry.epoch_end,
+            network: Cow::Borrowed(&manifest.network),
+            genesis_hash: manifest.genesis_hash,
+            sealed_through: manifest.sealed_through(),
+            manifest_version: MANIFEST_VERSION,
+            entries: Cow::Borrowed(&manifest.entries),
         }
-    }
-}
-
-impl TryFrom<EntryJson> for ManifestEntry {
-    type Error = InvalidSubtreeRoot;
-
-    fn try_from(json: EntryJson) -> Result<Self, Self::Error> {
-        Ok(Self {
-            range_version: json.range_version,
-            start_height: json.start_height,
-            end_height: json.end_height,
-            end_hash: json.end_hash,
-            end_tree_sizes: json.end_tree_sizes,
-            frontiers: Frontiers {
-                sapling: json.sapling_frontier,
-                orchard: json.orchard_frontier,
-                ironwood: json.ironwood_frontier,
-            },
-            subtree_roots: json
-                .subtree_roots
-                .into_iter()
-                .map(SubtreeRoot::try_from)
-                .collect::<Result<_, _>>()?,
-            blob_digest: BlobDigest(json.blob_digest),
-            blob_len: json.blob_len,
-            epoch_end: json.epoch_end,
-        })
-    }
-}
-
-impl SerializeAs<ManifestEntry> for EntryJson {
-    fn serialize_as<S: Serializer>(
-        entry: &ManifestEntry,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        Self::from(entry).serialize(serializer)
-    }
-}
-
-impl<'de> DeserializeAs<'de, ManifestEntry> for EntryJson {
-    fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<ManifestEntry, D::Error> {
-        Self::deserialize(deserializer)?.try_into().map_err(D::Error::custom)
-    }
-}
-
-impl From<&SubtreeRoot> for SubtreeRootJson {
-    fn from(root: &SubtreeRoot) -> Self {
-        Self { pool: root.root.pool(), index: root.index.0, root: root.root.to_bytes() }
-    }
-}
-
-impl TryFrom<SubtreeRootJson> for SubtreeRoot {
-    type Error = InvalidSubtreeRoot;
-
-    fn try_from(json: SubtreeRootJson) -> Result<Self, Self::Error> {
-        let SubtreeRootJson { pool, index, root } = json;
-        pool.node(root)
-            .map(|root| Self { index: NoteCommitmentSubtreeIndex(index), root })
-            .ok_or(InvalidSubtreeRoot { pool, index })
     }
 }
 

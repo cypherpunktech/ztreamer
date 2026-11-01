@@ -277,10 +277,10 @@ impl RangeMetaTable {
 pub(crate) fn full_meta(start: u32) -> RangeMeta {
     use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
     use ztreamer_chain::test_utils::hash;
-    use ztreamer_snapshot::{pool::SubtreeNode, test_utils::full_entry};
+    use ztreamer_snapshot::{pool::SubtreeNode, test_utils::entry_with_frontiers};
 
     RangeMeta {
-        entry: full_entry(start),
+        entry: entry_with_frontiers(start),
         state: VerifyState::Verified,
         verified_by: Some(NodeId {
             url: "https://node.example:8232".to_owned(),

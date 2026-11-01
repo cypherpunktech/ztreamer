@@ -79,7 +79,7 @@ mod tests {
 
     use serde_json::Value;
     use ztreamer_replicator::test_utils::index_with_rows;
-    use ztreamer_snapshot::{layout::Latest, manifest::Manifest};
+    use ztreamer_snapshot::{layout::ManifestPointer, manifest::Manifest};
 
     use super::*;
 
@@ -113,7 +113,8 @@ mod tests {
         args.run(&index).unwrap();
 
         let json: Value =
-            serde_json::from_slice(&fs::read(out.path().join(Latest::PATH)).unwrap()).unwrap();
+            serde_json::from_slice(&fs::read(out.path().join(ManifestPointer::PATH)).unwrap())
+                .unwrap();
         let manifest =
             fs::read_to_string(out.path().join(json["latest"]["manifest"].as_str().unwrap()));
         let manifest = Manifest::from_json(&manifest.unwrap()).unwrap();

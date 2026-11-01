@@ -1,7 +1,7 @@
 //! The export of the sealed ranges of an index as a snapshot that a replica can import.
 //!
 //! The export starts at genesis and stops at the first sealed range without a `range_meta` row.
-//! [`Manifest::from_contiguous_entries`] makes the manifest of the rows: it sets `epoch_end` on
+//! [`Manifest::from_entries_to_gap`] makes the manifest of the rows: it sets `epoch_end` on
 //! the last entry, because the last range of a manifest always closes an epoch. A peer source
 //! makes its manifest in the same way. The row in the index keeps its flag.
 //!
@@ -14,37 +14,18 @@ use zakura_chain::parameters::Network;
 use ztreamer_chain::codec::RANGE_SIZE;
 use ztreamer_index::index::{Index, IndexError};
 use ztreamer_snapshot::{
+    layout::ManifestPath,
     manifest::{Manifest, ManifestError},
     manifest_entry::ManifestEntry,
 };
 
 use crate::snapshot_writer::{SnapshotWriteError, SnapshotWriter};
 
-/// Why an export stopped.
-#[derive(Debug, thiserror::Error)]
-pub enum SnapshotExportError {
-    /// The index read failed.
-    #[error(transparent)]
-    Index(#[from] IndexError),
-    /// The index has no sealed range.
-    #[error("the index has no sealed range")]
-    NoSealedRange,
-    /// The range at genesis has no `range_meta` row.
-    #[error("the index has no range_meta row for the range at genesis")]
-    NoGenesisRow,
-    /// The rows do not make a valid manifest.
-    #[error("the range_meta rows do not make a valid manifest")]
-    Manifest(#[source] ManifestError),
-    /// The write of the snapshot directory failed.
-    #[error(transparent)]
-    Write(#[from] SnapshotWriteError),
-}
-
 /// What one export wrote.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapshotExport {
-    /// The path of the manifest, relative to the snapshot directory.
-    pub manifest: String,
+    /// The path of the manifest.
+    pub manifest: ManifestPath,
     /// The ranges in the manifest.
     pub ranges: usize,
     /// The range files written. The other files were present with the correct digest.
@@ -67,7 +48,7 @@ impl SnapshotExport {
             return Err(SnapshotExportError::NoGenesisRow);
         }
         let manifest =
-            Manifest::from_contiguous_entries(network.to_string(), network.genesis_hash(), entries)
+            Manifest::from_entries_to_gap(network.to_string(), network.genesis_hash(), entries)
                 .map_err(SnapshotExportError::Manifest)?;
         let exported = writer.export(index, &manifest, now)?;
         Ok(Self {
@@ -90,6 +71,26 @@ impl SnapshotExport {
             );
         }
     }
+}
+
+/// Why an export stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotExportError {
+    /// The index read failed.
+    #[error(transparent)]
+    Index(#[from] IndexError),
+    /// The index has no sealed range.
+    #[error("the index has no sealed range")]
+    NoSealedRange,
+    /// The range at genesis has no `range_meta` row.
+    #[error("the index has no range_meta row for the range at genesis")]
+    NoGenesisRow,
+    /// The rows do not make a valid manifest.
+    #[error("the range_meta rows do not make a valid manifest")]
+    Manifest(#[source] ManifestError),
+    /// The write of the snapshot directory failed.
+    #[error(transparent)]
+    Write(#[from] SnapshotWriteError),
 }
 
 /// The `range_meta` entries from genesis to the first sealed range without a row.

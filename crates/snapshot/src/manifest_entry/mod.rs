@@ -4,8 +4,11 @@
 //! completed, and the length and the BLAKE3 digest of its blob. Its `epoch_end` flag follows the
 //! epoch rule of [`MAX_RANGES`] and [`MAX_COMMITMENTS`]. Each `range_meta` row of the index keeps
 //! one entry. The `wire` module converts an entry to and from the Replicator `ManifestEntry`
-//! message.
+//! message. Serde gives the JSON form of an entry in the snapshot manifest: see
+//! [`manifest`](crate::manifest) for an example.
 
+use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, hex::Hex, serde_as};
 use zakura_chain::block;
 
 use crate::pool::{SubtreeRoot, put_subtree_roots, take_subtree_roots};
@@ -25,60 +28,9 @@ pub const MAX_RANGES: usize = 10;
 /// commitments, or more. The count includes all three pools.
 pub const MAX_COMMITMENTS: u64 = 1_000_000;
 
-/// The BLAKE3 digest of a range blob.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BlobDigest(pub [u8; 32]);
-
-impl BlobDigest {
-    /// Calculates the BLAKE3 digest of `blob`.
-    pub fn hash(blob: &[u8]) -> Self {
-        Self(*blake3::hash(blob).as_bytes())
-    }
-}
-
-/// Why a range blob does not match its [`ManifestEntry`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum BlobMismatch {
-    /// The length of the blob is not `blob_len`.
-    #[error("the blob has {actual} bytes; the entry gives {expected}")]
-    Len {
-        /// The length that the entry gives.
-        expected: u64,
-        /// The length of the blob.
-        actual: u64,
-    },
-    /// The BLAKE3 digest of the blob is not `blob_digest`.
-    #[error("the blob does not have the digest that the entry gives")]
-    Digest,
-}
-
-/// The three note commitment tree frontiers at the end of a range, each in the `zcashd` RPC
-/// encoding. An empty frontier means the pool was not active at that height.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Frontiers {
-    /// Sapling frontier.
-    pub sapling: Vec<u8>,
-    /// Orchard frontier.
-    pub orchard: Vec<u8>,
-    /// Ironwood frontier.
-    pub ironwood: Vec<u8>,
-}
-
-impl Frontiers {
-    /// Returns `true` if each pool that is active in `before` is also active in `self`.
-    ///
-    /// An empty frontier means that the pool is not active: `z_gettreestate` gives no tree for
-    /// it. An active pool always has a frontier, also when its tree is empty. A pool does not
-    /// become inactive, so `false` means that `self` is wrong.
-    pub const fn follows(&self, before: &Self) -> bool {
-        (before.sapling.is_empty() || !self.sapling.is_empty())
-            && (before.orchard.is_empty() || !self.orchard.is_empty())
-            && (before.ironwood.is_empty() || !self.ironwood.is_empty())
-    }
-}
-
 /// What a snapshot manifest says about one sealed range.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ManifestEntry {
     /// The range blob format version.
     pub range_version: u8,
@@ -86,11 +38,15 @@ pub struct ManifestEntry {
     pub start_height: u32,
     /// The last height of the range.
     pub end_height: u32,
-    /// The hash of the block at `end_height`.
+    /// The hash of the block at `end_height`. The JSON form is hex in display order.
+    #[serde_as(as = "DisplayFromStr")]
     pub end_hash: block::Hash,
     /// The cumulative tree sizes after the block at `end_height`.
+    #[serde(with = "TreeSizesJson")]
     pub end_tree_sizes: TreeSizes,
-    /// The tree frontiers after the block at `end_height`.
+    /// The tree frontiers after the block at `end_height`. The JSON form has one field per pool
+    /// in the entry: `sapling_frontier`, `orchard_frontier` and `ironwood_frontier`.
+    #[serde(flatten)]
     pub frontiers: Frontiers,
     /// The subtrees that the range completed.
     pub subtree_roots: Vec<SubtreeRoot>,
@@ -98,7 +54,7 @@ pub struct ManifestEntry {
     pub blob_digest: BlobDigest,
     /// The length of the range blob in bytes.
     pub blob_len: u64,
-    /// Whether the range closes a verification epoch.
+    /// `true` if the range closes a verification epoch.
     pub epoch_end: bool,
 }
 
@@ -197,6 +153,77 @@ impl ManifestEntry {
             epoch_end,
         })
     }
+}
+
+/// The three note commitment tree frontiers at the end of a range, each in the `zcashd` RPC
+/// encoding. An empty frontier means the pool was not active at that height. The JSON form of
+/// each frontier is hex.
+#[serde_as]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Frontiers {
+    /// Sapling frontier.
+    #[serde(rename = "sapling_frontier")]
+    #[serde_as(as = "Hex")]
+    pub sapling: Vec<u8>,
+    /// Orchard frontier.
+    #[serde(rename = "orchard_frontier")]
+    #[serde_as(as = "Hex")]
+    pub orchard: Vec<u8>,
+    /// Ironwood frontier.
+    #[serde(rename = "ironwood_frontier")]
+    #[serde_as(as = "Hex")]
+    pub ironwood: Vec<u8>,
+}
+
+impl Frontiers {
+    /// Returns `true` if each pool that is active in `before` is also active in `self`.
+    ///
+    /// An empty frontier means that the pool is not active: `z_gettreestate` gives no tree for
+    /// it. An active pool always has a frontier, also when its tree is empty. A pool does not
+    /// become inactive, so `false` means that `self` is wrong.
+    pub const fn follows(&self, before: &Self) -> bool {
+        (before.sapling.is_empty() || !self.sapling.is_empty())
+            && (before.orchard.is_empty() || !self.orchard.is_empty())
+            && (before.ironwood.is_empty() || !self.ironwood.is_empty())
+    }
+}
+
+/// The BLAKE3 digest of a range blob. The JSON form is hex.
+#[serde_as]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct BlobDigest(#[serde_as(as = "Hex")] pub [u8; 32]);
+
+impl BlobDigest {
+    /// Calculates the BLAKE3 digest of `blob`.
+    pub fn hash(blob: &[u8]) -> Self {
+        Self(*blake3::hash(blob).as_bytes())
+    }
+}
+
+/// Why a range blob does not match its [`ManifestEntry`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum BlobMismatch {
+    /// The length of the blob is not `blob_len`.
+    #[error("the blob has {actual} bytes; the entry gives {expected}")]
+    Len {
+        /// The length that the entry gives.
+        expected: u64,
+        /// The length of the blob.
+        actual: u64,
+    },
+    /// The BLAKE3 digest of the blob is not `blob_digest`.
+    #[error("the blob does not have the digest that the entry gives")]
+    Digest,
+}
+
+/// The JSON form of [`TreeSizes`]. `ztreamer_chain` does not use serde.
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "TreeSizes")]
+struct TreeSizesJson {
+    sapling: u32,
+    orchard: u32,
+    ironwood: u32,
 }
 
 #[cfg(test)]

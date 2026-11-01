@@ -71,7 +71,7 @@ impl TryFrom<replicate::ManifestEntry> for ManifestEntry {
                 .map_err(|_| WireError::Overflow("range_version"))?,
             start_height: entry.start_height,
             end_height: entry.end_height,
-            end_hash: block::Hash(fixed("end_hash", entry.end_hash)?),
+            end_hash: block::Hash(to_32_bytes("end_hash", entry.end_hash)?),
             end_tree_sizes: TreeSizes {
                 sapling: sizes.sapling,
                 orchard: sizes.orchard,
@@ -87,7 +87,7 @@ impl TryFrom<replicate::ManifestEntry> for ManifestEntry {
                 .into_iter()
                 .map(SubtreeRoot::try_from)
                 .collect::<Result<_, _>>()?,
-            blob_digest: BlobDigest(fixed("blob_digest", entry.blob_digest)?),
+            blob_digest: BlobDigest(to_32_bytes("blob_digest", entry.blob_digest)?),
             blob_len: entry.blob_len,
             epoch_end: entry.epoch_end,
         })
@@ -114,7 +114,7 @@ impl TryFrom<replicate::SubtreeRoot> for SubtreeRoot {
             NodeBytes::try_from(root.root).map_err(|_| WireError::Length("subtree_roots.root"))?;
         let pool = replicate::Pool::try_from(root.pool)
             .map_err(|_| WireError::Enum("subtree_roots.pool", root.pool))?;
-        let node = Pool::try_from(pool)?.node(bytes);
+        let node = Pool::try_from(pool)?.read_node(bytes);
         Ok(Self {
             index: NoteCommitmentSubtreeIndex(index),
             root: node.ok_or(WireError::SubtreeRoot(index))?,
@@ -145,7 +145,7 @@ impl TryFrom<replicate::Pool> for Pool {
     }
 }
 
-fn fixed(field: &'static str, bytes: Vec<u8>) -> Result<[u8; 32], WireError> {
+fn to_32_bytes(field: &'static str, bytes: Vec<u8>) -> Result<[u8; 32], WireError> {
     bytes.try_into().map_err(|_| WireError::Length(field))
 }
 
@@ -154,11 +154,11 @@ mod tests {
     use zakura_chain::ironwood;
 
     use super::*;
-    use crate::{pool::SubtreeNode, test_utils::full_entry};
+    use crate::{pool::SubtreeNode, test_utils::entry_with_frontiers};
 
     /// An entry with subtree roots of the Sapling, Orchard and Ironwood pools.
     fn entry() -> ManifestEntry {
-        let mut entry = full_entry(2_000);
+        let mut entry = entry_with_frontiers(2_000);
         entry.subtree_roots.push(SubtreeRoot {
             index: NoteCommitmentSubtreeIndex(5),
             root: SubtreeNode::Ironwood(ironwood::tree::Node::try_from([6; 32]).unwrap()),
