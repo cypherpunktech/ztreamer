@@ -66,6 +66,21 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
       - run: cargo nextest run --workspace --locked --cargo-profile ci-rust
 
+  # Imports the first range of the published snapshot. The test downloads it, thus a network
+  # failure fails this job. Do not make it a required check.
+  published-snapshot:
+    name: Published snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@nextest
+      - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
+      - run: cargo nextest run -p ztreamer-import --test published_snapshot --run-ignored only --locked --cargo-profile ci-rust
+
   bench:
     name: Bench
     runs-on: ubuntu-latest
