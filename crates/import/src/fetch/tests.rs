@@ -110,13 +110,13 @@ async fn a_bad_signature_refuses_the_manifest() {
     assert!(matches!(error, FetchError::Latest(PointerError::Signature)), "{error:?}");
 
     let manifest = &http.snapshot.manifest_path;
-    let bytes = std::fs::read(http.snapshot.dir.path().join(manifest)).unwrap();
+    let bytes = std::fs::read(http.snapshot.dir.path().join(manifest.to_path())).unwrap();
     let other = SignatureFile::sign(&bytes, &SigningKey::from_bytes(&[9; 32]));
-    let signature = http.snapshot.dir.path().join(SignatureFile::path_of(manifest.as_str()));
+    let signature = http.snapshot.dir.path().join(SignatureFile::path_of(&manifest.to_string()));
     std::fs::write(signature, other.to_hex()).unwrap();
     let error = http.fetcher(SEED).manifest().await.unwrap_err();
     assert!(
-        matches!(&error, FetchError::Signature { path } if path == manifest.as_str()),
+        matches!(&error, FetchError::Signature { path } if *path == manifest.to_string()),
         "{error:?}"
     );
 }

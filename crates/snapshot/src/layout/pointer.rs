@@ -14,13 +14,13 @@ use super::ManifestPath;
 /// use ztreamer_snapshot::layout::{ManifestPath, ManifestPointer};
 ///
 /// let key = SigningKey::from_bytes(&[7; 32]);
-/// let manifest = ManifestPath::try_from("manifests/a.json".to_owned()).unwrap();
+/// let manifest: ManifestPath = "manifests/2026-10-26T000000Z.json".parse().unwrap();
 /// let pointer = ManifestPointer { manifest, sealed_through: 999 };
 /// let json = pointer.to_signed_json(&key);
 /// let read = ManifestPointer::from_signed_json(&json, &key.verifying_key()).unwrap();
 /// assert_eq!(read, pointer);
 /// ```
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ManifestPointer {
     /// The path of the manifest.
     pub manifest: ManifestPath,
@@ -77,8 +77,8 @@ mod tests {
     use super::*;
 
     fn pointer() -> ManifestPointer {
-        let manifest = "manifests/2026-10-26T000000Z.json".to_owned();
-        ManifestPointer { manifest: manifest.try_into().unwrap(), sealed_through: 2_999 }
+        let manifest = "manifests/2026-10-26T000000Z.json".parse().unwrap();
+        ManifestPointer { manifest, sealed_through: 2_999 }
     }
 
     #[test]

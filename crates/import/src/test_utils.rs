@@ -191,7 +191,7 @@ impl Snapshot {
 
     /// The file of the blob of `entry`.
     pub fn range_path(&self, entry: &ManifestEntry) -> PathBuf {
-        self.dir.path().join(RangePath::from(entry))
+        self.dir.path().join(RangePath::from(entry).to_path())
     }
 
     /// Writes `entries` as a new manifest, one day after the last manifest.

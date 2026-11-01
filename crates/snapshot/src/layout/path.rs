@@ -1,91 +1,96 @@
 //! The paths of the files in a snapshot directory.
 //!
-//! A path is relative to the snapshot directory and uses `/`. A writer joins it to the directory.
-//! An HTTP reader joins it to the base URL.
+//! Each path type holds the values that its file name encodes. Its `Display` form is the path
+//! relative to the snapshot directory, with `/`. An HTTP reader joins this form to the base URL.
+//! [`ManifestPath::to_path`] and [`RangePath::to_path`] give the same path for the disk.
 
-use std::{fmt, path::Path};
+use std::{fmt, path::PathBuf, str::FromStr};
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, NaiveDateTime, SubsecRound as _, Utc};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::manifest_entry::ManifestEntry;
 
-/// The path of a manifest: `manifests/<time>.json`. `<time>` is UTC, for example
-/// `2026-10-26T143005Z`.
+/// The path of a manifest: `manifests/<time>.json`. `<time>` is the publish time in UTC, to
+/// the second, for example `2026-10-26T143005Z`.
 ///
-/// Serde refuses a path that does not have this form. Thus a `latest.json` cannot point at a
-/// file out of `manifests/`.
+/// The JSON form is the path. Serde refuses a path that is not a manifest path. Thus a
+/// `latest.json` cannot point at a file out of `manifests/`.
 ///
 /// ```
 /// use chrono::DateTime;
 /// use ztreamer_snapshot::layout::ManifestPath;
 ///
 /// let time = DateTime::from_timestamp(1_792_972_800, 0).unwrap();
-/// assert_eq!(ManifestPath::at(time).as_str(), "manifests/2026-10-26T000000Z.json");
+/// let path = ManifestPath::at(time);
+/// assert_eq!(path.to_string(), "manifests/2026-10-26T000000Z.json");
+/// assert_eq!("manifests/2026-10-26T000000Z.json".parse(), Ok(path));
 /// ```
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ManifestPath(String);
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, Eq, Hash, Ord, PartialEq, PartialOrd, SerializeDisplay,
+)]
+pub struct ManifestPath {
+    published_at: DateTime<Utc>,
+}
 
 impl ManifestPath {
     /// The directory of the manifests.
     const DIR: &str = "manifests/";
     /// The extension of a manifest.
     const EXTENSION: &str = ".json";
+    /// The format of the publish time in the file name.
+    const TIME_FORMAT: &str = "%Y-%m-%dT%H%M%SZ";
 
-    /// The path of the manifest that is published at `time`.
+    /// The path of the manifest that is published at `time`. The path removes the parts of a
+    /// second.
     pub fn at(time: DateTime<Utc>) -> Self {
-        Self(format!("{}{}{}", Self::DIR, time.format("%Y-%m-%dT%H%M%SZ"), Self::EXTENSION))
+        Self { published_at: time.trunc_subsecs(0) }
     }
 
-    /// The path as a string.
-    pub fn as_str(&self) -> &str {
-        &self.0
+    /// The publish time of the manifest, to the second.
+    pub const fn published_at(&self) -> DateTime<Utc> {
+        self.published_at
     }
-}
 
-impl AsRef<Path> for ManifestPath {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.0)
+    /// The path relative to the snapshot directory.
+    pub fn to_path(&self) -> PathBuf {
+        PathBuf::from(self.to_string())
     }
 }
 
 impl fmt::Display for ManifestPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        let time = self.published_at.format(Self::TIME_FORMAT);
+        write!(f, "{}{time}{}", Self::DIR, Self::EXTENSION)
     }
 }
 
-impl From<ManifestPath> for String {
-    fn from(path: ManifestPath) -> Self {
-        path.0
-    }
-}
+impl FromStr for ManifestPath {
+    type Err = ManifestPathError;
 
-impl TryFrom<String> for ManifestPath {
-    type Error = ManifestPathError;
-
-    /// Refuses a path that is not `manifests/<name>.json`, with a name that is not empty and
-    /// has no `/`.
-    fn try_from(path: String) -> Result<Self, Self::Error> {
-        let name = path
+    /// Reads the publish time from `manifests/<time>.json`. Refuses a path that
+    /// [`ManifestPath`] does not write in the same form, for example a time without zero
+    /// padding.
+    fn from_str(path: &str) -> Result<Self, Self::Err> {
+        let error = || ManifestPathError(path.to_owned());
+        let time = path
             .strip_prefix(Self::DIR)
             .and_then(|name| name.strip_suffix(Self::EXTENSION))
-            .filter(|name| !name.is_empty() && !name.contains('/'));
-        match name {
-            Some(_) => Ok(Self(path)),
-            None => Err(ManifestPathError(path)),
-        }
+            .ok_or_else(error)?;
+        let manifest = NaiveDateTime::parse_from_str(time, Self::TIME_FORMAT)
+            .map(|time| Self { published_at: time.and_utc() })
+            .map_err(|_| error())?;
+        (manifest.to_string() == path).then_some(manifest).ok_or_else(error)
     }
 }
 
-/// The path is not `manifests/<name>.json`.
+/// The path is not `manifests/<time>.json`.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("manifest path {0:?} is not manifests/<name>.json")]
+#[error("{0:?} is not manifests/<time>.json with a time such as 2026-10-26T143005Z")]
 pub struct ManifestPathError(String);
 
 /// The path of the blob of a range: `ranges/<start>-<digest prefix>.bin`. The prefix is the
-/// first 4 bytes of the BLAKE3 digest, in hex.
+/// first 4 bytes of the BLAKE3 digest of the blob, in hex.
 ///
 /// ```
 /// # use ztreamer_snapshot::manifest_entry::ManifestEntry;
@@ -93,29 +98,32 @@ pub struct ManifestPathError(String);
 ///
 /// # fn run(entry: &ManifestEntry) {
 /// let path = RangePath::from(entry);
-/// assert!(path.as_str().starts_with("ranges/"));
+/// assert!(path.to_string().starts_with("ranges/"));
 /// # }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RangePath(String);
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RangePath {
+    start: u32,
+    digest_prefix: [u8; 4],
+}
 
 impl RangePath {
-    /// The path as a string.
-    pub fn as_str(&self) -> &str {
-        &self.0
+    /// The path relative to the snapshot directory.
+    pub fn to_path(&self) -> PathBuf {
+        PathBuf::from(self.to_string())
     }
 }
 
-impl AsRef<Path> for RangePath {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.0)
+impl fmt::Display for RangePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ranges/{}-{}.bin", self.start, hex::encode(self.digest_prefix))
     }
 }
 
 impl From<&ManifestEntry> for RangePath {
     fn from(entry: &ManifestEntry) -> Self {
-        let prefix = hex::encode(&entry.blob_digest.0[..4]);
-        Self(format!("ranges/{}-{prefix}.bin", entry.start_height))
+        let [a, b, c, d, ..] = entry.blob_digest.0;
+        Self { start: entry.start_height, digest_prefix: [a, b, c, d] }
     }
 }
 
@@ -125,29 +133,48 @@ mod tests {
     use crate::{manifest_entry::BlobDigest, test_utils::entries_from_genesis};
 
     #[test]
-    fn a_manifest_path_has_the_form_of_the_layout() {
-        let path = ManifestPath::try_from("manifests/2026-10-26T000000Z.json".to_owned());
-        assert_eq!(path.unwrap().as_str(), "manifests/2026-10-26T000000Z.json");
+    fn a_manifest_path_round_trips_and_drops_the_parts_of_a_second() {
+        let time = DateTime::from_timestamp(1_792_972_805, 999_000_000).unwrap();
+        let path = ManifestPath::at(time);
 
+        assert_eq!(path.to_string(), "manifests/2026-10-26T000005Z.json");
+        assert_eq!(path.published_at(), DateTime::from_timestamp(1_792_972_805, 0).unwrap());
+        assert_eq!(path.to_string().parse(), Ok(path));
+        assert_eq!(path.to_path(), PathBuf::from("manifests/2026-10-26T000005Z.json"));
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_manifest_path_is_refused() {
         for wrong in [
             "manifests/.json",
-            "manifests/a/b.json",
-            "manifests/../../latest.json",
-            "ranges/0-abababab.bin",
-            "/manifests/a.json",
-            "manifests/a.json.sig",
+            "manifests/a.json",
+            "manifests/2026-10-26T000000Z.json.sig",
+            "manifests/2026-1-26T000000Z.json",
+            "manifests/../2026-10-26T000000Z.json",
+            "/manifests/2026-10-26T000000Z.json",
+            "ranges/2026-10-26T000000Z.json",
         ] {
-            let error = ManifestPath::try_from(wrong.to_owned());
+            let error = wrong.parse::<ManifestPath>();
             assert_eq!(error, Err(ManifestPathError(wrong.to_owned())), "{wrong}");
         }
     }
 
     #[test]
-    fn serde_refuses_a_manifest_path_out_of_the_layout() {
-        let path: ManifestPath = serde_json::from_str("\"manifests/a.json\"").unwrap();
-        assert_eq!(serde_json::to_string(&path).unwrap(), "\"manifests/a.json\"");
+    fn serde_uses_the_path_and_refuses_another_path() {
+        let json = "\"manifests/2026-10-26T000000Z.json\"";
+        let path: ManifestPath = serde_json::from_str(json).unwrap();
 
-        assert!(serde_json::from_str::<ManifestPath>("\"../a.json\"").is_err());
+        assert_eq!(serde_json::to_string(&path).unwrap(), json);
+        assert!(serde_json::from_str::<ManifestPath>("\"../latest.json\"").is_err());
+    }
+
+    #[test]
+    fn manifest_paths_sort_by_publish_time() {
+        let [old, new] = [0, 86_400].map(|offset| {
+            ManifestPath::at(DateTime::from_timestamp(1_792_972_800 + offset, 0).unwrap())
+        });
+
+        assert!(old < new);
     }
 
     #[test]
@@ -155,6 +182,6 @@ mod tests {
         let mut entry = entries_from_genesis(&[Default::default(); 2]).pop().unwrap();
         entry.blob_digest = BlobDigest([0xab; 32]);
 
-        assert_eq!(RangePath::from(&entry).as_str(), "ranges/1000-abababab.bin");
+        assert_eq!(RangePath::from(&entry).to_string(), "ranges/1000-abababab.bin");
     }
 }

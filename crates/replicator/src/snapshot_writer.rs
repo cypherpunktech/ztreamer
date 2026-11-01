@@ -40,7 +40,7 @@ pub struct SnapshotWriter {
 }
 
 /// What [`SnapshotWriter::export`] wrote.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Exported {
     /// The path of the manifest.
     pub manifest: ManifestPath,
@@ -111,7 +111,7 @@ impl SnapshotWriter {
         entry
             .check_blob(blob)
             .map_err(|mismatch| SnapshotWriteError::BlobMismatch(entry.start_height, mismatch))?;
-        Ok(self.put(RangePath::from(entry), blob)?)
+        Ok(self.put(RangePath::from(entry).to_path(), blob)?)
     }
 
     /// The path of the manifest for `now`. It refuses the path if a file has it.
@@ -120,7 +120,7 @@ impl SnapshotWriter {
         now: DateTime<Utc>,
     ) -> Result<ManifestPath, SnapshotWriteError> {
         let path = ManifestPath::at(now);
-        if self.root.join(&path).exists() {
+        if self.root.join(path.to_path()).exists() {
             return Err(SnapshotWriteError::ManifestExists(path));
         }
         Ok(path)
@@ -130,7 +130,7 @@ impl SnapshotWriter {
     /// file with a different length, it logs a warning and returns `false`. Then the caller
     /// writes the file again.
     fn has_range(&self, entry: &ManifestEntry) -> io::Result<bool> {
-        let path = self.root.join(RangePath::from(entry));
+        let path = self.root.join(RangePath::from(entry).to_path());
         match fs::metadata(&path) {
             Ok(file) if file.is_file() && file.len() == entry.blob_len => Ok(true),
             Ok(_) => {
@@ -151,11 +151,11 @@ impl SnapshotWriter {
         manifest: &Manifest,
     ) -> io::Result<()> {
         let bytes = serde_json::to_vec(manifest).expect("a Manifest always serializes");
-        self.put(path, &bytes)?;
+        self.put(path.to_path(), &bytes)?;
         let signature = SignatureFile::sign(&bytes, &self.key);
-        self.put(SignatureFile::path_of(path.as_str()), signature.to_hex().as_bytes())?;
+        self.put(SignatureFile::path_of(&path.to_string()), signature.to_hex().as_bytes())?;
         let pointer =
-            ManifestPointer { manifest: path.clone(), sealed_through: manifest.sealed_through() };
+            ManifestPointer { manifest: *path, sealed_through: manifest.sealed_through() };
         self.put(ManifestPointer::PATH, &pointer.to_signed_json(&self.key))
     }
 
@@ -190,6 +190,6 @@ mod tests {
             matches!(error, SnapshotWriteError::BlobMismatch(0, BlobMismatch::Digest)),
             "{error:?}"
         );
-        assert!(!dir.path().join(RangePath::from(&entry)).exists());
+        assert!(!dir.path().join(RangePath::from(&entry).to_path()).exists());
     }
 }

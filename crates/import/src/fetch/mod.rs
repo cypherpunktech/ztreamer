@@ -479,7 +479,7 @@ impl HttpSource {
 impl RangeSource for HttpSource {
     async fn manifest(&self) -> Result<Manifest, FetchError> {
         let latest = self.latest().await?;
-        let bytes = self.signed(latest.manifest.as_str()).await?;
+        let bytes = self.signed(&latest.manifest.to_string()).await?;
         let manifest = Manifest::from_json(std::str::from_utf8(&bytes)?)?;
         if manifest.sealed_through() != latest.sealed_through {
             let (latest, manifest) = (latest.sealed_through, manifest.sealed_through());
@@ -494,7 +494,8 @@ impl RangeSource for HttpSource {
         offset: u64,
     ) -> Result<BlobStream, FetchError> {
         let open = async {
-            let body = self.get(RangePath::from(entry).as_str(), offset).await?.into_body();
+            let path = RangePath::from(entry).to_string();
+            let body = self.get(&path, offset).await?.into_body();
             Ok(body.into_data_stream().map(|chunk| chunk.map_err(FetchError::from)))
         };
         self.blob_requests.open_blob_stream(open).await

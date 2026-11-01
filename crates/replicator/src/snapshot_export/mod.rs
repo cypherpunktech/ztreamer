@@ -42,7 +42,7 @@ pub enum SnapshotExportError {
 }
 
 /// What one export wrote.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapshotExport {
     /// The path of the manifest.
     pub manifest: ManifestPath,
