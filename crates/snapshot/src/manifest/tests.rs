@@ -1,10 +1,13 @@
-use crate::pool::SubtreeNode;
 use serde_json::Value;
-use zakura_chain::{ironwood, orchard};
-use ztreamer_chain::test_utils::hash;
+use zakura_chain::{ironwood, orchard, subtree::NoteCommitmentSubtreeIndex};
+use ztreamer_chain::{codec::TreeSizes, test_utils::hash};
 
 use super::*;
-use crate::test_utils::synthetic_entries;
+use crate::{
+    manifest_entry::{BlobDigest, Frontiers},
+    pool::{SubtreeNode, SubtreeRoot},
+    test_utils::synthetic_entries,
+};
 
 /// A manifest with two entries. The first entry has frontiers and subtree roots in all three
 /// pools.
@@ -36,9 +39,15 @@ fn two_entry_manifest() -> Manifest {
     Manifest::new("Mainnet", hash(0), entries).unwrap()
 }
 
-/// The fields of [`two_entry_manifest`], to break one rule at a time.
-fn fields() -> ManifestFields {
-    two_entry_manifest().0
+/// The JSON form of [`two_entry_manifest`], to break one rule at a time.
+fn json_form() -> ManifestJson<'static> {
+    let manifest = two_entry_manifest();
+    let json = ManifestJson::from(&manifest);
+    ManifestJson {
+        network: Cow::Owned(json.network.into_owned()),
+        entries: Cow::Owned(json.entries.into_owned()),
+        ..json
+    }
 }
 
 #[test]
@@ -109,7 +118,7 @@ fn contiguous_entries_that_do_not_start_at_genesis_are_refused() {
     let error =
         Manifest::from_contiguous_entries("Mainnet", hash(0), rows[1..].to_vec()).unwrap_err();
 
-    assert!(matches!(error, ManifestError::SealedThrough { last_end: None, .. }), "{error:?}");
+    assert!(matches!(error, ManifestError::Empty), "{error:?}");
 }
 
 #[test]
@@ -133,33 +142,33 @@ fn a_subtree_root_that_is_not_a_field_element_is_refused() {
 }
 
 /// Each row breaks one rule of [`two_entry_manifest`]. `Manifest::try_from` must refuse the
-/// fields with the expected error.
+/// JSON form with the expected error.
 #[test]
-fn fields_that_break_a_rule_are_refused() {
+fn json_that_breaks_a_rule_is_refused() {
     type IsExpected = fn(&ManifestError) -> bool;
-    type BreakRule = fn(&mut ManifestFields);
+    type BreakRule = fn(&mut ManifestJson<'static>);
     let cases: [(&str, BreakRule, IsExpected); 11] = [
         (
             "entries out of order",
-            |manifest| manifest.entries.swap(0, 1),
+            |manifest| manifest.entries.to_mut().swap(0, 1),
             |error| matches!(error, ManifestError::Discontiguous { index: 0, start_height: 1_000 }),
         ),
         (
             "a gap",
             |manifest| {
-                manifest.entries = synthetic_entries(&[TreeSizes::default(); 3]);
-                manifest.entries.remove(1);
+                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 3]));
+                manifest.entries.to_mut().remove(1);
             },
             |error| matches!(error, ManifestError::Discontiguous { index: 1, start_height: 2_000 }),
         ),
         (
             "a wrong range length",
-            |manifest| manifest.entries[1].end_height += 1,
+            |manifest| manifest.entries.to_mut()[1].end_height += 1,
             |error| matches!(error, ManifestError::RangeLength { index: 1 }),
         ),
         (
             "a shrinking tree",
-            |manifest| manifest.entries[1].end_tree_sizes.orchard = 2,
+            |manifest| manifest.entries.to_mut()[1].end_tree_sizes.orchard = 2,
             |error| matches!(error, ManifestError::TreeSizes { index: 1 }),
         ),
         (
@@ -173,34 +182,34 @@ fn fields_that_break_a_rule_are_refused() {
             |error| {
                 matches!(
                     error,
-                    ManifestError::SealedThrough { sealed_through: 2_999, last_end: Some(1_999) }
+                    ManifestError::SealedThrough { sealed_through: 2_999, last_end: 1_999 }
                 )
             },
         ),
         (
-            "sealed_through with no entries",
+            "no entries",
             |manifest| {
                 manifest.sealed_through = 2_999;
-                manifest.entries.clear();
+                manifest.entries.to_mut().clear();
             },
-            |error| matches!(error, ManifestError::SealedThrough { last_end: None, .. }),
+            |error| matches!(error, ManifestError::Empty),
         ),
         (
             "a pool that becomes inactive",
-            |manifest| manifest.entries[1].frontiers.orchard.clear(),
+            |manifest| manifest.entries.to_mut()[1].frontiers.orchard.clear(),
             |error| matches!(error, ManifestError::PoolInactive { index: 1 }),
         ),
         (
             "an epoch end before the epoch closes",
-            |manifest| manifest.entries[0].epoch_end = true,
+            |manifest| manifest.entries.to_mut()[0].epoch_end = true,
             |error| matches!(error, ManifestError::EpochEnd { index: 0, expected: false }),
         ),
         (
             "no epoch end where the epoch closes",
             |manifest| {
-                manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 12]));
                 manifest.sealed_through = 11_999;
-                manifest.entries[9].epoch_end = false;
+                manifest.entries.to_mut()[9].epoch_end = false;
             },
             |error| matches!(error, ManifestError::EpochEnd { index: 9, expected: true }),
         ),
@@ -208,16 +217,16 @@ fn fields_that_break_a_rule_are_refused() {
         (
             "no epoch end at the last entry",
             |manifest| {
-                manifest.entries = synthetic_entries(&[TreeSizes::default(); 12]);
+                manifest.entries = Cow::Owned(synthetic_entries(&[TreeSizes::default(); 12]));
                 manifest.sealed_through = 11_999;
-                manifest.entries[11].epoch_end = false;
+                manifest.entries.to_mut()[11].epoch_end = false;
             },
             |error| matches!(error, ManifestError::EpochEnd { index: 11, expected: true }),
         ),
     ];
 
     for (case, break_rule, expected) in cases {
-        let mut manifest = fields();
+        let mut manifest = json_form();
         break_rule(&mut manifest);
 
         let error = Manifest::try_from(manifest).unwrap_err();
