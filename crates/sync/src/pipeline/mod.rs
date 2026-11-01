@@ -9,7 +9,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{Span, field::Empty, info};
 
 mod flow_control;
 use crate::metrics::{PipelineMetrics, SegmentMetrics};
@@ -297,6 +297,33 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             return Ok(initial_state);
         }
 
+        let pass = tracing::info_span!(
+            "pipeline.pass",
+            start_height = start,
+            target_height = target,
+            workers = self.config.workers,
+            written_blocks = Empty,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let result =
+            pass.in_scope(|| self.run_pass(initial_state, start, (target, tip_hash), &pass));
+        if let Err(error) = &result {
+            pass.record("otel.status_code", "ERROR");
+            pass.record("otel.status_description", tracing::field::display(error));
+        }
+        result
+    }
+
+    /// Runs the threads of one pass from `start` to `target`. Each thread makes its spans with
+    /// the parent `pass`.
+    fn run_pass(
+        &self,
+        initial_state: IndexState,
+        start: u32,
+        (target, tip_hash): (u32, block::Hash),
+        pass: &Span,
+    ) -> Result<IndexState, PipelineError> {
         thread::scope(|scope| {
             let next = Arc::new(AtomicU64::new(u64::from(start)));
 
@@ -315,7 +342,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             let (batch_tx, batch_rx) = sync_channel::<EncodedBatch>(1);
 
             // single threaded writer receives WriteBatches and writes to Index
-            let writer = scope.spawn(move || self.write_batches(initial_state, batch_rx));
+            let writer = scope.spawn(move || self.write_batches(initial_state, batch_rx, pass));
 
             // concurrent parser workers
             let workers: Vec<_> = (0..self.config.workers)
@@ -325,7 +352,9 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
                     // all workers add the segment size atomically to `next` to split work
                     //
                     // todo(@distractedm1nd): all ranges are not equal. optimize by having more workers in sandblasting range?
-                    scope.spawn(move || self.process_segments(next, target, tip_hash, parsed_tx))
+                    scope.spawn(move || {
+                        self.process_segments(next, (target, tip_hash), parsed_tx, pass)
+                    })
                 })
                 .collect();
             drop(parsed_tx);
@@ -380,6 +409,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
                     actual: None,
                 });
             }
+            pass.record("written_blocks", write_stats.blocks);
             info!(
                 start_height = start,
                 target_height = target,
@@ -409,6 +439,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
         &self,
         initial_state: IndexState,
         batch_rx: Receiver<EncodedBatch>,
+        pass: &Span,
     ) -> Result<(IndexState, WriteStats), PipelineError> {
         let mut state = initial_state;
         let mut stats = WriteStats::default();
@@ -416,6 +447,9 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             stats.batches += 1;
             let blocks = batch.block_count() as u64;
             stats.blocks += blocks;
+            let span =
+                tracing::debug_span!(parent: pass, "pipeline.commit", blocks, generation = Empty);
+            let _span = span.enter();
             let started = Instant::now();
             let written = self.index.write_encoded(batch);
             let elapsed = started.elapsed();
@@ -423,6 +457,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             stats.write += elapsed;
             // Stop at the first error. The coordinator then stops when its next send fails.
             state = written?;
+            span.record("generation", state.generation());
         }
         Ok((state, stats))
     }
@@ -431,9 +466,9 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
     fn process_segments(
         &self,
         next: Arc<AtomicU64>,
-        target: u32,
-        tip_hash: block::Hash,
+        (target, tip_hash): (u32, block::Hash),
         mut parsed_tx: ReadAheadSender,
+        pass: &Span,
     ) -> Result<WorkerStats, PipelineError> {
         let mut stats = WorkerStats::default();
         loop {
@@ -448,6 +483,14 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             let segment_end = segment_start
                 .saturating_add(u64::from(self.config.source_segment_blocks - 1))
                 .min(u64::from(target)) as u32;
+            let span = tracing::debug_span!(
+                parent: pass,
+                "pipeline.segment",
+                start_height = segment_start,
+                end_height = segment_end,
+                blocks = Empty,
+            );
+            let _span = span.enter();
             let mut segment = SegmentMetrics::new(&self.metrics);
             let mut segment_tx = parsed_tx.segment(segment_start as u32, segment_end);
             let processed = self
@@ -465,6 +508,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
                 parsed_tx.cancel();
                 return Err(error);
             }
+            span.record("blocks", segment.stats.blocks);
             stats.add(segment.stats);
         }
     }
@@ -555,9 +599,12 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
         batch: WriteBatch,
         batch_tx: &SyncSender<EncodedBatch>,
     ) -> Result<Duration, PipelineError> {
+        let span = tracing::debug_span!("pipeline.encode", blocks = Empty).entered();
         let started = Instant::now();
         let batch = batch.encode(self.config.workers).map_err(IngestError::from)?;
         self.metrics.encode(started.elapsed());
+        span.record("blocks", batch.block_count());
+        drop(span);
         let started = Instant::now();
         let sent = batch_tx.send(batch);
         let elapsed = started.elapsed();

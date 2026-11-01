@@ -4,6 +4,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::watch;
+use tracing::{Instrument, field::Empty};
 use ztreamer_chain::codec::CompactBlockRecord;
 use ztreamer_index::index::{Index, IndexState};
 
@@ -132,8 +133,21 @@ impl HeadFollower {
     ) -> Result<IndexState, HeadSyncError> {
         self.begin_recovery();
         let snapshot = self.snapshot();
-        let (state, head) =
-            recover_deep_reorg(&self.index, source, &snapshot.volatile_head, config).await?;
+        let span = tracing::info_span!(
+            "head.recover",
+            to_height = Empty,
+            ancestor_height = Empty,
+            replaced = Empty,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let recovered = recover_deep_reorg(&self.index, source, &snapshot.volatile_head, config)
+            .instrument(span.clone())
+            .await;
+        let (state, head) = recovered.inspect_err(|error| {
+            span.record("otel.status_code", "ERROR");
+            span.record("otel.status_description", tracing::field::display(error));
+        })?;
         self.publish_head(state, head).expect("deep recovery must produce a connected snapshot");
         Ok(state)
     }
@@ -180,8 +194,17 @@ impl HeadFollower {
                     self.recover_deep_reorg(&mut source, pipeline).await
                 }
             };
+            // Each tick is a root span. A tick that finds a new tip makes a `head.reconcile` span.
+            let poll = tracing::debug_span!(
+                parent: None,
+                "head.poll",
+                otel.status_code = Empty,
+                otel.status_description = Empty,
+            );
+            let attempt =
+                tokio::time::timeout(config.attempt_timeout, attempt).instrument(poll.clone());
             let result = tokio::select! {
-                result = tokio::time::timeout(config.attempt_timeout, attempt) => {
+                result = attempt => {
                     result
                         .map_err(|_| "Zakura head attempt timed out".to_owned())
                         .and_then(|result| result.map_err(|error| error.to_string()))
@@ -194,6 +217,8 @@ impl HeadFollower {
                 }
             };
             if let Err(error) = result {
+                poll.record("otel.status_code", "ERROR");
+                poll.record("otel.status_description", error.as_str());
                 self.mark_source_failure(error, config.freshness_timeout);
             }
         }

@@ -5,6 +5,7 @@ use zakura_chain::{
     parameters::{GENESIS_PREVIOUS_BLOCK_HASH, constants::MAX_BLOCK_REORG_HEIGHT},
 };
 
+use tracing::{Instrument, Span, field::Empty};
 use ztreamer_blocking::BlockingTaskCancelled;
 
 use crate::pipeline::PipelineConfig;
@@ -201,30 +202,62 @@ pub async fn poll_canonical_head(
     Ok(CanonicalSuffix { retained, blocks })
 }
 
-/// Reconciles the canonical head and atomically replaces an ordinary reorg suffix.
+/// Reconciles the canonical head and atomically replaces an ordinary reorg suffix. When the
+/// tip of the source did not change, it returns at once. Else the work is a `head.reconcile`
+/// span.
 pub async fn sync_head_once(
     index: &Index,
     source: &mut impl CanonicalBlockSource,
     current_head: &[CompactBlockRecord],
     config: PipelineConfig,
 ) -> Result<(IndexState, Vec<CompactBlockRecord>), HeadSyncError> {
-    let mut state = index.state()?;
-    if current_head.is_empty() {
-        return match sync_extension_once(index, source, state, config).await {
-            Err(HeadSyncError::Head(HeadError::Anchor { height })) => {
-                Err(HeadSyncError::DeepReorg { height })
-            }
-            result => result,
-        };
-    }
-
-    let old_visible_tip =
-        current_head.last().map(|block| block.height).expect("the current head is non-empty");
-    let old_visible_tip_hash =
-        current_head.last().map(|block| block.hash).expect("the current head is non-empty");
-    if source.tip().await? == Some(BlockId::new(old_visible_tip, old_visible_tip_hash)) {
+    let state = index.state()?;
+    let old_tip = current_head.last().map(|block| BlockId::new(block.height, block.hash));
+    if let Some(old_tip) = old_tip
+        && source.tip().await? == Some(old_tip)
+    {
         return Ok((state, current_head.to_vec()));
     }
+    let span = tracing::info_span!(
+        "head.reconcile",
+        from_height = old_tip.map(|tip| tip.height),
+        to_height = Empty,
+        ancestor_height = Empty,
+        replaced = Empty,
+        otel.status_code = Empty,
+        otel.status_description = Empty,
+    );
+    let reconcile = async {
+        match old_tip {
+            None => match sync_extension_once(index, source, state, config).await {
+                Err(HeadSyncError::Head(HeadError::Anchor { height })) => {
+                    Err(HeadSyncError::DeepReorg { height })
+                }
+                result => result,
+            },
+            Some(old_tip) => {
+                replace_suffix(index, source, current_head, config, old_tip.height).await
+            }
+        }
+    };
+    let result = reconcile.instrument(span.clone()).await;
+    if let Err(error) = &result {
+        span.record("otel.status_code", "ERROR");
+        span.record("otel.status_description", tracing::field::display(error));
+    }
+    result
+}
+
+/// Polls the blocks above the anchor of the head that ends at `old_visible_tip`, and replaces the
+/// blocks that changed. Records the heights on the current `head.reconcile` span.
+async fn replace_suffix(
+    index: &Index,
+    source: &mut impl CanonicalBlockSource,
+    current_head: &[CompactBlockRecord],
+    config: PipelineConfig,
+    old_visible_tip: u32,
+) -> Result<(IndexState, Vec<CompactBlockRecord>), HeadSyncError> {
+    let mut state = index.state()?;
     let anchor_height = old_visible_tip.checked_sub(SEAL_DEPTH);
     let anchor_record = anchor_height
         .map(|height| current_record(index, state, current_head, height))
@@ -287,6 +320,10 @@ pub async fn sync_head_once(
         .filter(|block| block.height > ancestor_height && block.height <= durable_tip)
         .cloned()
         .collect::<Vec<_>>();
+    let span = Span::current();
+    span.record("to_height", visible_tip);
+    span.record("ancestor_height", ancestor_height);
+    span.record("replaced", replacement.len());
     if ancestor_height != old_durable_tip.height || !replacement.is_empty() {
         state = index.replace_mutable_suffix(
             state.generation(),
@@ -348,8 +385,12 @@ pub async fn recover_deep_reorg(
 
     let durable_tip =
         visible_tip.checked_sub(PERSIST_DEPTH).map_or(matching, |height| height.max(matching));
-    let replacement =
+    let replacement: Vec<_> =
         canonical.iter().filter(|block| block.height <= durable_tip).cloned().collect();
+    let span = Span::current();
+    span.record("to_height", visible_tip);
+    span.record("ancestor_height", matching);
+    span.record("replaced", replacement.len());
     let state = index.replace_deep_suffix(
         state.generation(),
         BlockId::new(common.height, common.hash),

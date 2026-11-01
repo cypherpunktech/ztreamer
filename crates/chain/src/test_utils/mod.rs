@@ -26,7 +26,7 @@ use crate::{
     types::{CompactTransaction, ParsedCompactBlock, RawIndexBlock},
 };
 
-pub use self::spans::{capture_spans, closed_spans};
+pub use self::spans::{capture_spans, closed_spans, closed_spans_under};
 
 /// A deterministic block hash: the big-endian height in the first four bytes, zeros after.
 pub fn hash(height: u32) -> block::Hash {

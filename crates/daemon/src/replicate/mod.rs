@@ -16,7 +16,7 @@ use eyre::{Result, WrapErr, ensure, eyre};
 use http::Uri;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{Instrument as _, info};
 use zakura_chain::{block::Height, parameters::Network};
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_import::{
@@ -156,8 +156,16 @@ impl Replica {
         info!(source = %self.source, from = ?sealed, import_state = "fetching");
 
         let (stop, stopped) = watch::channel(false);
-        let mut import =
-            tokio::spawn(Importer::new(source, node, Arc::clone(index), config).run(stopped));
+        let span = tracing::info_span!(
+            parent: None,
+            "import.run",
+            source = %self.source,
+            sealed_through = sealed,
+            otel.status_code = tracing::field::Empty,
+            otel.status_description = tracing::field::Empty,
+        );
+        let importer = Importer::new(source, node, Arc::clone(index), config).run(stopped);
+        let mut import = tokio::spawn(importer.instrument(span.clone()));
         let result = tokio::select! {
             result = &mut import => result,
             _ = shutdown.cancelled() => {
@@ -177,7 +185,12 @@ impl Replica {
                 info!(%error, "the import stops");
                 return Ok(ControlFlow::Break(()));
             }
-            result => result.wrap_err("import the sealed ranges")?,
+            result => result
+                .inspect_err(|error| {
+                    span.record("otel.status_code", "ERROR");
+                    span.record("otel.status_description", tracing::field::display(error));
+                })
+                .wrap_err("import the sealed ranges")?,
         };
         info!(?report, "import complete");
         Ok(if report.stopped { ControlFlow::Break(()) } else { ControlFlow::Continue(()) })

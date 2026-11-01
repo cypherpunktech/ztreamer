@@ -1,4 +1,5 @@
-use ztreamer_chain::test_utils::{hash, raw_block};
+use tracing::Instrument as _;
+use ztreamer_chain::test_utils::{capture_spans, closed_spans_under, hash, raw_block};
 use ztreamer_index::index::BlockId;
 use ztreamer_index::test_utils::open_index;
 
@@ -388,4 +389,38 @@ fn branch_hash(height: u32) -> block::Hash {
     let mut hash = hash(height);
     hash.0[31] = 1;
     hash
+}
+
+#[test]
+fn only_a_tip_change_makes_a_reconcile_span() {
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let ((), lines) = capture_spans(|| {
+        let test = tracing::info_span!("test.head_reconcile");
+        let work = async {
+            let dir = tempfile::tempdir().unwrap();
+            let index = open_index(dir.path());
+            let config = PipelineConfig::default();
+            let mut source = Source((0..=150).map(raw_block).collect());
+            let (_, head) = sync_head_once(&index, &mut source, &[], config).await.unwrap();
+            let mut unchanged = TipOnly(BlockId::new(150, hash(150)));
+            let (_, head) = sync_head_once(&index, &mut unchanged, &head, config).await.unwrap();
+            let mut branch =
+                Source((0..=152).map(|height| raw_branch_block(height, 145)).collect());
+            sync_head_once(&index, &mut branch, &head, config).await.unwrap();
+        };
+        runtime.block_on(work.instrument(test));
+    });
+
+    // The first fill and the reorg each make a span. The unchanged tip makes none.
+    let spans: Vec<_> =
+        closed_spans_under(&lines, "head.reconcile", "test.head_reconcile").collect();
+    assert_eq!(spans.len(), 2, "{spans:?}");
+    assert!(spans[0].get("from_height").is_none());
+    let reorg = spans[1];
+    assert_eq!(reorg["from_height"], 150);
+    assert_eq!(reorg["to_height"], 152);
+    // The old durable tip is 140, below the first changed block 145.
+    assert_eq!(reorg["ancestor_height"], 140);
+    assert_eq!(reorg["replaced"], 2);
+    assert!(reorg.get("otel.status_code").is_none());
 }
