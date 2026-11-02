@@ -26,8 +26,8 @@ pub(crate) struct TelemetryArgs {
     #[arg(long, global = true, env = "OTEL_EXPORTER_OTLP_ENDPOINT", value_name = "URL")]
     otlp_endpoint: Option<String>,
 
-    /// Filter of the spans that ztreamerd sends to --otlp-endpoint, in RUST_LOG syntax. Defaults
-    /// to the log filter.
+    /// Filter of the spans that ztreamerd sends to --otlp-endpoint, in RUST_LOG syntax. The
+    /// default is the log filter.
     #[arg(long, global = true, requires = "otlp_endpoint", value_name = "DIRECTIVES")]
     otlp_filter: Option<String>,
 }

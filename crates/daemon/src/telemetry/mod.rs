@@ -14,7 +14,7 @@ use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::Subs
 pub use self::config::{LogFormat, OtlpConfig, TelemetryConfig};
 use self::otlp::OtlpExport;
 
-/// Keeps the trace export alive. On drop, it sends the spans that wait. Keep it in a local of
+/// Holds the trace export. On drop, it sends the spans that wait. Keep it in a local of
 /// `main`, not in a `static`: a `static` never drops.
 #[derive(Debug)]
 #[must_use = "the trace export stops when the guard drops"]
@@ -68,8 +68,8 @@ pub fn init_telemetry(config: TelemetryConfig) -> Result<TelemetryGuard> {
     Ok(TelemetryGuard { _export: export })
 }
 
-/// Parses `directives` in `RUST_LOG` syntax. Unlike `EnvFilter::from_default_env`, it fails on
-/// a directive that is not valid.
+/// Parses `directives` in `RUST_LOG` syntax. It fails on a directive that is not valid. This is
+/// different from `EnvFilter::from_default_env`.
 fn parse_filter(directives: &str) -> Result<EnvFilter> {
     EnvFilter::try_new(directives).wrap_err_with(|| format!("directives {directives:?}"))
 }
