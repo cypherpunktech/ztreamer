@@ -1,4 +1,3 @@
-use tracing::Instrument as _;
 use ztreamer_chain::test_utils::{capture_spans, closed_spans_under, hash, raw_block};
 use ztreamer_index::index::BlockId;
 use ztreamer_index::test_utils::open_index;
