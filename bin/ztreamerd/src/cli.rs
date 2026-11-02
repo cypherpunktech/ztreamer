@@ -11,12 +11,12 @@ use clap::{Args, Parser, Subcommand};
 use eyre::{Result, eyre};
 use ztreamer_daemon::{
     DaemonConfig, IndexConfig, Mode, RemoteConfig, ReplicaSource, ServerConfig, SyncConfig,
-    TlsFiles, run_daemon,
+    TelemetryConfig, TlsFiles, run_daemon,
 };
 use ztreamer_remote::NodeUrl;
 use ztreamer_sync::pipeline::PipelineConfig;
 
-use crate::export::ExportArgs;
+use crate::{export::ExportArgs, telemetry::TelemetryArgs};
 
 /// Must be larger than the full mainnet index. That index was 17.3 GiB at height 3,532,489
 /// (2026-10-27).
@@ -35,6 +35,9 @@ pub(crate) struct Cli {
 
     #[command(flatten)]
     daemon: DaemonArgs,
+
+    #[command(flatten)]
+    telemetry: TelemetryArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -44,9 +47,14 @@ enum Command {
 }
 
 impl Cli {
+    /// The telemetry configuration of the telemetry flags.
+    pub(crate) fn telemetry(&self) -> TelemetryConfig {
+        self.telemetry.config()
+    }
+
     /// Runs the subcommand, or the daemon when no subcommand is given.
     pub(crate) fn run(self) -> Result<()> {
-        let Self { command, daemon } = self;
+        let Self { command, daemon, telemetry: _ } = self;
         match command {
             Some(Command::ExportSnapshot(args)) => args.run(&daemon.index().open_existing()?),
             None => run_daemon(DaemonConfig::try_from(daemon)?),
@@ -200,6 +208,7 @@ mod tests {
     use std::path::PathBuf;
 
     use clap::error::ErrorKind;
+    use ztreamer_daemon::LogFormat;
 
     use super::*;
 
@@ -215,6 +224,36 @@ mod tests {
         assert_eq!(pipeline.source_segment_blocks, defaults.source_segment_blocks);
         assert_eq!(pipeline.max_pending_bytes, defaults.max_pending_bytes);
         assert_eq!(pipeline.max_source_bytes, defaults.max_source_bytes);
+    }
+
+    #[test]
+    fn telemetry_flags_make_the_telemetry_config() {
+        let cli = Cli::parse_from([
+            "ztreamerd",
+            "--log-filter",
+            "debug",
+            "--log-format",
+            "json",
+            "--otlp-endpoint",
+            "http://localhost:4317",
+            "--otlp-filter",
+            "info",
+        ]);
+        let config = cli.telemetry();
+        assert_eq!(config.log_filter, "debug");
+        assert_eq!(config.log_format, LogFormat::Json);
+        let otlp = config.otlp.unwrap();
+        assert_eq!(otlp.endpoint, "http://localhost:4317");
+        assert_eq!(otlp.filter.as_deref(), Some("info"));
+    }
+
+    #[test]
+    fn telemetry_flags_apply_after_a_subcommand() {
+        let export = ["export-snapshot", "--out", "snapshot", "--signing-key", "key"];
+        let cli = Cli::parse_from(
+            ["ztreamerd"].into_iter().chain(export).chain(["--log-format", "json"]),
+        );
+        assert_eq!(cli.telemetry().log_format, LogFormat::Json);
     }
 
     #[test]
