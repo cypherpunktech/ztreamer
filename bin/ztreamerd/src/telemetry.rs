@@ -22,7 +22,8 @@ pub(crate) struct TelemetryArgs {
     log_format: LogFormatArg,
 
     /// OTLP/gRPC endpoint of a trace collector, for example http://localhost:4317. ztreamerd
-    /// sends its spans there. Without this flag, ztreamerd sends no trace.
+    /// sends its spans there. Without this flag, ztreamerd sends no trace. Needs a build with
+    /// the `otlp` feature.
     #[arg(long, global = true, env = "OTEL_EXPORTER_OTLP_ENDPOINT", value_name = "URL")]
     otlp_endpoint: Option<String>,
 

@@ -1,4 +1,4 @@
-//! A synthetic indexed [`CompactService`](crate::CompactService), a [`StateBackend`] over an empty
+//! A synthetic indexed [`CompactService`], a [`StateBackend`] over an empty
 //! chain, and a local gRPC server, shared by tests, benchmarks and examples.
 //!
 //! Compiled for this crate's own tests and for targets that enable the `test-utils` feature.

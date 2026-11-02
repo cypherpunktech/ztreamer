@@ -17,6 +17,8 @@ Install [Protocol Buffers](https://protobuf.dev/installation/), then:
 cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamerd
 ```
 
+Add `--features otlp` for the trace export over OTLP/gRPC (`--otlp-endpoint`). The default build has no trace export.
+
 ### Docker
 
 The image runs ztreamerd as a user without privileges. It has no shell. The volume `/var/lib/ztreamer` holds the index. In the embedded mode, it also holds the zakura state.
@@ -94,7 +96,7 @@ Restart ztreamerd after a certificate change. The Prometheus listener has no TLS
 | --- | --- | --- | --- |
 | `--log-filter` | `RUST_LOG` | `info` | Log filter, in `RUST_LOG` syntax. A directive that is not valid stops ztreamerd. |
 | `--log-format` | | `text` | `text` or `json`. A JSON event has the list of its spans. |
-| `--otlp-endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | | OTLP/gRPC collector, for example `http://localhost:4317`. ztreamerd sends its spans there. |
+| `--otlp-endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | | OTLP/gRPC collector, for example `http://localhost:4317`. ztreamerd sends its spans there. Needs a build with the `otlp` feature. |
 | `--otlp-filter` | | the log filter | Filter of the spans that ztreamerd sends to the collector. |
 
 The span resource has `service.name = ztreamerd` and `service.version`. With a subcommand, give these flags after the subcommand name.

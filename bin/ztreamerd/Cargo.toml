@@ -7,6 +7,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The trace export over OTLP/gRPC, for `--otlp-endpoint`.
+otlp = ["ztreamer-daemon/otlp"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5", features = ["derive", "env"] }

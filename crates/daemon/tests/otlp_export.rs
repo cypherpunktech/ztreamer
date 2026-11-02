@@ -1,6 +1,8 @@
 //! The trace export sends the spans of `tracing` to an OTLP/gRPC collector. This test installs
 //! the global subscriber, thus it is the only test in this binary.
 
+#![cfg(feature = "otlp")]
+
 use std::sync::{Arc, Mutex};
 
 use opentelemetry_proto::tonic::{
