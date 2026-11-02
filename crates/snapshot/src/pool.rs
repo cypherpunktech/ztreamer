@@ -5,7 +5,6 @@ use std::{array::TryFromSliceError, str::FromStr};
 use hex::{FromHex, FromHexError};
 use sapling_crypto::Node as SaplingNode;
 use serde::{Deserialize, Serialize};
-use serde_with::{hex::Hex, serde_as};
 use zakura_chain::{ironwood, orchard, sapling, subtree::NoteCommitmentSubtreeIndex};
 
 use ztreamer_chain::codec::{CodecError, Reader, put_count};
@@ -172,12 +171,11 @@ impl TryFrom<SubtreeRootJson> for SubtreeRoot {
 }
 
 /// The JSON form of a [`SubtreeRoot`], before serde checks the root bytes.
-#[serde_as]
 #[derive(Deserialize, Serialize)]
 struct SubtreeRootJson {
     pool: Pool,
     index: u16,
-    #[serde_as(as = "Hex")]
+    #[serde(with = "crate::json::hex_bytes")]
     root: NodeBytes,
 }
 

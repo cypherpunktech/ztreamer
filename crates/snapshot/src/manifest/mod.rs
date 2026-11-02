@@ -27,7 +27,6 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize, Serializer};
-use serde_with::{DisplayFromStr, serde_as};
 use zakura_chain::block;
 use ztreamer_chain::codec::RANGE_SIZE;
 
@@ -287,11 +286,10 @@ pub enum ManifestError {
 
 /// The JSON form of a [`Manifest`], before the rules are checked. It borrows a manifest to
 /// serialize it, and owns its fields after it deserializes.
-#[serde_as]
 #[derive(Deserialize, Serialize)]
 struct ManifestJson<'a> {
     network: Cow<'a, str>,
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde(with = "crate::json::display")]
     genesis_hash: block::Hash,
     sealed_through: u32,
     manifest_version: u32,
