@@ -7,22 +7,11 @@ benchmarks with `--test`. It checks that the workloads and their assertions pass
 it does not collect performance samples. Known documentation/site-only changes
 skip execution and leave an explanation in the job summary.
 
-Add the `benchmark` label to a pull request to request the separate **Benchmarks**
-workflow. It compares the PR merge revision against its base on the same runner.
-New commits rerun the comparison while the label is present; remove and re-add
-the label to request another comparison of the same commit. Unrelated label
-changes do not start comparisons. New eligible runs cancel older comparisons
-for the same PR. Removing the label prevents future comparisons, but does not
-cancel a comparison already running.
+Timing results from a GitHub hosted runner are not comparable between runs. To compare two
+revisions, run `just bench -- --save-baseline base` on the base revision and `just bench --
+--baseline base` on the candidate, on the same machine.
 
-Timing results are advisory. Empty/unrecognized output and report-generation
-failures are reported as unavailable or unclassified, rather than unchanged.
-A failed report or comment does not fail the comparison job; benchmark execution
-errors still do. Raw results remain in the `benchmark-results` artifact for 30
-days. Same-repository PRs also get a sticky comment; fork PRs use the job summary
-and artifact and remain subject to the repository's normal Actions approval.
-
-Branch protection should require `Bench`; `Benchmark comparison` is optional.
+Branch protection should require `Bench`.
 
 `scripts/benchmark-serving.sh` runs a native Rust/Tonic client against a running
 gRPC server. It measures RPC latency, range scaling, sustained concurrent
