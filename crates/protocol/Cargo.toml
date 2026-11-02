@@ -7,6 +7,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enables `EncodedCompactBlock::into_decoded` for the tests of other crates.
+test-utils = []
+
 [dependencies]
 prost = "0.14.4"
 tonic = "0.14.6"

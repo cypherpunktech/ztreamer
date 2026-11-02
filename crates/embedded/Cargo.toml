@@ -7,6 +7,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enables `NodeClient::subscribe_chain_tip` for the tests of other crates.
+test-utils = []
+
 [dependencies]
 sapling-crypto.workspace = true
 thiserror = "2"

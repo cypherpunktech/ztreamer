@@ -52,6 +52,7 @@ zakura-network.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
+ztreamer-embedded = { path = "../embedded", features = ["test-utils"] }
 ztreamer-import = { path = "../import", features = ["test-utils"] }
 ztreamer-index = { path = "../index", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
