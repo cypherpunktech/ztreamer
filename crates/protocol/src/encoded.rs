@@ -24,6 +24,7 @@ impl EncodedCompactBlock {
         Self(Repr::Encoded(bytes))
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn into_decoded(self) -> Result<proto::CompactBlock, DecodeError> {
         match self.0 {
             Repr::Encoded(bytes) => proto::CompactBlock::decode(bytes),

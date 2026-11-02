@@ -10,10 +10,10 @@ maxperf:
     cargo build --locked --profile maxperf -p ztreamerd
 
 test:
-    cargo test --workspace --locked
+    cargo test --workspace --all-features --locked
 
 clippy:
-    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 fmt:
     cargo +nightly fmt --all
@@ -22,7 +22,7 @@ fmt-check:
     cargo +nightly fmt --all -- --check
 
 doc:
-    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 
 # Everything CI checks before tests: fmt, clippy, docs.
 check: fmt-check clippy doc

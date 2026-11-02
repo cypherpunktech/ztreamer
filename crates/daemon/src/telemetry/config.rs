@@ -10,7 +10,7 @@ pub enum LogFormat {
     Json,
 }
 
-/// The trace export over OTLP/gRPC.
+/// The trace export over OTLP/gRPC. It needs the `otlp` feature of this crate.
 #[derive(Clone, Debug)]
 pub struct OtlpConfig {
     /// The OTLP/gRPC endpoint of the collector, for example `http://localhost:4317`.
@@ -40,6 +40,7 @@ pub struct TelemetryConfig {
     pub log_filter: String,
     /// The output format of the log.
     pub log_format: LogFormat,
-    /// The trace export. `None` exports no trace.
+    /// The trace export. `None` exports no trace. `Some` needs the `otlp` feature:
+    /// without it, [`init_telemetry`](crate::init_telemetry) fails.
     pub otlp: Option<OtlpConfig>,
 }

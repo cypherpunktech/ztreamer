@@ -20,7 +20,6 @@ hex = "0.4"
 sapling-crypto.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-serde_with = { version = "3", features = ["hex"] }
 thiserror = "2"
 zakura-chain.workspace = true
 ztreamer-chain = { path = "../chain" }

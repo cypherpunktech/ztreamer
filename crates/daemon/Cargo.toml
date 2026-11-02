@@ -8,15 +8,19 @@ description = "The ztreamer daemon: the node modes, the indexing, the head follo
 [lints]
 workspace = true
 
+[features]
+# The trace export over OTLP/gRPC. Off by default: it adds about 13 packages to the build.
+otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
+
 [dependencies]
 ed25519-zebra.workspace = true
 eyre = "0.6"
 getrandom = "0.4"
 http = "1"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = ["http-listener"] }
-opentelemetry = "0.33"
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "trace"] }
-opentelemetry_sdk = "0.33"
+opentelemetry = { version = "0.33", optional = true }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "trace"], optional = true }
+opentelemetry_sdk = { version = "0.33", optional = true }
 percent-encoding = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
@@ -24,7 +28,7 @@ tonic = { version = "0.14.6", features = ["tls-ring"] }
 tower-http = { version = "0.7", default-features = false, features = ["trace"] }
 tower-layer = "0.3"
 tracing = "0.1"
-tracing-opentelemetry = "0.34"
+tracing-opentelemetry = { version = "0.34", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
@@ -52,6 +56,7 @@ zakura-network.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
+ztreamer-embedded = { path = "../embedded", features = ["test-utils"] }
 ztreamer-import = { path = "../import", features = ["test-utils"] }
 ztreamer-index = { path = "../index", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }

@@ -27,6 +27,7 @@ criterion = "0.8"
 zakura-test.workspace = true
 # Enables `test_utils` for this crate's benches.
 ztreamer-chain = { path = ".", features = ["test-utils"] }
+ztreamer-protocol = { path = "../protocol", features = ["test-utils"] }
 
 [[bench]]
 name = "parser"

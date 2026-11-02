@@ -37,7 +37,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
-      - run: cargo clippy --workspace --all-targets --locked --profile ci-rust -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features --locked --profile ci-rust -- -D warnings
 
   doc:
     name: Rustdoc
@@ -51,7 +51,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
-      - run: cargo doc --workspace --no-deps --locked --profile ci-rust
+      - run: cargo doc --workspace --no-deps --all-features --locked --profile ci-rust
 
   test:
     name: Nextest
@@ -64,7 +64,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: taiki-e/install-action@nextest
       - run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
-      - run: cargo nextest run --workspace --locked --cargo-profile ci-rust
+      - run: cargo nextest run --workspace --all-features --locked --cargo-profile ci-rust
 
   # Imports the first range of the published snapshot. The test downloads it, thus a network
   # failure fails this job. Do not make it a required check.

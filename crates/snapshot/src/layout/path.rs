@@ -7,7 +7,7 @@
 use std::{fmt, path::PathBuf, str::FromStr};
 
 use chrono::{DateTime, NaiveDateTime, SubsecRound as _, Utc};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::manifest_entry::ManifestEntry;
 
@@ -26,9 +26,7 @@ use crate::manifest_entry::ManifestEntry;
 /// assert_eq!(path.to_string(), "manifests/2026-10-26T000000Z.json");
 /// assert_eq!("manifests/2026-10-26T000000Z.json".parse(), Ok(path));
 /// ```
-#[derive(
-    Clone, Copy, Debug, DeserializeFromStr, Eq, Hash, Ord, PartialEq, PartialOrd, SerializeDisplay,
-)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ManifestPath {
     published_at: DateTime<Utc>,
 }
@@ -86,6 +84,18 @@ impl FromStr for ManifestPath {
             .map(|time| Self { published_at: time.and_utc() })
             .map_err(|_| error())?;
         (manifest.to_string() == path).then_some(manifest).ok_or_else(error)
+    }
+}
+
+impl Serialize for ManifestPath {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::json::display::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ManifestPath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::json::display::deserialize(deserializer)
     }
 }
 

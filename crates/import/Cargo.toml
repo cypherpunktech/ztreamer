@@ -72,7 +72,6 @@ ztreamer-embedded = { path = "../embedded" }
 ztreamer-index = { path = "../index", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 ztreamer-replicator = { path = "../replicator" }
-ztreamer-service = { path = "../service", features = ["test-utils"] }
 ztreamer-snapshot = { path = "../snapshot", features = ["test-utils"] }
 ztreamer-sync = { path = "../sync" }
 

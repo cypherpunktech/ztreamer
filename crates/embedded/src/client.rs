@@ -150,6 +150,7 @@ impl NodeClient {
     }
 
     /// Returns an independent listener for best chain tip changes.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn subscribe_chain_tip(&self) -> ChainTipChange {
         self.services.chain_tip_change.clone()
     }
