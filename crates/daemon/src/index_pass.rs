@@ -36,11 +36,13 @@ impl<S: FinalizedBlockSource + Send + 'static> IndexPass<S> {
         let started = Instant::now();
         let stop = Arc::new(AtomicBool::new(false));
         let mut pass = tokio::task::spawn_blocking({
-            let stop = Arc::clone(&stop);
+            let (stop, span) = (Arc::clone(&stop), tracing::Span::current());
             move || {
-                HistoricalPipeline::new(&sync_index, &source, pipeline)?
-                    .with_stop(&stop)
-                    .sync_until_stable()
+                span.in_scope(|| {
+                    HistoricalPipeline::new(&sync_index, &source, pipeline)?
+                        .with_stop(&stop)
+                        .sync_until_stable()
+                })
             }
         });
         let state = tokio::select! {

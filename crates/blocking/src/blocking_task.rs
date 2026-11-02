@@ -3,6 +3,7 @@
 use std::panic;
 
 use tokio::task::JoinHandle;
+use tracing::Span;
 
 /// A closure that runs on the Tokio blocking thread pool.
 ///
@@ -24,13 +25,15 @@ pub struct BlockingTask<T>(JoinHandle<T>);
 pub struct BlockingTaskCancelled;
 
 impl<T: Send + 'static> BlockingTask<T> {
-    /// Starts `work` on the blocking thread pool of the current runtime.
+    /// Starts `work` on the blocking thread pool of the current runtime. `work` runs in the
+    /// current span of the caller.
     ///
     /// # Panics
     ///
     /// Panics if the caller is not in the context of a Tokio runtime.
     pub fn spawn(work: impl FnOnce() -> T + Send + 'static) -> Self {
-        Self(tokio::task::spawn_blocking(work))
+        let span = Span::current();
+        Self(tokio::task::spawn_blocking(move || span.in_scope(work)))
     }
 
     /// Waits for the result of the closure. If the closure panicked, the panic continues on
@@ -56,6 +59,7 @@ impl<U: Send + 'static, E: From<BlockingTaskCancelled> + Send + 'static>
 #[cfg(test)]
 mod tests {
     use tokio::runtime::{Builder, Runtime};
+    use ztreamer_chain::test_utils::capture_spans;
 
     use super::*;
 
@@ -66,6 +70,21 @@ mod tests {
     #[tokio::test]
     async fn join_gives_the_result_of_the_closure() {
         assert_eq!(BlockingTask::spawn(|| 7).join().await.unwrap(), 7);
+    }
+
+    #[test]
+    fn the_closure_runs_in_the_span_of_the_caller() {
+        let ((), lines) = capture_spans(|| {
+            let runtime = Builder::new_multi_thread().build().unwrap();
+            let _span = tracing::info_span!("test.caller").entered();
+            runtime
+                .block_on(async {
+                    BlockingTask::spawn(|| tracing::info!("blocking work")).join().await
+                })
+                .unwrap();
+        });
+        let event = lines.iter().find(|line| line["fields"]["message"] == "blocking work").unwrap();
+        assert_eq!(event["spans"][0]["name"], "test.caller");
     }
 
     #[tokio::test]

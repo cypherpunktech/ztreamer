@@ -73,10 +73,37 @@ Generated protobuf modules in `crates/protocol/src/lib.rs` carry a targeted
 
 ### Tracing
 
-- Instrument work items, not long-lived tasks. `skip(self)` on methods.
-- Levels: `trace` rare and verbose, `debug` sparingly, `info` default,
-  `warn` potential issues, `error` prevents operation.
-- Propagate spans across task boundaries with `Instrument`.
+- Make one root span for each unit of work: a request, a reconcile, a pass, an epoch, a
+  stage. A long-lived task or loop has no span. Each iteration that does work makes its
+  own root span.
+- Name a span `component.action`, in lower case: `grpc.request`, `head.reconcile`,
+  `pipeline.segment`. The OTel display name of an RPC span goes in `otel.name`.
+- Span levels: `info` for a root, at most about one each second in steady state. `debug`
+  for a step of a unit. `trace` for an item in a hot loop. A loop that fires each second
+  and usually does nothing makes a `debug` span, and makes the `info` span only when it
+  has work.
+- Event levels: `trace` rare and verbose, `debug` sparingly, `info` default, `warn`
+  potential issues, `error` prevents operation.
+- Fields: OTel keys for RPC and network (`rpc.system`, `rpc.method`,
+  `rpc.grpc.status_code`, `client.address`, `server.address`). Snake case for domain
+  fields: a height ends in `_height`, a count is a plain noun (`blocks`, `bytes`). `%` for
+  `Display`, `?` only for a type with no `Display`.
+- Declare each field that code records later as `tracing::field::Empty`. A record into a
+  field that is not declared has no effect and gives no error.
+- `#[instrument]` always has `name = "x.y"`, `level`, `skip_all` and `fields(k = v)`. A
+  bare `fields(k)` needs a later `record("k", ..)`.
+- A unit that fails records `otel.status_code = "ERROR"` and `otel.status_description` on
+  its span. Do not record `OK`. Log an error once, where the code handles it. No
+  `instrument(err)`.
+- Each spawn carries the span of the caller: `fut.instrument(span)` or
+  `fut.in_current_span()` for a future, and `span.in_scope(..)` in a blocking closure. A
+  span on a worker thread names its parent: `debug_span!(parent: &pass, ..)`.
+  `BlockingTask` carries the span itself.
+- Never hold `span.enter()` across `.await`. Clippy refuses it
+  (`await-holding-invalid-types` in `clippy.toml`).
+- Record a field that costs much only under `tracing::enabled!(Level::TRACE)`.
+- Never put a seed, a cookie or RPC credentials in a field.
+- Test spans with `ztreamer_chain::test_utils::capture_spans`.
 
 ### Metrics
 

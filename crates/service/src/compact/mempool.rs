@@ -6,6 +6,7 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
+use tracing::{Instrument, Span};
 use zakura_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction},
@@ -36,7 +37,7 @@ impl CompactService {
         };
         let mut transactions = backend.mempool_transactions().await?;
         let (sender, receiver) = mpsc::channel(1);
-        tokio::spawn(async move {
+        let producer = async move {
             // The stream ends when the head follower publishes a new visible tip. While the head
             // is stale or in deep reorg recovery, no new tip comes. Thus the stream fails.
             let tip_changed = async move {
@@ -100,7 +101,8 @@ impl CompactService {
                     }
                 };
             }
-        });
+        };
+        tokio::spawn(producer.in_current_span());
         Ok(Box::pin(ReceiverStream::new(receiver)))
     }
 
@@ -110,9 +112,12 @@ impl CompactService {
     ) -> Result<RpcStream<proto::CompactTx>, Status> {
         PoolSelection::from_mempool_request(&request.pool_types)?;
         let transactions = self.backend.mempool_transactions().await?;
-        let compact = tokio::task::spawn_blocking(move || mempool_compact(transactions, &request))
-            .await
-            .map_err(|error| Status::internal(format!("mempool conversion failed: {error}")))??;
+        let span = Span::current();
+        let compact = tokio::task::spawn_blocking(move || {
+            span.in_scope(|| mempool_compact(transactions, &request))
+        })
+        .await
+        .map_err(|error| Status::internal(format!("mempool conversion failed: {error}")))??;
         Ok(Box::pin(tokio_stream::iter(compact.into_iter().map(Ok))))
     }
 }

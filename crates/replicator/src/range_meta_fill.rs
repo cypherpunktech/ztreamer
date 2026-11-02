@@ -245,8 +245,8 @@ impl RangeMetaFiller {
         &self,
         read: impl FnOnce(&Index) -> Result<T, FillError> + Send + 'static,
     ) -> Result<T, FillError> {
-        let index = Arc::clone(&self.index);
-        self.reads.spawn_blocking(move || read(&index)).await?
+        let (index, span) = (Arc::clone(&self.index), tracing::Span::current());
+        self.reads.spawn_blocking(move || span.in_scope(|| read(&index))).await?
     }
 }
 

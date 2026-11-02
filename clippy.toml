@@ -1,2 +1,4 @@
 too-large-for-stack = 128
 large-error-threshold = 256
+# A span guard held across `.await` puts the events of other tasks into the span.
+await-holding-invalid-types = ["tracing::span::Entered", "tracing::span::EnteredSpan"]

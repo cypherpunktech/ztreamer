@@ -112,8 +112,8 @@ pub(crate) struct IndexTip(Option<BlockId>);
 impl IndexTip {
     /// Reads the durable tip of `index` on a blocking thread.
     pub(crate) async fn read(index: &Arc<Index>) -> Result<Self> {
-        let index = Arc::clone(index);
-        let state = tokio::task::spawn_blocking(move || index.state())
+        let (index, span) = (Arc::clone(index), tracing::Span::current());
+        let state = tokio::task::spawn_blocking(move || span.in_scope(|| index.state()))
             .await
             .wrap_err("index state task panicked")??;
         Ok(Self(state.durable_tip()))

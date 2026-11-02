@@ -7,6 +7,7 @@ use tokio::{
     runtime::Handle,
     task::{JoinError, JoinHandle},
 };
+use tracing::Instrument;
 use zakura_chain::block::{self, Height};
 use zakura_state::HashOrHeight;
 
@@ -199,9 +200,14 @@ impl<'a> BlockRequests<'a> {
             && let Some(height) = self.heights.next()
         {
             let node = self.source.node.clone();
-            let request = self.source.runtime.spawn(async move {
-                node.get_block_raw(HashOrHeight::Height(Height(height))).await.map(|bytes| bytes.0)
-            });
+            let request = self.source.runtime.spawn(
+                async move {
+                    node.get_block_raw(HashOrHeight::Height(Height(height)))
+                        .await
+                        .map(|bytes| bytes.0)
+                }
+                .in_current_span(),
+            );
             self.pending.push_back((height, request));
         }
     }

@@ -10,17 +10,20 @@ workspace = true
 
 [features]
 # Shared test and benchmark fixtures in `ztreamer_chain::test_utils`.
-test-utils = ["dep:zakura-test"]
+test-utils = ["dep:serde_json", "dep:tracing-subscriber", "dep:zakura-test"]
 
 [dependencies]
 prost = "0.14.4"
+serde_json = { version = "1", optional = true }
 thiserror = "2"
+tracing-subscriber = { version = "0.3", optional = true, features = ["json"] }
 zakura-chain.workspace = true
 zakura-test = { workspace = true, optional = true }
 ztreamer-protocol = { path = "../protocol" }
 
 [dev-dependencies]
 criterion = "0.8"
+tracing = "0.1"
 zakura-test.workspace = true
 # Enables `test_utils` for this crate's benches.
 ztreamer-chain = { path = ".", features = ["test-utils"] }

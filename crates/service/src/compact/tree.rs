@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
+use tracing::Span;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
 use ztreamer_protocol::proto;
 
@@ -44,7 +45,9 @@ impl CompactService {
     ) -> RpcStream<proto::SubtreeRoot> {
         let index = Arc::clone(&self.index);
         let (sender, receiver) = mpsc::channel(1);
+        let span = Span::current();
         tokio::task::spawn_blocking(move || {
+            let _span = span.entered();
             for (root_hash, height) in roots {
                 let block = match snapshot.volatile(height) {
                     Some(block) => block.clone(),

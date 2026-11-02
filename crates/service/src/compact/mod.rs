@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Semaphore, watch};
 use tonic::Status;
+use tracing::Span;
 use zakura_chain::{
     block,
     parameters::{ConsensusBranchId, NetworkUpgrade},
@@ -136,17 +137,22 @@ impl CompactService {
         }
         let index = Arc::clone(&self.index);
         let generation = snapshot.generation;
+        let span = Span::current();
         let lookup = if request.hash.is_empty() {
             let height = u32::try_from(request.height)
                 .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
-            tokio::task::spawn_blocking(move || index.snapshot(generation)?.block(height).map(Some))
+            tokio::task::spawn_blocking(move || {
+                span.in_scope(|| index.snapshot(generation)?.block(height).map(Some))
+            })
         } else {
             let hash = request
                 .hash
                 .try_into()
                 .map(block::Hash)
                 .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            tokio::task::spawn_blocking(move || index.snapshot(generation)?.block_by_hash(hash))
+            tokio::task::spawn_blocking(move || {
+                span.in_scope(|| index.snapshot(generation)?.block_by_hash(hash))
+            })
         };
         lookup
             .await

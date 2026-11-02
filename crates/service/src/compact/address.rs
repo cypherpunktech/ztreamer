@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
+use tracing::Instrument;
 use zakura_chain::{block, transparent};
 use ztreamer_protocol::proto;
 
@@ -44,7 +45,7 @@ impl CompactService {
 
         let service = self.clone();
         let (sender, receiver) = mpsc::channel(1);
-        tokio::spawn(async move {
+        let producer = async move {
             for hash in transactions {
                 match service.mined_transaction(hash).await {
                     Ok(Some(transaction)) => {
@@ -66,7 +67,8 @@ impl CompactService {
                     }
                 }
             }
-        });
+        };
+        tokio::spawn(producer.in_current_span());
         Ok(Box::pin(ReceiverStream::new(receiver)))
     }
 

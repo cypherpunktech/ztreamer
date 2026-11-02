@@ -19,6 +19,7 @@ tempfile = { version = "3", optional = true }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-stream = "0.1"
 tonic = "0.14.6"
+tracing = "0.1"
 zakura-chain.workspace = true
 ztreamer-backend = { path = "../backend" }
 ztreamer-chain = { path = "../chain" }

@@ -122,8 +122,8 @@ impl Replica {
             .await
             .wrap_err("check the chain of the remote zakura node")?;
         let sealed = {
-            let index = Arc::clone(index);
-            tokio::task::spawn_blocking(move || index.state())
+            let (index, span) = (Arc::clone(index), tracing::Span::current());
+            tokio::task::spawn_blocking(move || span.in_scope(|| index.state()))
                 .await
                 .wrap_err("index state task panicked")??
                 .sealed_through()

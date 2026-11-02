@@ -83,8 +83,8 @@ impl ReplicatorService {
         &self,
         read: impl FnOnce(&Index) -> Result<T, IndexError> + Send + 'static,
     ) -> Result<T, Status> {
-        let index = Arc::clone(&self.index);
-        tokio::task::spawn_blocking(move || read(&index))
+        let (index, span) = (Arc::clone(&self.index), tracing::Span::current());
+        tokio::task::spawn_blocking(move || span.in_scope(|| read(&index)))
             .await
             .map_err(|error| Status::internal(format!("index read task failed: {error}")))?
             .map_err(Status::from)
