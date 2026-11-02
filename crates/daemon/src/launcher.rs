@@ -12,7 +12,6 @@ use std::{ops::ControlFlow, sync::Arc};
 
 use eyre::{Result, WrapErr};
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
@@ -27,16 +26,17 @@ use crate::{
     lifecycle::{Supervisor, TaskSet},
     node::{HistoricalSource, IndexTip, Node, NodeComponents, StageContext, Tail},
     tasks::{FillerTask, GrpcTask, HeadFollowerTask, TASK_STOPPED},
+    telemetry::GrpcServer,
 };
 
 /// Runs a node through the stages of the daemon, with one configuration and one gRPC server.
 pub(crate) struct Launcher {
     config: DaemonConfig,
-    grpc_server: Server,
+    grpc_server: GrpcServer,
 }
 
 impl Launcher {
-    pub(crate) const fn new(config: DaemonConfig, grpc_server: Server) -> Self {
+    pub(crate) const fn new(config: DaemonConfig, grpc_server: GrpcServer) -> Self {
         Self { config, grpc_server }
     }
 

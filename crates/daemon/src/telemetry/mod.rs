@@ -6,12 +6,14 @@
 //! the log filter.
 
 mod config;
+mod grpc;
 mod otlp;
 
 use eyre::{Result, WrapErr};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub use self::config::{LogFormat, OtlpConfig, TelemetryConfig};
+pub(crate) use self::grpc::{GrpcRouter, GrpcServer, GrpcSpan};
 use self::otlp::OtlpExport;
 
 /// Holds the trace export. On drop, it sends the spans that wait. Keep it in a local of

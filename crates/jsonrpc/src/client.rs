@@ -17,6 +17,7 @@ use http::{
 use http_body_util::{BodyExt as _, Full};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use tracing::{Instrument, Span, field::Empty};
 
 use crate::{Auth, HttpsClient, RpcError, envelope};
 
@@ -238,8 +239,37 @@ impl RpcClient {
             .map_err(|source| RpcError::Decode { method: method.to_owned(), source })
     }
 
-    /// Calls `method` and returns the raw `result` value.
+    /// Calls `method` and returns the raw `result` value, in an `rpc.call` span.
     async fn call_value(
+        &self,
+        method: &str,
+        params: Value,
+        retries: Retries,
+    ) -> Result<Value, RpcError> {
+        let uri = &self.inner.uri;
+        let span = tracing::debug_span!(
+            "rpc.call",
+            otel.name = method,
+            otel.kind = "client",
+            rpc.system = "jsonrpc",
+            rpc.method = method,
+            server.address = uri.host(),
+            server.port = uri.port_u16(),
+            rpc.jsonrpc.request_id = Empty,
+            retries = Empty,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let result = self.attempts(method, params, retries).instrument(span.clone()).await;
+        if let Err(error) = &result {
+            span.record("otel.status_code", "ERROR");
+            span.record("otel.status_description", tracing::field::display(error));
+        }
+        result
+    }
+
+    /// Sends `method` until it succeeds, or until `retries` and the retry policy stop it.
+    async fn attempts(
         &self,
         method: &str,
         params: Value,
@@ -252,6 +282,7 @@ impl RpcClient {
         let mut reloaded_cookie = false;
         loop {
             let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+            Span::current().record("rpc.jsonrpc.request_id", id);
             let body = serde_json::to_vec(&envelope::Request::new(id, method, params.clone()))
                 .map_err(|error| RpcError::Protocol {
                     method: method.to_owned(),
@@ -286,6 +317,7 @@ impl RpcClient {
             if retry && retry_count < max_retries {
                 let wait = self.inner.retry.backoff(retry_count);
                 retry_count += 1;
+                Span::current().record("retries", retry_count);
                 tracing::debug!(
                     method,
                     retry = retry_count,
@@ -397,6 +429,8 @@ fn preview(body: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use ztreamer_chain::test_utils::{capture_spans, closed_spans};
+
     use super::*;
 
     fn config(url: &'static str) -> RpcConfig {
@@ -421,6 +455,31 @@ mod tests {
         .unwrap();
         assert_eq!(client.timeout_for("getblock"), Duration::from_secs(15));
         assert_eq!(client.timeout_for("z_gettreestate"), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_call_has_a_span_with_its_attempts_and_error() {
+        let retry = RetryPolicy {
+            max_retries: 1,
+            initial_backoff: Duration::from_millis(1),
+            max_backoff: Duration::from_millis(1),
+        };
+        // Port 1 refuses the connection, thus each attempt fails before it sends.
+        let client = RpcClient::new(config("http://127.0.0.1:1").with_retry(retry)).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let (result, lines) =
+            capture_spans(|| runtime.block_on(client.call::<_, Value>("getblockcount", ())));
+        assert!(result.is_err());
+
+        let span = closed_spans(&lines, "rpc.call").next().unwrap();
+        assert_eq!(span["otel.kind"], "client");
+        assert_eq!(span["rpc.system"], "jsonrpc");
+        assert_eq!(span["rpc.method"], "getblockcount");
+        assert_eq!(span["server.address"], "127.0.0.1");
+        assert_eq!(span["server.port"], 1);
+        assert_eq!(span["rpc.jsonrpc.request_id"], 2);
+        assert_eq!(span["retries"], 1);
+        assert_eq!(span["otel.status_code"], "ERROR");
     }
 
     #[test]

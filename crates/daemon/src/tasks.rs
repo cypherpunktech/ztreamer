@@ -6,13 +6,14 @@ use std::{net::SocketAddr, pin::pin};
 use eyre::{Result, WrapErr};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::server::Router;
 use tracing::info;
 use ztreamer_replicator::RangeMetaFiller;
 use ztreamer_sync::{
     head::{CanonicalBlockSource, HeadFollower, HeadFollowerConfig, ServingSnapshot},
     pipeline::PipelineConfig,
 };
+
+use crate::telemetry::GrpcRouter;
 
 /// The error when a server task stops before shutdown.
 pub(crate) const TASK_STOPPED: &str = "daemon task stopped unexpectedly";
@@ -43,7 +44,7 @@ impl<S: CanonicalBlockSource> HeadFollowerTask<S> {
 
 /// The gRPC server of CompactTxStreamer and Replicator on one listener.
 pub(crate) struct GrpcTask {
-    pub(crate) router: Router,
+    pub(crate) router: GrpcRouter,
     pub(crate) address: SocketAddr,
     /// The router has a TLS identity. Only the log uses it.
     pub(crate) tls: bool,

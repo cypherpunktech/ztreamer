@@ -21,7 +21,7 @@ static CAPTURE: LazyLock<Capture> = LazyLock::new(|| {
     tracing_subscriber::fmt()
         .json()
         .with_span_list(true)
-        .with_current_span(false)
+        .with_current_span(true)
         .with_span_events(FmtSpan::CLOSE)
         .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .with_writer(SharedOutput(Arc::clone(&output)))
@@ -31,21 +31,26 @@ static CAPTURE: LazyLock<Capture> = LazyLock::new(|| {
 });
 
 /// Runs `run`, and returns its result and each JSON line that the global test subscriber wrote
-/// meanwhile. A line is an event, or the close of a span (`"message": "close"`, with the span
-/// as the last entry of `"spans"`).
+/// meanwhile. A line is an event, or the close of a span. An event has its spans in `"spans"`,
+/// from the root. A close has the span in `"span"`, with its last fields, and the parents of the
+/// span in `"spans"`. [`closed_spans`] finds the closes.
 ///
 /// Other tests of the same binary can write lines at the same time. Find the lines of a test by
 /// the names of its spans or by the messages of its events.
 ///
 /// ```
-/// use ztreamer_chain::test_utils::capture_spans;
+/// use ztreamer_chain::test_utils::{capture_spans, closed_spans};
 ///
 /// let ((), lines) = capture_spans(|| {
-///     tracing::info_span!("test.work", blocks = 3).in_scope(|| tracing::info!("done"));
+///     let span = tracing::info_span!("test.work", blocks = 3, done = tracing::field::Empty);
+///     span.in_scope(|| tracing::info!("work done"));
+///     span.record("done", true);
 /// });
-/// let event = lines.iter().find(|line| line["fields"]["message"] == "done").unwrap();
+/// let event = lines.iter().find(|line| line["fields"]["message"] == "work done").unwrap();
 /// assert_eq!(event["spans"][0]["name"], "test.work");
-/// assert_eq!(event["spans"][0]["blocks"], 3);
+/// let work: Vec<_> = closed_spans(&lines, "test.work").collect();
+/// assert_eq!(work[0]["blocks"], 3);
+/// assert_eq!(work[0]["done"], true);
 /// ```
 pub fn capture_spans<T>(run: impl FnOnce() -> T) -> (T, Vec<Value>) {
     let capture = &*CAPTURE;
@@ -58,6 +63,16 @@ pub fn capture_spans<T>(run: impl FnOnce() -> T) -> (T, Vec<Value>) {
         .map(|line| serde_json::from_slice(line).expect("the test subscriber writes JSON lines"))
         .collect();
     (result, lines)
+}
+
+/// The spans named `name` that closed in `lines`, with their last fields, in the order that they
+/// closed.
+pub fn closed_spans<'a>(lines: &'a [Value], name: &str) -> impl Iterator<Item = &'a Value> {
+    lines
+        .iter()
+        .filter(|line| line["fields"]["message"] == "close")
+        .map(|line| &line["span"])
+        .filter(move |span| span["name"] == name)
 }
 
 fn lock(output: &Mutex<Vec<u8>>) -> MutexGuard<'_, Vec<u8>> {

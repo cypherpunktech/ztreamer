@@ -11,7 +11,10 @@ use zakura_chain::parameters::Network;
 use ztreamer_index::index::Index;
 use ztreamer_sync::pipeline::PipelineConfig;
 
-use crate::remote::RemoteConfig;
+use crate::{
+    remote::RemoteConfig,
+    telemetry::{GrpcServer, GrpcSpan},
+};
 
 /// The configuration of the daemon.
 #[derive(Debug)]
@@ -93,20 +96,23 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    /// The gRPC server, with the TLS identity of [`Self::tls`] if it is set. Reads the TLS files.
-    pub(crate) fn grpc_server(&self) -> Result<Server> {
+    /// The gRPC server, with the TLS identity of [`Self::tls`] if it is set, and a
+    /// `grpc.request` span for each request. Reads the TLS files.
+    pub(crate) fn grpc_server(&self) -> Result<GrpcServer> {
         let server = Server::builder();
-        let Some(TlsFiles { cert: cert_path, key: key_path }) = &self.tls else {
-            return Ok(server);
+        let server = match &self.tls {
+            None => server,
+            Some(TlsFiles { cert: cert_path, key: key_path }) => {
+                let cert = std::fs::read(cert_path)
+                    .wrap_err_with(|| format!("read TLS certificate {}", cert_path.display()))?;
+                let key = std::fs::read(key_path)
+                    .wrap_err_with(|| format!("read TLS private key {}", key_path.display()))?;
+                server
+                    .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
+                    .wrap_err("configure gRPC TLS")?
+            }
         };
-
-        let cert = std::fs::read(cert_path)
-            .wrap_err_with(|| format!("read TLS certificate {}", cert_path.display()))?;
-        let key = std::fs::read(key_path)
-            .wrap_err_with(|| format!("read TLS private key {}", key_path.display()))?;
-        server
-            .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
-            .wrap_err("configure gRPC TLS")
+        Ok(server.layer(GrpcSpan::layer()))
     }
 }
 
