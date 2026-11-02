@@ -8,8 +8,9 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use tracing::warn;
+use zeroize::Zeroizing;
 use ztreamer_index::index::{Index, IndexError};
 use ztreamer_snapshot::manifest_entry::{BlobMismatch, ManifestEntry};
 
@@ -32,17 +33,18 @@ use ztreamer_snapshot::{
 /// The writer never replaces a manifest. Each manifest has a new name. The writer writes it,
 /// then `latest.json`, which points at it.
 ///
-/// The `Debug` output shows only the verifying key: `SigningKey` does not show its secret key.
+/// The writer zeroes the key on drop. The `Debug` output shows only the verification key:
+/// `SigningKey` does not show its secret key.
 #[derive(Debug)]
 pub struct SnapshotWriter {
     root: PathBuf,
-    key: SigningKey,
+    key: Zeroizing<SigningKey>,
 }
 
 impl SnapshotWriter {
     /// A writer for the snapshot directory at `root`, which signs with `key`.
     pub fn new(root: impl Into<PathBuf>, key: SigningKey) -> Self {
-        Self { root: root.into(), key }
+        Self { root: root.into(), key: Zeroizing::new(key) }
     }
 
     /// Writes the range files of `manifest` from `index`. Then it writes `manifest` and its

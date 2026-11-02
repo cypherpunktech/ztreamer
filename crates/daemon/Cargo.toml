@@ -13,7 +13,7 @@ workspace = true
 otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
 
 [dependencies]
-ed25519-dalek.workspace = true
+ed25519-zebra.workspace = true
 eyre = "0.6"
 getrandom = "0.4"
 http = "1"

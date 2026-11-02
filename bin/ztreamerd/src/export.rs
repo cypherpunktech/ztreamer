@@ -14,7 +14,7 @@ use std::{
 };
 
 use chrono::Utc;
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use eyre::{Result, WrapErr, ensure};
 use zakura_chain::parameters::Network;
 use zeroize::Zeroizing;
@@ -49,15 +49,15 @@ impl ExportArgs {
             "the index has genesis {}, not the genesis of {network}",
             identity.genesis_hash
         );
-        let writer = SnapshotWriter::new(self.out, signer.0);
+        let writer = SnapshotWriter::new(self.out, *signer.0);
         SnapshotExport::run(index, &network, Utc::now(), &writer)?.log();
         Ok(())
     }
 }
 
-/// The Ed25519 key that signs the manifest and `latest.json`.
+/// The Ed25519 key that signs the manifest and `latest.json`. It zeroes the key on drop.
 #[derive(Debug)]
-struct Signer(SigningKey);
+struct Signer(Zeroizing<SigningKey>);
 
 impl Signer {
     /// Reads a key file that holds the raw 32-byte seed. The seed goes straight into a buffer
@@ -69,7 +69,7 @@ impl Signer {
         ensure!(len == 32, "signing key {} has {len} bytes, not a 32-byte seed", path.display());
         let mut seed = Zeroizing::new([0; 32]);
         file.read_exact(seed.as_mut()).wrap_err_with(read)?;
-        Ok(Self(SigningKey::from_bytes(&seed)))
+        Ok(Self(Zeroizing::new(SigningKey::from_bytes(&seed))))
     }
 }
 

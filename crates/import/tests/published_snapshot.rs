@@ -7,7 +7,7 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
-use ed25519_dalek::VerifyingKey;
+use ed25519_zebra::VerificationKey;
 use http::{StatusCode, Uri};
 use serde_json::json;
 use tokio::sync::watch;
@@ -33,7 +33,7 @@ const END_HASH: &str = "0000000aeb86e32aeb49ef9e40bfbd69585bd67ebd62d535e7e728ed
 #[tokio::test]
 #[ignore = "reads https://snapshot.ztreamer.sh"]
 async fn the_published_snapshot_verifies_with_the_production_key_and_obeys_the_rules() {
-    let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
+    let key = VerificationKey::try_from(SNAPSHOT_PUBKEY).unwrap();
     let base = Uri::from_static("https://snapshot.ztreamer.sh/mainnet");
     let source = HttpSource::new(base, key).unwrap();
 
@@ -93,7 +93,7 @@ async fn the_first_published_range_imports_and_verifies() {
         sampler: Arc::new(JsonRpcSampler::new(zakura)),
         id: NodeId { url: node.url().to_string(), version: "recorded".to_owned() },
     };
-    let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
+    let key = VerificationKey::try_from(SNAPSHOT_PUBKEY).unwrap();
     let base = Uri::from_static("https://snapshot.ztreamer.sh/mainnet");
     let source = FirstRange(HttpSource::new(base, key).unwrap());
     let dir = tempfile::tempdir().unwrap();

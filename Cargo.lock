@@ -734,23 +734,7 @@ dependencies = [
  "cpufeatures 0.2.17",
  "curve25519-dalek-derive",
  "digest 0.10.7",
- "fiat-crypto 0.2.9",
- "rustc_version",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
- "curve25519-dalek-derive",
- "digest 0.11.3",
- "fiat-crypto 0.3.0",
+ "fiat-crypto",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -838,29 +822,7 @@ checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
  "serde",
- "signature 2.2.0",
-]
-
-[[package]]
-name = "ed25519"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
-dependencies = [
- "signature 3.0.0",
-]
-
-[[package]]
-name = "ed25519-dalek"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
-dependencies = [
- "curve25519-dalek 5.0.0",
- "ed25519 3.0.0",
- "sha2 0.11.1",
- "subtle",
- "zeroize",
+ "signature",
 ]
 
 [[package]]
@@ -869,8 +831,8 @@ version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775765289f7c6336c18d3d66127527820dd45ffd9eb3b6b8ee4708590e6c20f5"
 dependencies = [
- "curve25519-dalek 4.1.3",
- "ed25519 2.2.3",
+ "curve25519-dalek",
+ "ed25519",
  "hashbrown 0.16.1",
  "pkcs8",
  "rand_core 0.6.4",
@@ -957,12 +919,6 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
-
-[[package]]
-name = "fiat-crypto"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "find-msvc-tools"
@@ -2812,12 +2768,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signature"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
-
-[[package]]
 name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4243,7 +4193,7 @@ version = "0.1.0"
 source = "git+https://github.com/zakura-core/zakura.git?tag=v1.7.0#c572f8faf88e58dcaefd80ec8e4ed05f2d8643b6"
 dependencies = [
  "bytes",
- "curve25519-dalek 4.1.3",
+ "curve25519-dalek",
  "ed25519-zebra",
  "futures",
  "hex",
@@ -4659,7 +4609,7 @@ name = "ztreamer-daemon"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "ed25519-dalek",
+ "ed25519-zebra",
  "eyre",
  "getrandom 0.4.3",
  "http",
@@ -4733,7 +4683,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
- "ed25519-dalek",
+ "ed25519-zebra",
  "futures-util",
  "hex",
  "http",
@@ -4879,7 +4829,7 @@ name = "ztreamer-replicator"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "ed25519-dalek",
+ "ed25519-zebra",
  "hex",
  "prost",
  "serde_json",
@@ -4891,6 +4841,7 @@ dependencies = [
  "tonic",
  "tracing",
  "zakura-chain",
+ "zeroize",
  "ztreamer-backend",
  "ztreamer-chain",
  "ztreamer-index",
@@ -4934,7 +4885,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "chrono",
- "ed25519-dalek",
+ "ed25519-zebra",
  "hex",
  "serde",
  "serde_json",
@@ -4970,7 +4921,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
- "ed25519-dalek",
+ "ed25519-zebra",
  "eyre",
  "serde_json",
  "tempfile",

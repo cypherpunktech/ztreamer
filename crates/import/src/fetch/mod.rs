@@ -26,7 +26,7 @@ use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use ed25519_dalek::VerifyingKey;
+use ed25519_zebra::VerificationKey;
 use http::{Request, StatusCode, Uri, header::RANGE};
 use http_body_util::{BodyExt as _, Empty};
 use tokio::sync::Semaphore;
@@ -239,10 +239,10 @@ impl FetchError {
 /// Reads complete blobs from a source, and checks the length and the digest of each blob.
 ///
 /// ```no_run
-/// use ed25519_dalek::VerifyingKey;
+/// use ed25519_zebra::VerificationKey;
 /// use ztreamer_import::fetch::{FetchError, Fetcher, HttpSource};
 ///
-/// # async fn run(key: VerifyingKey) -> Result<(), FetchError> {
+/// # async fn run(key: VerificationKey) -> Result<(), FetchError> {
 /// let source = HttpSource::new("https://snapshots.example/mainnet".parse().unwrap(), key)?;
 /// let fetcher = Fetcher::new(Box::new(source));
 /// let manifest = fetcher.manifest().await?;
@@ -416,7 +416,7 @@ type HttpClient = HttpsClient<Empty<Bytes>>;
 #[derive(Clone)]
 pub struct HttpSource {
     base: String,
-    key: VerifyingKey,
+    key: VerificationKey,
     client: HttpClient,
     blob_requests: RequestLimit,
 }
@@ -430,7 +430,7 @@ impl fmt::Debug for HttpSource {
 
 impl HttpSource {
     /// A source below `base` whose files `key` signs. It does not contact the server.
-    pub fn new(base: Uri, key: VerifyingKey) -> Result<Self, FetchError> {
+    pub fn new(base: Uri, key: VerificationKey) -> Result<Self, FetchError> {
         let client = HttpClient::new(None)?;
         let base = base.to_string().trim_end_matches('/').to_owned();
         let blob_requests = RequestLimit::new(HTTP_BLOB_REQUESTS);

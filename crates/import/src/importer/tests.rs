@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use tempfile::TempDir;
 use tokio::sync::Notify;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
@@ -146,7 +146,7 @@ impl Import {
     }
 
     fn importer(&self, attestor: Arc<FakeAttestor>, network: Network) -> Importer {
-        let key = SigningKey::from_bytes(&SEED).verifying_key();
+        let key = SigningKey::from_bytes(&SEED).verification_key();
         let source = HttpSource::new(self.server.base.clone(), key).unwrap();
         self.importer_with_source(Box::new(source), attestor, network)
     }

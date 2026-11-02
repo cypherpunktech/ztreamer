@@ -14,7 +14,7 @@ test-utils = ["ztreamer-chain/test-utils", "ztreamer-index/test-utils", "ztreame
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-ed25519-dalek.workspace = true
+ed25519-zebra.workspace = true
 prost = "0.14.4"
 serde_json = "1"
 thiserror = "2"
@@ -23,6 +23,7 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 tonic = "0.14.6"
 tracing = "0.1"
+zeroize = "1"
 zakura-chain.workspace = true
 ztreamer-backend = { path = "../backend" }
 ztreamer-chain = { path = "../chain" }

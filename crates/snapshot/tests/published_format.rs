@@ -12,7 +12,7 @@
 //! The tests read each fixture and write it again. The bytes must not change: replicas read
 //! the published files, and the signatures cover their exact bytes.
 
-use ed25519_dalek::VerifyingKey;
+use ed25519_zebra::VerificationKey;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use ztreamer_snapshot::{
@@ -35,7 +35,7 @@ struct LatestObject<'a> {
 
 #[test]
 fn the_published_latest_verifies_and_writes_the_same_bytes() {
-    let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
+    let key = VerificationKey::try_from(SNAPSHOT_PUBKEY).unwrap();
 
     let latest = ManifestPointer::from_signed_json(LATEST, &key).unwrap();
 
