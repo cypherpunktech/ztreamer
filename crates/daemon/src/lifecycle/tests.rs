@@ -194,7 +194,7 @@ fn task_errors_come_in_start_order() {
             .any(|line| line["fields"]["message"] == message && line["fields"][key] == value)
     };
     assert!(event("shutting down node and application", "cause", "second"));
-    assert!(event("a second error stopped the daemon", "error", "second failed"));
+    assert!(event("the daemon also failed with this error", "error", "second failed"));
 }
 
 #[tokio::test]

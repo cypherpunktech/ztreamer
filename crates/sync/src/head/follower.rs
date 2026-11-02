@@ -188,7 +188,7 @@ impl HeadFollower {
                 if self.snapshot().ready {
                     match self.sync_head(&mut source, pipeline).await {
                         Err(HeadSyncError::DeepReorg { height }) => {
-                            warn!(height, "deep reorg below the volatile head; recovering");
+                            warn!(height, "deep reorg below the volatile head, recovery starts");
                             self.recover_deep_reorg(&mut source, pipeline).await
                         }
                         result => result,
@@ -226,7 +226,7 @@ impl HeadFollower {
                     if std::mem::replace(&mut failing, true) {
                         debug!(%error, "head source still fails");
                     } else {
-                        warn!(%error, "head source failed; retrying");
+                        warn!(%error, "head source failed, the follower tries again");
                     }
                     self.mark_source_failure(error, config.freshness_timeout);
                 }

@@ -147,7 +147,7 @@ impl Supervisor {
                 .map_or(Ok(()), |Started { unexpected_stop, .. }| Err(eyre!(unexpected_stop)));
         };
         errors.for_each(|error| {
-            error!(error = format!("{error:#}"), "a second error stopped the daemon")
+            error!(error = format!("{error:#}"), "the daemon also failed with this error")
         });
         Err(first)
     }
