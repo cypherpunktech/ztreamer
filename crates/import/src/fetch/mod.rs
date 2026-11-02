@@ -277,9 +277,16 @@ impl Fetcher {
     /// byte of the entry does not resume: the digest check decides. A blob with a wrong length
     /// or digest is [`FetchError::Digest`]. The stream of a failed transfer is dropped before
     /// the next request, thus the source can release its place before the resume.
+    #[tracing::instrument(
+        name = "import.fetch_range",
+        level = "debug",
+        skip_all,
+        fields(start_height = entry.start_height, bytes = entry.blob_len, resumes = 0)
+    )]
     pub async fn blob(&self, entry: &ManifestEntry) -> Result<Bytes, FetchError> {
         let mut blob = BytesMut::new();
         let mut stalled = StalledResumes::from(self.resume_rule);
+        let mut resumes = 0_u32;
         loop {
             let offset = blob.len();
             let Err(error) = self.transfer(entry, &mut blob).await else {
@@ -298,6 +305,8 @@ impl Fetcher {
             let (start_height, offset, error) =
                 (entry.start_height, blob.len(), ErrorChain(&error));
             warn!(%error, start_height, offset, received, ?wait, "range transfer stopped; resuming");
+            resumes += 1;
+            tracing::Span::current().record("resumes", resumes);
             if let Some(wait) = wait {
                 tokio::time::sleep(wait).await;
             }

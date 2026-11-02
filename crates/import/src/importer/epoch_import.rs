@@ -9,7 +9,7 @@ use std::{
 use bytes::Bytes;
 use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
-use tracing::Span;
+use tracing::{Span, field::Empty};
 use ztreamer_blocking::BlockingTask;
 use ztreamer_index::index::{
     CheckedRange, IndexState,
@@ -95,9 +95,18 @@ impl EpochImport {
         }
     }
 
-    /// The span of the work on the epoch at `at`.
+    /// The span of the work on the epoch at `at`, from its fetch to its install.
     pub(crate) fn epoch_span(&self, at: usize) -> Span {
-        tracing::debug_span!("import_epoch", end_height = self.manifest_epoch(at).end_height())
+        let epoch = self.manifest_epoch(at);
+        let bytes: u64 = epoch.entries().iter().map(|entry| entry.blob_len).sum();
+        tracing::info_span!(
+            "import.epoch",
+            end_height = epoch.end_height(),
+            ranges = epoch.entries().len(),
+            bytes,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        )
     }
 
     /// The bytes of the blobs of the epoch at `at`, at most [`MAX_BLOB_BYTES_BEFORE_INSTALL`].
@@ -140,7 +149,8 @@ impl EpochImport {
     ) -> Result<(Vec<CheckedRange>, EpochProof), ImportError> {
         let _permit =
             self.verify_permits.acquire().await.expect("the verify permits are never closed");
-        let (run, span) = (Arc::clone(self), Span::current());
+        let run = Arc::clone(self);
+        let span = tracing::debug_span!("import.verify", ranges = blobs.len());
         BlockingTask::spawn(move || span.in_scope(|| run.verify_blobs(at, blobs)))
             .join_flattened()
             .await

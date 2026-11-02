@@ -12,6 +12,7 @@ use std::{ops::ControlFlow, sync::Arc};
 
 use eyre::{Result, WrapErr};
 use tokio_util::sync::CancellationToken;
+use tracing::{Instrument as _, Span, field::Empty};
 use ztreamer_protocol::{
     replicate::replicator_server::ReplicatorServer,
     wire::compact_tx_streamer_server::CompactTxStreamerServer,
@@ -56,12 +57,25 @@ impl Launcher {
     async fn stages<N: Node>(self, mut node: N, tasks: TaskSet) -> Result<()> {
         let shutdown = tasks.shutdown().clone();
 
-        // Boot.
-        let ControlFlow::Continue(network) = node.network(&shutdown).await? else {
-            return Ok(());
+        let boot = async {
+            let ControlFlow::Continue(network) = node.network(&shutdown).await? else {
+                return Ok(None);
+            };
+            Span::current().record("network", tracing::field::display(&network));
+            let index = self.config.index.open(&network).await?;
+            let ControlFlow::Continue(components) = node.boot(&tasks).await? else {
+                return Ok(None);
+            };
+            Ok(Some((network, index, components)))
         };
-        let index = self.config.index.open(&network).await?;
-        let ControlFlow::Continue(components) = node.boot(&tasks).await? else {
+        let span = tracing::info_span!(
+            parent: None,
+            "daemon.boot",
+            network = Empty,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let Some((network, index, components)) = in_stage(span, boot).await? else {
             return Ok(());
         };
         let stage = StageContext {
@@ -71,13 +85,25 @@ impl Launcher {
             shutdown: &shutdown,
         };
 
-        // Historical.
-        if components.historical().fill(&stage).await?.is_break() {
+        let span = tracing::info_span!(
+            parent: None,
+            "daemon.historical",
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        if in_stage(span, components.historical().fill(&stage)).await?.is_break() {
             return Ok(());
         }
 
-        // Catch up.
-        let ControlFlow::Continue(caught_up) = self.catch_up(&components, &stage).await? else {
+        let span = tracing::info_span!(
+            parent: None,
+            "daemon.catch_up",
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let ControlFlow::Continue(caught_up) =
+            in_stage(span, self.catch_up(&components, &stage)).await?
+        else {
             return Ok(());
         };
 
@@ -189,4 +215,13 @@ impl<H: CanonicalBlockSource + Clone> CaughtUp<H> {
             result = reconcile => result.map(|_| ControlFlow::Continue(())),
         }
     }
+}
+
+/// Runs `stage` in its root `span`, and records its error on the span. The serve stage has no
+/// span: it lasts until shutdown.
+async fn in_stage<T>(span: Span, stage: impl Future<Output = Result<T>>) -> Result<T> {
+    stage.instrument(span.clone()).await.inspect_err(|error| {
+        span.record("otel.status_code", "ERROR");
+        span.record("otel.status_description", tracing::field::display(format!("{error:#}")));
+    })
 }

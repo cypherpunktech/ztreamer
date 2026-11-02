@@ -26,7 +26,7 @@ use std::{
 
 use tokio::sync::watch;
 use tokio_util::task::TaskTracker;
-use tracing::{info, warn};
+use tracing::{Instrument as _, Span, field::Empty, info, warn};
 use zakura_chain::{
     block,
     subtree::{NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
@@ -144,15 +144,39 @@ impl RangeMetaFiller {
     }
 
     /// Fills the missing rows if `sealed_through` is not `covered`. Returns the `sealed_through`
-    /// that the pass covered.
+    /// that the pass covered. A pass that has work is a `replicator.fill_pass` root span.
     async fn pass(&self, covered: Option<Option<u32>>) -> Result<Option<u32>, FillError> {
         let sealed_through = self.blocking(|index| Ok(index.state()?.sealed_through())).await?;
         if covered == Some(sealed_through) {
             return Ok(sealed_through);
         }
+        let span = tracing::info_span!(
+            parent: None,
+            "replicator.fill_pass",
+            sealed_through,
+            pending = Empty,
+            filled = Empty,
+            otel.status_code = Empty,
+            otel.status_description = Empty,
+        );
+        let filled = self.fill_missing(sealed_through, covered.is_none()).instrument(span.clone());
+        filled.await.inspect_err(|error| {
+            span.record("otel.status_code", "ERROR");
+            span.record("otel.status_description", tracing::field::display(error));
+        })?;
+        Ok(sealed_through)
+    }
+
+    /// Fills the missing rows through `sealed_through`. The first pass logs its start.
+    async fn fill_missing(
+        &self,
+        sealed_through: Option<u32>,
+        first: bool,
+    ) -> Result<(), FillError> {
         let slots = self.blocking(move |index| Slot::scan(index, sealed_through)).await?;
         let mut pending = slots.iter().filter(|slot| slot.row.is_none()).count() as u64;
-        if covered.is_none() {
+        Span::current().record("pending", pending);
+        if first {
             info!(pending, ?sealed_through, "range metadata filler started");
         }
 
@@ -167,16 +191,22 @@ impl RangeMetaFiller {
             epoch.advance(meta.entry.epoch_end, meta.entry.end_tree_sizes);
             pending -= 1;
             filled += 1;
+            Span::current().record("filled", filled);
             if filled % LOG_EVERY == 0 {
                 info!(filled, pending, end_height = meta.entry.end_height, "filled range metadata");
             }
             tokio::task::yield_now().await;
         }
-        Ok(sealed_through)
+        Ok(())
     }
 
     /// Builds and writes the row of the range at `start`. `epoch` is the epoch state before it.
-    #[tracing::instrument(level = "debug", skip(self, epoch))]
+    #[tracing::instrument(
+        name = "replicator.fill_range",
+        level = "debug",
+        skip_all,
+        fields(start_height = start)
+    )]
     async fn fill(&self, start: u32, epoch: Epoch) -> Result<RangeMeta, FillError> {
         let read = self.blocking(move |index| RangeRead::read(index, start)).await?;
         let end = &read.last;

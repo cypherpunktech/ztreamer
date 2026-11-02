@@ -7,6 +7,7 @@ use std::sync::{
 
 use super::*;
 use zakura_chain::{parameters::GENESIS_PREVIOUS_BLOCK_HASH, transaction};
+use ztreamer_chain::test_utils::{capture_spans, closed_spans_under};
 use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     test_utils::hash,
@@ -589,4 +590,31 @@ async fn historical_to_live_handoff_keeps_tree_sizes_and_contiguous_heights() {
         assert_eq!(block.end_tree_sizes, state.tree_sizes());
     }
     verify(&index, source.count);
+}
+
+/// The worker and writer threads make their spans below the pass span of the calling thread.
+#[test]
+fn segment_and_commit_spans_are_children_of_the_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let index = open(&dir, 32 * MIB);
+    let source = Fixture::new(1_107);
+    let ((), lines) = capture_spans(|| {
+        tracing::info_span!("test.pipeline_pass").in_scope(|| {
+            HistoricalPipeline::new(&index, &source, config(4)).unwrap().sync().unwrap();
+        });
+    });
+
+    let passes: Vec<_> =
+        closed_spans_under(&lines, "pipeline.pass", "test.pipeline_pass").collect();
+    assert_eq!(passes.len(), 1);
+    assert_eq!(passes[0]["start_height"], 0);
+    assert_eq!(passes[0]["target_height"], 1_106);
+    assert_eq!(passes[0]["written_blocks"], 1_107);
+    let segments = closed_spans_under(&lines, "pipeline.segment", "test.pipeline_pass");
+    let blocks: u64 = segments.map(|span| span["blocks"].as_u64().unwrap()).sum();
+    assert_eq!(blocks, 1_107);
+    let commits: Vec<_> =
+        closed_spans_under(&lines, "pipeline.commit", "test.pipeline_pass").collect();
+    assert!(!commits.is_empty());
+    assert!(commits.iter().all(|span| span["generation"].is_u64()));
 }

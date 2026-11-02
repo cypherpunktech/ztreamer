@@ -124,7 +124,7 @@ fn record_status(headers: &HeaderMap, span: &Span) {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use tokio::sync::watch;
     use tokio_stream::StreamExt as _;
     use tonic::transport::server::TcpIncoming;
@@ -140,11 +140,13 @@ mod tests {
 
     use super::*;
 
-    /// The fields of the `grpc.request` span of `method`, when the span closed.
-    fn request_span<'a>(lines: &'a [Value], method: &str) -> &'a Value {
-        closed_spans(lines, "grpc.request")
-            .find(|span| span["rpc.method"] == method)
-            .unwrap_or_else(|| panic!("no closed grpc.request span for {method}"))
+    /// Checks that a closed `grpc.request` span has each field of `expected`. A `null` field is
+    /// a field that the span does not have. Other tests of the binary can also make spans.
+    fn assert_request_span(lines: &[Value], expected: Value) {
+        let expected = expected.as_object().unwrap();
+        let mut spans = closed_spans(lines, "grpc.request");
+        let found = spans.any(|span| expected.iter().all(|(key, value)| &span[key] == value));
+        assert!(found, "no grpc.request span with {expected:?}");
     }
 
     #[test]
@@ -179,20 +181,31 @@ mod tests {
             });
         });
 
-        let unary = request_span(&lines, "GetExportInfo");
-        assert_eq!(unary["otel.name"], "ztreamer.replicate.Replicator/GetExportInfo");
-        assert_eq!(unary["rpc.service"], "ztreamer.replicate.Replicator");
-        assert_eq!(unary["client.address"], "127.0.0.1");
-        assert_eq!(unary["rpc.grpc.status_code"], 0);
-        assert!(unary.get("otel.status_code").is_none());
-
+        assert_request_span(
+            &lines,
+            json!({
+                "rpc.method": "GetExportInfo",
+                "otel.name": "ztreamer.replicate.Replicator/GetExportInfo",
+                "rpc.service": "ztreamer.replicate.Replicator",
+                "client.address": "127.0.0.1",
+                "rpc.grpc.status_code": 0,
+                "otel.status_code": null,
+            }),
+        );
         // A stream records its status from the trailers at its end.
-        assert_eq!(request_span(&lines, "ListRanges")["rpc.grpc.status_code"], 0);
-
+        assert_request_span(
+            &lines,
+            json!({ "rpc.method": "ListRanges", "rpc.grpc.status_code": 0 }),
+        );
         // An error has its status in the headers.
-        let failed = request_span(&lines, "GetRange");
-        assert_eq!(failed["rpc.grpc.status_code"], 5);
-        assert_eq!(failed["otel.status_code"], "ERROR");
-        assert_eq!(failed["otel.status_description"], "no listed sealed range starts at 5");
+        assert_request_span(
+            &lines,
+            json!({
+                "rpc.method": "GetRange",
+                "rpc.grpc.status_code": 5,
+                "otel.status_code": "ERROR",
+                "otel.status_description": "no listed sealed range starts at 5",
+            }),
+        );
     }
 }

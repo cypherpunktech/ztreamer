@@ -58,7 +58,7 @@ use std::{future, num::NonZeroUsize, pin, sync::Arc, thread};
 
 use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::{Semaphore, watch};
-use tracing::{Instrument as _, info};
+use tracing::{Instrument as _, Span, info};
 use zakura_chain::{block, parameters::Network};
 use ztreamer_blocking::{BlockingTask, BlockingTaskCancelled};
 use ztreamer_chain::codec::CompactBlockRecord;
@@ -348,10 +348,18 @@ impl Importer {
             })
             .map(|(at, budget_permit)| {
                 let fetch_and_verify = Arc::clone(&epoch_import).fetch_and_verify(at);
-                let rows = async move {
-                    Ok::<_, ImportError>((at, fetch_and_verify.await?, budget_permit))
+                // The epoch carries its span from the fetch to the install.
+                let span = epoch_import.epoch_span(at);
+                let rows = {
+                    let span = span.clone();
+                    async move {
+                        let rows = fetch_and_verify
+                            .await
+                            .inspect_err(|error| record_error(&span, error))?;
+                        Ok::<_, ImportError>((at, rows, budget_permit, span))
+                    }
                 };
-                rows.instrument(epoch_import.epoch_span(at))
+                rows.instrument(span)
             })
             .buffered(epoch_import.epochs_in_work())
             .take_until(stop_signal);
@@ -359,9 +367,12 @@ impl Importer {
         // `buffered` gives the epochs in height order. Thus the error of an epoch comes after
         // the install of each epoch below it.
         let mut next_epoch = epoch_import.epochs_to_import().start;
-        while let Some((at, rows, _budget_permit)) = epochs.try_next().await? {
+        while let Some((at, rows, _budget_permit, span)) = epochs.try_next().await? {
             let install = epoch_import.install_rows(rows);
-            let state = install.instrument(epoch_import.epoch_span(at)).await?;
+            let state = install
+                .instrument(span.clone())
+                .await
+                .inspect_err(|error| record_error(&span, error))?;
             let epoch = epoch_import.manifest_epoch(at);
             report.add_installed_epoch(&epoch, &state);
             next_epoch = at + 1;
@@ -448,6 +459,12 @@ impl Importer {
         let index = Arc::clone(&self.index);
         Ok(BlockingTask::spawn(move || call(&index)).join().await??)
     }
+}
+
+/// Records `error` as the outcome of the epoch of `span`.
+fn record_error(span: &Span, error: &ImportError) {
+    span.record("otel.status_code", "ERROR");
+    span.record("otel.status_description", tracing::field::display(error));
 }
 
 #[cfg(test)]
