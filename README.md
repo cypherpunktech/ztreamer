@@ -17,6 +17,25 @@ Install [Protocol Buffers](https://protobuf.dev/installation/), then:
 cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamerd
 ```
 
+### Docker
+
+The image runs ztreamerd as a user without privileges. It has no shell. The volume `/var/lib/ztreamer` holds the index. In the embedded mode, it also holds the zakura state.
+
+```console
+docker build -t ztreamer .
+docker run -d --name ztreamer -v ztreamer:/var/lib/ztreamer -p 9067:9067 -p 8233:8233 ztreamer
+```
+
+The arguments of `docker run` replace the default command. Keep the listen flags. Without them, ztreamerd listens on loopback, and the host cannot connect.
+
+```console
+docker run -d --name ztreamer -v ztreamer:/var/lib/ztreamer -p 9067:9067 ztreamer \
+  --grpc-listen 0.0.0.0:9067 --metrics-listen 0.0.0.0:9999 \
+  --remote-rpc https://user:password@host:8232 --replicate-from https://snapshot.example
+```
+
+To give the embedded node a zakura configuration, mount the file and add `--zakura-config FILE`. The build runs on all x86-64 and aarch64 CPUs. The build arguments are `PROFILE` (default `maxperf`) and `RUSTFLAGS`. To make a build for the CPU type of the build host only, add `--build-arg RUSTFLAGS="-C target-cpu=native"`.
+
 ## Modes
 
 ztreamerd has two modes. Both modes write the same index and serve the same gRPC API.

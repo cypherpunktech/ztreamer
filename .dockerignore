@@ -1,0 +1,6 @@
+# Only the build inputs of ztreamerd go into the build context.
+*
+!Cargo.toml
+!Cargo.lock
+!bin/
+!crates/
