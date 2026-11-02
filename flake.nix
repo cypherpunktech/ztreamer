@@ -13,31 +13,18 @@
         "aarch64-darwin"
       ];
       eachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      zakuraHash = "sha256-YUKKRFCNgPAF5fXywKlZfSd0ZMHzruW0HxHbELiem+0=";
     in
     {
       packages = eachSystem (pkgs: {
         default = pkgs.rustPlatform.buildRustPackage {
           pname = "ztreamerd";
-          version = "0.0.1";
+          version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
-            outputHashes = pkgs.lib.genAttrs [
-              "zakura-1.5.1"
-              "zakura-chain-9.0.0"
-              "zakura-consensus-10.0.0"
-              "zakura-header-chain-4.0.0"
-              "zakura-jsonl-trace-1.2.0"
-              "zakura-network-9.0.0"
-              "zakura-node-services-4.0.0"
-              "zakura-rpc-12.0.0"
-              "zakura-script-4.0.0"
-              "zakura-state-10.0.0"
-              "zakura-test-2.2.0"
-              "zakura-tower-batch-control-1.3.0"
-              "zakura-tower-fallback-1.2.0"
-            ] (_: zakuraHash);
+            # Fetch each git dependency at the rev that `Cargo.lock` pins. The
+            # zakura crates then need no hash list that goes stale on each bump.
+            allowBuiltinFetchGit = true;
           };
           nativeBuildInputs = with pkgs; [
             protobuf
