@@ -15,7 +15,7 @@ test-utils = ["ztreamer-chain/test-utils"]
 [dependencies]
 blake3.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-ed25519-dalek.workspace = true
+ed25519-zebra.workspace = true
 hex = "0.4"
 sapling-crypto.workspace = true
 serde = { version = "1", features = ["derive"] }

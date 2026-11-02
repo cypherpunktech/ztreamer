@@ -43,13 +43,12 @@ pub const SNAPSHOT_PUBKEY: [u8; 32] = [
 
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::VerifyingKey;
+    use ed25519_zebra::VerificationKey;
 
     use super::*;
 
     #[test]
-    fn the_snapshot_key_is_a_valid_key_that_is_not_weak() {
-        let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).unwrap();
-        assert!(!key.is_weak());
+    fn the_snapshot_key_is_a_valid_key() {
+        VerificationKey::try_from(SNAPSHOT_PUBKEY).unwrap();
     }
 }

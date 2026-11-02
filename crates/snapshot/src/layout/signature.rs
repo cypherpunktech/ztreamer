@@ -1,18 +1,18 @@
 //! `<file>.sig`: the detached signature of a file.
 
-use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
+use ed25519_zebra::{Signature, SigningKey, VerificationKey};
 
 /// A detached signature. The file `<file>.sig` holds the Ed25519 signature of the bytes of
 /// `<file>`: 64 bytes in hex.
 ///
 /// ```
-/// use ed25519_dalek::SigningKey;
+/// use ed25519_zebra::SigningKey;
 /// use ztreamer_snapshot::layout::SignatureFile;
 ///
 /// let key = SigningKey::from_bytes(&[7; 32]);
 /// let file = SignatureFile::sign(b"manifest", &key).to_hex();
 /// let signature = SignatureFile::try_from(file.as_bytes()).unwrap();
-/// assert!(signature.verify(b"manifest", &key.verifying_key()).is_ok());
+/// assert!(signature.verify(b"manifest", &key.verification_key()).is_ok());
 /// assert_eq!(SignatureFile::path_of("manifests/a.json"), "manifests/a.json.sig");
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,8 +38,8 @@ impl SignatureFile {
     }
 
     /// Verifies that this signature signs `bytes` with `key`.
-    pub fn verify(&self, bytes: &[u8], key: &VerifyingKey) -> Result<(), SignatureFileError> {
-        key.verify_strict(bytes, &self.0).map_err(|_| SignatureFileError::Mismatch)
+    pub fn verify(&self, bytes: &[u8], key: &VerificationKey) -> Result<(), SignatureFileError> {
+        key.verify(&self.0, bytes).map_err(|_| SignatureFileError::Mismatch)
     }
 }
 
@@ -75,10 +75,17 @@ mod tests {
         let file = format!("{}\n", SignatureFile::sign(b"manifest", &key).to_hex());
         let signature = SignatureFile::try_from(file.as_bytes()).unwrap();
 
-        assert_eq!(signature.verify(b"manifest", &key.verifying_key()), Ok(()));
-        let other = SigningKey::from_bytes(&[8; 32]).verifying_key();
+        // The bytes that `ed25519-dalek` 3.0.0 signs for the same seed and message: RFC 8032
+        // signatures are deterministic, so a reader with either crate accepts the file.
+        assert_eq!(
+            signature.to_hex(),
+            "4202d2e6e6c85979b9f3641563b56b63429b916edc4f39dcabfd439c55398f10\
+             868f711a1beb251bd32fe3c9310c56a2a9f7c28c462604d180b5633a31e61e08"
+        );
+        assert_eq!(signature.verify(b"manifest", &key.verification_key()), Ok(()));
+        let other = SigningKey::from_bytes(&[8; 32]).verification_key();
         assert_eq!(signature.verify(b"manifest", &other), Err(SignatureFileError::Mismatch));
-        let error = signature.verify(b"other bytes", &key.verifying_key());
+        let error = signature.verify(b"other bytes", &key.verification_key());
         assert_eq!(error, Err(SignatureFileError::Mismatch));
         for file in [&file[..126], "zz"] {
             let error = SignatureFile::try_from(file.as_bytes());

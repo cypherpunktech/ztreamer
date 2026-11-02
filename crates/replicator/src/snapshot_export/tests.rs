@@ -1,7 +1,7 @@
 use std::fs;
 
 use chrono::DateTime;
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use serde_json::Value;
 use tempfile::TempDir;
 use ztreamer_chain::test_utils::record;
@@ -118,7 +118,7 @@ fn a_second_export_writes_no_range_file_again() {
 fn signatures_verify_with_the_signing_key() {
     let (dir, out) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let (index, _) = index_with_rows(dir.path(), 3, &ALL_ROWS);
-    let key = signing_key().verifying_key();
+    let key = signing_key().verification_key();
 
     let report = export(&index, &out, 0);
 

@@ -18,7 +18,7 @@ use std::{
 
 use bytes::Bytes;
 use chrono::{DateTime, TimeDelta};
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use futures_util::stream;
 use http::{Request, Response, StatusCode, Uri, header::RANGE};
 use http_body_util::{BodyExt as _, Full, StreamBody, combinators::BoxBody};

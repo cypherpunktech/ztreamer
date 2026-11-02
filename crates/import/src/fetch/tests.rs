@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use futures_util::future;
 use tokio::sync::watch;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -80,7 +80,7 @@ impl Http {
     }
 
     fn fetcher(&self, seed: [u8; 32]) -> Fetcher {
-        let key = SigningKey::from_bytes(&seed).verifying_key();
+        let key = SigningKey::from_bytes(&seed).verification_key();
         let source = HttpSource::new(self.server.base.clone(), key).unwrap();
         Fetcher::with_test_resume_rule(Box::new(source))
     }
@@ -387,7 +387,7 @@ async fn http_source_reads_the_manifest_of_each_export() {
     let source = SourceIndex::new(12).await;
     let dir = tempfile::tempdir().unwrap();
     let key = SigningKey::from_bytes(&SEED);
-    let http = HttpSource::new(FileServer::start(dir.path()).await.base, key.verifying_key());
+    let http = HttpSource::new(FileServer::start(dir.path()).await.base, key.verification_key());
     let (http, writer) = (http.unwrap(), SnapshotWriter::new(dir.path(), key));
     let entries = source.entries();
     let manifest = |ranges| {

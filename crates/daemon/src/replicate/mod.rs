@@ -11,7 +11,7 @@
 
 use std::{fmt, ops::ControlFlow, str::FromStr, sync::Arc};
 
-use ed25519_dalek::VerifyingKey;
+use ed25519_zebra::VerificationKey;
 use eyre::{Result, WrapErr, ensure, eyre};
 use http::Uri;
 use tokio::sync::watch;
@@ -68,7 +68,7 @@ impl fmt::Display for ReplicaSource {
 
 impl ReplicaSource {
     /// The source of ranges at this address. `key` signs a snapshot. A peer gets a connection.
-    async fn connect(&self, key: VerifyingKey) -> Result<Box<dyn RangeSource>> {
+    async fn connect(&self, key: VerificationKey) -> Result<Box<dyn RangeSource>> {
         match self {
             Self::Snapshot(base) => Ok(Box::new(HttpSource::new(base.clone(), key)?)),
             Self::Peer(endpoint) => {
@@ -86,13 +86,13 @@ impl ReplicaSource {
 pub(crate) struct Replica {
     source: ReplicaSource,
     /// The key that signs the snapshots: [`SNAPSHOT_PUBKEY`].
-    key: VerifyingKey,
+    key: VerificationKey,
 }
 
 impl Replica {
     /// The import of `source`. The built-in key [`SNAPSHOT_PUBKEY`] checks its snapshots.
     pub(crate) fn new(source: ReplicaSource) -> Self {
-        let key = VerifyingKey::from_bytes(&SNAPSHOT_PUBKEY).expect("the built-in key is valid");
+        let key = VerificationKey::try_from(SNAPSHOT_PUBKEY).expect("the built-in key is valid");
         Self { source, key }
     }
 

@@ -1,7 +1,7 @@
 use std::{future, net::SocketAddr, num::NonZeroUsize, path::Path, time::Duration};
 
 use chrono::Utc;
-use ed25519_dalek::SigningKey;
+use ed25519_zebra::SigningKey;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -154,7 +154,7 @@ async fn daemon(
 ) -> Result<()> {
     let remote = remote_mode(&config);
     let replica =
-        Replica { key: SigningKey::from_bytes(&seed).verifying_key(), ..remote.replica() };
+        Replica { key: SigningKey::from_bytes(&seed).verification_key(), ..remote.replica() };
     let client = remote.client(Path::new("/nonexistent/zakura/.cookie")).unwrap();
     let node = RemoteNode::new(client, replica);
     Launcher::new(config, Server::builder().layer(GrpcSpan::layer())).run(node, signal).await
@@ -284,7 +284,7 @@ async fn a_replica_fills_the_rows_of_the_ranges_that_the_tail_seals() {
     let out = tempfile::tempdir().unwrap();
     Snapshot::export(dir.path(), out.path()).await;
     let server = FileServer::start(&out.path().join("snapshot")).await;
-    let key = SigningKey::from_bytes(&SEED).verifying_key();
+    let key = SigningKey::from_bytes(&SEED).verification_key();
     let exported = HttpSource::new(server.base.clone(), key).unwrap().manifest().await.unwrap();
     assert_eq!(exported.sealed_through(), TAIL_SEALED);
 }

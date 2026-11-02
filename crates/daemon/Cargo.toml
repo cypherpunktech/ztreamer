@@ -9,7 +9,7 @@ description = "The ztreamer daemon: the node modes, the indexing, the head follo
 workspace = true
 
 [dependencies]
-ed25519-dalek.workspace = true
+ed25519-zebra.workspace = true
 eyre = "0.6"
 getrandom = "0.4"
 http = "1"

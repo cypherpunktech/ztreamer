@@ -1,6 +1,6 @@
 //! `latest.json`: the signed pointer to the current manifest.
 
-use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
+use ed25519_zebra::{Signature, SigningKey, VerificationKey};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_with::{hex::Hex, serde_as};
@@ -10,14 +10,14 @@ use super::ManifestPath;
 /// The pointer to the current manifest of a snapshot, in `latest.json`.
 ///
 /// ```
-/// use ed25519_dalek::SigningKey;
+/// use ed25519_zebra::SigningKey;
 /// use ztreamer_snapshot::layout::{ManifestPath, ManifestPointer};
 ///
 /// let key = SigningKey::from_bytes(&[7; 32]);
 /// let manifest: ManifestPath = "manifests/2026-10-26T000000Z.json".parse().unwrap();
 /// let pointer = ManifestPointer { manifest, sealed_through: 999 };
 /// let json = pointer.to_signed_json(&key);
-/// let read = ManifestPointer::from_signed_json(&json, &key.verifying_key()).unwrap();
+/// let read = ManifestPointer::from_signed_json(&json, &key.verification_key()).unwrap();
 /// assert_eq!(read, pointer);
 /// ```
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -43,9 +43,9 @@ impl ManifestPointer {
 
     /// Reads the bytes of `latest.json` and verifies their signature with `key`, the key that
     /// the reader trusts.
-    pub fn from_signed_json(bytes: &[u8], key: &VerifyingKey) -> Result<Self, PointerError> {
+    pub fn from_signed_json(bytes: &[u8], key: &VerificationKey) -> Result<Self, PointerError> {
         let file: SignedPointer<'_> = serde_json::from_slice(bytes)?;
-        key.verify_strict(file.latest.get().as_bytes(), &Signature::from_bytes(&file.signature))
+        key.verify(&Signature::from_bytes(&file.signature), file.latest.get().as_bytes())
             .map_err(|_| PointerError::Signature)?;
         Ok(serde_json::from_str(file.latest.get())?)
     }
@@ -86,20 +86,20 @@ mod tests {
         let key = SigningKey::from_bytes(&[7; 32]);
         let bytes = pointer().to_signed_json(&key);
 
-        let read = ManifestPointer::from_signed_json(&bytes, &key.verifying_key()).unwrap();
+        let read = ManifestPointer::from_signed_json(&bytes, &key.verification_key()).unwrap();
         assert_eq!(read, pointer());
-        let other = SigningKey::from_bytes(&[8; 32]).verifying_key();
+        let other = SigningKey::from_bytes(&[8; 32]).verification_key();
         let error = ManifestPointer::from_signed_json(&bytes, &other).unwrap_err();
         assert!(matches!(error, PointerError::Signature), "{error:?}");
         let changed = String::from_utf8(bytes).unwrap().replace("2999", "3999");
-        let error = ManifestPointer::from_signed_json(changed.as_bytes(), &key.verifying_key())
+        let error = ManifestPointer::from_signed_json(changed.as_bytes(), &key.verification_key())
             .unwrap_err();
         assert!(matches!(error, PointerError::Signature), "{error:?}");
     }
 
     #[test]
     fn an_unsigned_pointer_is_refused() {
-        let key = SigningKey::from_bytes(&[7; 32]).verifying_key();
+        let key = SigningKey::from_bytes(&[7; 32]).verification_key();
         let unsigned = serde_json::json!({ "latest": pointer() }).to_string();
 
         let error = ManifestPointer::from_signed_json(unsigned.as_bytes(), &key).unwrap_err();
