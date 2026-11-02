@@ -273,16 +273,6 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
 
     /// Ingests the finalized durable blocks available when this call starts.
     pub fn sync(&self) -> Result<IndexState, PipelineError> {
-        let mut pass = self.metrics.pass();
-        let result = self.sync_inner();
-        pass.finish(result.is_ok());
-        if result.is_ok() && self.stopped() {
-            pass.stopped();
-        }
-        result
-    }
-
-    fn sync_inner(&self) -> Result<IndexState, PipelineError> {
         // read local resume point
         let initial_state = self.index.state()?;
         let durable_tip = initial_state.durable_tip();
@@ -303,7 +293,6 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             return Err(PipelineError::MissingBody { height: start });
         }
         let target = tip_height.0;
-        self.metrics.target(target);
         if start > target {
             return Ok(initial_state);
         }
@@ -430,7 +419,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             let started = Instant::now();
             let written = self.index.write_encoded(batch);
             let elapsed = started.elapsed();
-            self.metrics.commit(elapsed, written.is_ok(), blocks);
+            self.metrics.commit(elapsed, written.is_ok());
             stats.write += elapsed;
             // Stop at the first error. The coordinator then stops when its next send fails.
             state = written?;
@@ -473,15 +462,9 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
                 )
                 .and_then(|()| segment_tx.finish());
             if let Err(error) = processed {
-                // `Worker` means that another thread failed or the pass stopped. This segment
-                // did not fail, so it records no outcome.
-                if matches!(error, PipelineError::Worker) {
-                    segment.cancelled = true;
-                }
                 parsed_tx.cancel();
                 return Err(error);
             }
-            segment.success = true;
             stats.add(segment.stats);
         }
     }

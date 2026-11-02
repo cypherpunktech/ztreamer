@@ -13,7 +13,6 @@ ed25519-dalek.workspace = true
 eyre = "0.6"
 getrandom = "0.4"
 http = "1"
-metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = ["http-listener"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"

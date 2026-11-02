@@ -1,10 +1,7 @@
 //! The head follower: it keeps the index at the canonical head of a node, and publishes a
 //! [`ServingSnapshot`] after each change.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use tokio::sync::watch;
 use ztreamer_chain::codec::CompactBlockRecord;
@@ -15,10 +12,7 @@ use super::{
     serving::{Readiness, ServingSnapshot, SnapshotError},
     sync_head_once,
 };
-use crate::{
-    metrics::{HeadMetrics, ObservedSource},
-    pipeline::PipelineConfig,
-};
+use crate::pipeline::PipelineConfig;
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeadFollowerConfig {
@@ -47,12 +41,11 @@ pub enum HeadFollowerError {
 /// each change. The wallet service and the Replicator read the snapshots through
 /// [`HeadFollower::subscribe`].
 ///
-/// Clones share the index, the snapshot channel and the metrics.
+/// Clones share the index and the snapshot channel.
 #[derive(Clone)]
 pub struct HeadFollower {
     index: Arc<Index>,
     snapshot: watch::Sender<ServingSnapshot>,
-    metrics: Arc<HeadMetrics>,
 }
 
 impl std::fmt::Debug for HeadFollower {
@@ -67,9 +60,7 @@ impl HeadFollower {
     /// A follower over `index` that publishes the snapshot of `state` first.
     pub fn new(index: Arc<Index>, state: IndexState) -> Self {
         let (snapshot, _) = watch::channel(state.into());
-        let metrics = Arc::new(HeadMetrics::new());
-        metrics.snapshot(&snapshot.borrow());
-        Self { index, snapshot, metrics }
+        Self { index, snapshot }
     }
 
     /// Returns a receiver for each serving snapshot that the follower publishes after this call.
@@ -84,7 +75,6 @@ impl HeadFollower {
         volatile_head: Vec<CompactBlockRecord>,
     ) -> Result<(), SnapshotError> {
         let snapshot = ServingSnapshot::with_head(state, volatile_head)?;
-        self.metrics.snapshot(&snapshot);
         self.snapshot.send_replace(snapshot);
         Ok(())
     }
@@ -94,7 +84,6 @@ impl HeadFollower {
         let mut snapshot = self.snapshot();
         snapshot.ready = false;
         snapshot.tip_fresh = false;
-        self.metrics.snapshot(&snapshot);
         self.snapshot.send_replace(snapshot);
     }
 
@@ -110,7 +99,6 @@ impl HeadFollower {
         snapshot.tip_fresh =
             snapshot.last_source_success.is_some_and(|last| last.elapsed() < freshness_timeout);
         snapshot.source_error = Some(error.into());
-        self.metrics.snapshot(&snapshot);
         self.snapshot.send_replace(snapshot);
     }
 
@@ -125,26 +113,14 @@ impl HeadFollower {
         source: &mut impl CanonicalBlockSource,
         config: PipelineConfig,
     ) -> Result<IndexState, HeadSyncError> {
-        let started = Instant::now();
         let snapshot = self.snapshot();
-        let mut observed = ObservedSource {
-            source,
-            previous: snapshot.visible_tip,
-            observed: None,
-            metrics: &self.metrics,
-        };
-        let result =
-            sync_head_once(&self.index, &mut observed, &snapshot.volatile_head, config).await;
+        let result = sync_head_once(&self.index, source, &snapshot.volatile_head, config).await;
         if matches!(result, Err(HeadSyncError::DeepReorg { .. })) {
             self.begin_recovery();
         }
-        let (state, head) = result.inspect_err(|_| {
-            self.metrics.reconcile(started.elapsed(), false);
-        })?;
+        let (state, head) = result?;
         self.publish_head(state, head)
             .expect("head reconciliation must produce a connected snapshot");
-        self.metrics.published(observed.observed, self.snapshot().visible_tip);
-        self.metrics.reconcile(started.elapsed(), true);
         Ok(state)
     }
 

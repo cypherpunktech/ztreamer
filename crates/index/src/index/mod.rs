@@ -115,7 +115,7 @@
 //! - `index/metadata.rs` gives the byte layout of the state and of the identity, and
 //!   `index/range_meta.rs` the layout of a range metadata record.
 
-use std::{fs, io, path::Path, time::Instant};
+use std::{fs, io, path::Path};
 
 use heed::{Env, EnvOpenOptions, RwTxn};
 use zakura_chain::block;
@@ -133,7 +133,7 @@ mod snapshot;
 mod state;
 mod tables;
 mod writer;
-use crate::metrics::{WriteStage, record_state_metrics};
+use crate::metrics::record_durable_height;
 pub use batch::{EncodedBatch, WriteBatch};
 pub use checked_range::{CheckedRange, RangeCheckError};
 pub use error::IndexError;
@@ -209,7 +209,7 @@ impl Index {
 
         let index = Self { env, tables };
         index.latest()?.verify_continuity()?;
-        record_state_metrics(index.state()?);
+        record_durable_height(index.state()?);
         Ok(index)
     }
 
@@ -371,12 +371,7 @@ impl Index {
 
     /// Atomically writes a batch and packs newly sealed ranges.
     pub fn write(&self, batch: WriteBatch) -> Result<IndexState, IndexError> {
-        let started = Instant::now();
-        let batch = batch.encode(1)?;
-        let encode = started.elapsed();
-        let state = self.write_encoded(batch)?;
-        WriteStage::Encode.record(encode);
-        Ok(state)
+        self.write_encoded(batch.encode(1)?)
     }
 
     /// Atomically writes a batch with encoded records and packs newly sealed ranges.

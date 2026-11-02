@@ -14,7 +14,7 @@ use super::{
     range_meta::{RangeMeta, VerifyState},
     tables::{RangeChain, Tables, range_start},
 };
-use crate::metrics::{WriteStage, WriteTimer, record_state_metrics};
+use crate::metrics::{WriteStage, WriteTimer, record_durable_height};
 use ztreamer_chain::codec::{
     CompactBlockRecord, RANGE_FORMAT_VERSION, TreeSizes, encode_range_from_bytes,
 };
@@ -405,7 +405,7 @@ impl<'env> IndexWriter<'env> {
             timer.lap(WriteStage::Commit);
             timer.finish();
         }
-        record_state_metrics(state);
+        record_durable_height(state);
         Ok(state)
     }
 
