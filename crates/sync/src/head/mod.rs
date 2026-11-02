@@ -203,8 +203,8 @@ pub async fn poll_canonical_head(
 }
 
 /// Reconciles the canonical head and atomically replaces an ordinary reorg suffix. When the
-/// tip of the source did not change, it returns at once. Else the work is a `head.reconcile`
-/// span.
+/// tip of the source did not change, it returns at once. If it changed, the work is in a
+/// `head.reconcile` span.
 pub async fn sync_head_once(
     index: &Index,
     source: &mut impl CanonicalBlockSource,
