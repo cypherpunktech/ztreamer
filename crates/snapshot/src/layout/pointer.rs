@@ -3,7 +3,6 @@
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use serde_with::{hex::Hex, serde_as};
 
 use super::ManifestPath;
 
@@ -52,12 +51,11 @@ impl ManifestPointer {
 }
 
 /// The JSON of `latest.json`: the pointer and the signature of its exact bytes.
-#[serde_as]
 #[derive(Deserialize, Serialize)]
 struct SignedPointer<'a> {
     #[serde(borrow)]
     latest: &'a RawValue,
-    #[serde_as(as = "Hex")]
+    #[serde(with = "crate::json::hex_bytes")]
     signature: [u8; 64],
 }
 
@@ -86,6 +84,10 @@ mod tests {
         let key = SigningKey::from_bytes(&[7; 32]);
         let bytes = pointer().to_signed_json(&key);
 
+        let latest = r#"{"manifest":"manifests/2026-10-26T000000Z.json","sealed_through":2999}"#;
+        let signature = hex::encode(key.sign(latest.as_bytes()).to_bytes());
+        let expected = format!(r#"{{"latest":{latest},"signature":"{signature}"}}"#);
+        assert_eq!(String::from_utf8(bytes.clone()).unwrap(), expected);
         let read = ManifestPointer::from_signed_json(&bytes, &key.verifying_key()).unwrap();
         assert_eq!(read, pointer());
         let other = SigningKey::from_bytes(&[8; 32]).verifying_key();

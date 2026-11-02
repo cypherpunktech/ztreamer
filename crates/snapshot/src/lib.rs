@@ -13,6 +13,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod epoch;
+mod json;
 pub mod layout;
 pub mod manifest;
 pub mod manifest_entry;

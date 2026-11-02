@@ -8,7 +8,6 @@
 //! [`manifest`](crate::manifest) for an example.
 
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, hex::Hex, serde_as};
 use zakura_chain::block;
 
 use crate::pool::{SubtreeRoot, put_subtree_roots, take_subtree_roots};
@@ -29,7 +28,6 @@ pub const MAX_RANGES: usize = 10;
 pub const MAX_COMMITMENTS: u64 = 1_000_000;
 
 /// What a snapshot manifest says about one sealed range.
-#[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ManifestEntry {
     /// The range blob format version.
@@ -39,7 +37,7 @@ pub struct ManifestEntry {
     /// The last height of the range.
     pub end_height: u32,
     /// The hash of the block at `end_height`. The JSON form is hex in display order.
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde(with = "crate::json::display")]
     pub end_hash: block::Hash,
     /// The cumulative tree sizes after the block at `end_height`.
     #[serde(with = "TreeSizesJson")]
@@ -158,20 +156,19 @@ impl ManifestEntry {
 /// The three note commitment tree frontiers at the end of a range, each in the `zcashd` RPC
 /// encoding. An empty frontier means the pool was not active at that height. The JSON form of
 /// each frontier is hex.
-#[serde_as]
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Frontiers {
     /// Sapling frontier.
     #[serde(rename = "sapling_frontier")]
-    #[serde_as(as = "Hex")]
+    #[serde(with = "crate::json::hex_bytes")]
     pub sapling: Vec<u8>,
     /// Orchard frontier.
     #[serde(rename = "orchard_frontier")]
-    #[serde_as(as = "Hex")]
+    #[serde(with = "crate::json::hex_bytes")]
     pub orchard: Vec<u8>,
     /// Ironwood frontier.
     #[serde(rename = "ironwood_frontier")]
-    #[serde_as(as = "Hex")]
+    #[serde(with = "crate::json::hex_bytes")]
     pub ironwood: Vec<u8>,
 }
 
@@ -189,10 +186,9 @@ impl Frontiers {
 }
 
 /// The BLAKE3 digest of a range blob. The JSON form is hex.
-#[serde_as]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
-pub struct BlobDigest(#[serde_as(as = "Hex")] pub [u8; 32]);
+pub struct BlobDigest(#[serde(with = "crate::json::hex_bytes")] pub [u8; 32]);
 
 impl BlobDigest {
     /// Calculates the BLAKE3 digest of `blob`.
