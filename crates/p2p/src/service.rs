@@ -329,7 +329,7 @@ async fn send_bytes(send: &FramedSend, message: Message, payload: Vec<u8>) -> Re
         let span = Span::current();
         span.record("rpc.grpc.status_code", tonic::Code::ResourceExhausted as i32);
         span.record("otel.status_code", "ERROR");
-        span.record("otel.status_description", "response exceeds the message limit");
+        span.record("otel.status_description", "the response is larger than the message limit");
         (
             Message::ErrorResponse,
             P2pStatus {
