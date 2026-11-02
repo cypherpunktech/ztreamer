@@ -39,6 +39,7 @@ zakura-rpc.workspace = true
 zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 ztreamer-index = { path = "../index", features = ["test-utils"] }
+ztreamer-protocol = { path = "../protocol", features = ["test-utils"] }
 ztreamer-remote = { path = "../remote", features = ["test-utils"] }
 # Enables `test_utils` for this crate's tests, benches and examples.
 ztreamer-service = { path = ".", features = ["test-utils"] }
