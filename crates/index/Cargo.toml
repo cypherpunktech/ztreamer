@@ -22,11 +22,9 @@ ztreamer-chain = { path = "../chain" }
 ztreamer-snapshot = { path = "../snapshot" }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 criterion = "0.8"
 metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 tempfile = "3"
-zakura-test.workspace = true
 ztreamer-chain = { path = "../chain", features = ["test-utils"] }
 # Enables `test_utils` for this crate's benches.
 ztreamer-index = { path = ".", features = ["test-utils"] }
