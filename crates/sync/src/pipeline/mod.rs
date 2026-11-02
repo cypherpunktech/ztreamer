@@ -31,6 +31,8 @@ const MIB: usize = 1024 * 1024;
 pub(crate) const MAX_SOURCE_BLOCKS: u32 = 4096;
 /// How often the coordinator checks the stop flag while it waits for a block.
 const STOP_POLL: Duration = Duration::from_millis(50);
+/// The time between two progress events of a pass. A first pass can take hours.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Where the historical pass reads finalized blocks from.
 ///
@@ -443,6 +445,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
     ) -> Result<(IndexState, WriteStats), PipelineError> {
         let mut state = initial_state;
         let mut stats = WriteStats::default();
+        let mut reported = Instant::now();
         while let Ok(batch) = batch_rx.recv() {
             stats.batches += 1;
             let blocks = batch.block_count() as u64;
@@ -458,6 +461,12 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
             // Stop at the first error. The coordinator then stops when its next send fails.
             state = written?;
             span.record("generation", state.generation());
+            if reported.elapsed() >= PROGRESS_INTERVAL {
+                reported = Instant::now();
+                let durable_height = state.durable_tip().map(|tip| tip.height);
+                let written_blocks = stats.blocks;
+                pass.in_scope(|| info!(durable_height, written_blocks, "historical pass progress"));
+            }
         }
         Ok((state, stats))
     }

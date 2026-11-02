@@ -11,7 +11,7 @@ use std::{
 use eyre::{Result, WrapErr, eyre};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use zakura_chain::parameters::Network;
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_index::index::range_meta::NodeId;
@@ -129,11 +129,13 @@ impl RemoteNode {
     }
 
     /// `getblockchaininfo`, sent again after [`READY_POLL_INTERVAL`] while the node is out of
-    /// reach or answers [`RpcCode::IN_WARMUP`]. Breaks on shutdown.
+    /// reach or answers [`RpcCode::IN_WARMUP`]. It logs the first wait of each kind at `info` or
+    /// `warn`, and the waits after it at `debug`. Breaks on shutdown.
     async fn blockchain_info_when_up(
         &self,
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), GetBlockchainInfoResponse>> {
+        let (mut logged_warm_up, mut logged_unsent) = (false, false);
         loop {
             let Some(result) =
                 shutdown.run_until_cancelled(self.client.get_blockchain_info()).await
@@ -142,10 +144,18 @@ impl RemoteNode {
             };
             match result {
                 Err(error) if error.rpc_code() == Some(RpcCode::IN_WARMUP) => {
-                    info!(%error, "waiting for remote zakura to end its warm-up");
+                    if std::mem::replace(&mut logged_warm_up, true) {
+                        debug!(%error, "remote zakura is still in warm-up");
+                    } else {
+                        info!(%error, "waiting for remote zakura to end its warm-up");
+                    }
                 }
                 Err(error) if error.is_unsent() => {
-                    warn!(%error, "waiting for remote zakura to accept connections");
+                    if std::mem::replace(&mut logged_unsent, true) {
+                        debug!(%error, "remote zakura still refuses connections");
+                    } else {
+                        warn!(%error, "waiting for remote zakura to accept connections");
+                    }
                 }
                 result => {
                     return result
@@ -222,12 +232,14 @@ impl NodeComponents for RemoteComponents {
         shutdown: &CancellationToken,
     ) -> Result<ControlFlow<(), Tail<RemoteTailSource, RemoteHeadSource>>> {
         let mut info = self.info.clone();
+        let mut logged = false;
         while !tip.is_reached_by(info.blocks().0) {
-            info!(
-                best = info.blocks().0,
-                index_tip = tip.height(),
-                "waiting for remote zakura to reach the index tip"
-            );
+            let (best, index_tip) = (info.blocks().0, tip.height());
+            if std::mem::replace(&mut logged, true) {
+                debug!(best, index_tip, "remote zakura is still below the index tip");
+            } else {
+                info!(best, index_tip, "waiting for remote zakura to reach the index tip");
+            }
             if shutdown.run_until_cancelled(tokio::time::sleep(READY_POLL_INTERVAL)).await.is_none()
             {
                 return Ok(ControlFlow::Break(()));
@@ -239,7 +251,6 @@ impl NodeComponents for RemoteComponents {
             info = next;
         }
         info!(best = info.blocks().0, "remote zakura is ready");
-        info!(import_state = "tail");
         let client = &self.node.client;
         Ok(ControlFlow::Continue(Tail {
             finalized: RemoteTailSource::new(client.clone(), Handle::current()),
@@ -262,9 +273,8 @@ impl NodeComponents for RemoteComponents {
         self.node.id()
     }
 
-    /// Logs the import state `following`.
+    /// The remote node serves no p2p peers: it does nothing.
     fn start_following(&self, _: &CompactService) -> Result<()> {
-        info!(import_state = "following");
         Ok(())
     }
 }

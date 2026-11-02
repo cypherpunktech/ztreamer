@@ -16,7 +16,7 @@ use tokio::{
     task::{Id, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{error, info};
 
 /// The tasks of the daemon that run until shutdown. A clone adds to the same set. Each task
 /// must stop on [`Self::shutdown`].
@@ -92,8 +92,9 @@ impl Supervisor {
     /// It polls `signal` first: a process signal registers before potentially lengthy startup.
     ///
     /// The result is the first error in this order: `signal`, each task in the order that it
-    /// started, then `main`. With no error, it is the `unexpected_stop` of the task that stopped
-    /// first, if a task stopped first.
+    /// started, then `main`. It logs each other error, because the result does not have it. With
+    /// no error, the result is the `unexpected_stop` of the task that stopped first, if a task
+    /// stopped first.
     pub(crate) async fn run(
         self,
         signal: impl Future<Output = Result<()>>,
@@ -105,23 +106,29 @@ impl Supervisor {
         let mut signal = pin!(signal);
         let mut main = pin!(main);
 
-        let (signal_result, main_result, unexpected_stop) = loop {
+        let (signal_result, main_result, stopped) = loop {
             let event = tokio::select! {
                 biased;
                 result = &mut signal => Event::Signal(result),
                 Some(task) = added.recv() => Event::Added(task),
-                Some(unexpected_stop) = running.join_next() => Event::Stopped(unexpected_stop),
+                Some(stopped) = running.join_next() => Event::Stopped(stopped),
                 result = &mut main => Event::MainDone(result),
             };
             match event {
                 Event::Added(task) => running.start(task),
                 Event::Signal(result) => break (result, None, None),
-                Event::Stopped(unexpected_stop) => break (Ok(()), None, Some(unexpected_stop)),
+                Event::Stopped(stopped) => break (Ok(()), None, Some(stopped)),
                 Event::MainDone(result) => break (Ok(()), Some(result), None),
             }
         };
 
-        info!("shutting down node and application");
+        let cause = match (&main_result, &stopped) {
+            (_, Some(started)) => started.name,
+            (Some(Ok(())), None) => "main work ended",
+            (Some(Err(_)), None) => "main work failed",
+            (None, None) => "signal",
+        };
+        info!(cause, "shutting down node and application");
         shutdown.cancel();
         // Refuse new tasks, and drop the tasks that have not started.
         drop(added);
@@ -133,10 +140,16 @@ impl Supervisor {
         };
         let (main_result, ()) = tokio::join!(main, running.drain());
 
-        signal_result?;
-        running.into_result()?;
-        main_result?;
-        unexpected_stop.map_or(Ok(()), |message| Err(eyre!(message)))
+        let mut errors =
+            signal_result.err().into_iter().chain(running.into_errors()).chain(main_result.err());
+        let Some(first) = errors.next() else {
+            return stopped
+                .map_or(Ok(()), |Started { unexpected_stop, .. }| Err(eyre!(unexpected_stop)));
+        };
+        errors.for_each(|error| {
+            error!(error = format!("{error:#}"), "the daemon also failed with this error")
+        });
+        Err(first)
     }
 }
 
@@ -159,8 +172,8 @@ enum Work {
 enum Event {
     Signal(Result<()>),
     Added(Task),
-    /// A task stopped. It has this unexpected stop.
-    Stopped(&'static str),
+    /// A task stopped.
+    Stopped(Started),
     MainDone(Result<()>),
 }
 
@@ -186,18 +199,18 @@ impl Running {
         self.results.push(None);
     }
 
-    /// Waits until a task stops, and keeps its result. Gives the unexpected stop of the task, or
-    /// `None` when no task runs.
-    async fn join_next(&mut self) -> Option<&'static str> {
+    /// Waits until a task stops, and keeps its result. Gives the task, or `None` when no task
+    /// runs.
+    async fn join_next(&mut self) -> Option<Started> {
         let (id, result) = match self.set.join_next_with_id().await? {
             Ok((id, result)) => (id, Ok(result)),
             Err(error) => (error.id(), Err(error)),
         };
-        let Started { place, name, unexpected_stop } =
-            self.started.remove(&id).expect("the supervisor starts each task of its set");
-        self.results[place] =
+        let started = self.started.remove(&id).expect("the supervisor starts each task of its set");
+        let name = started.name;
+        self.results[started.place] =
             Some(result.wrap_err_with(|| format!("{name} task panicked")).flatten());
-        Some(unexpected_stop)
+        Some(started)
     }
 
     /// Waits until each task has stopped.
@@ -205,12 +218,12 @@ impl Running {
         while self.join_next().await.is_some() {}
     }
 
-    /// The first error of the tasks in the order that they started. Call it only after
+    /// The errors of the tasks in the order that they started. Call it only after
     /// [`Self::drain`].
-    fn into_result(self) -> Result<()> {
+    fn into_errors(self) -> impl Iterator<Item = eyre::Report> {
         self.results
             .into_iter()
-            .try_for_each(|result| result.expect("the supervisor drains each task"))
+            .filter_map(|result| result.expect("the supervisor drains each task").err())
     }
 }
 

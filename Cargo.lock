@@ -5269,6 +5269,7 @@ dependencies = [
  "eyre",
  "serde_json",
  "tempfile",
+ "tracing",
  "zakura-chain",
  "zeroize",
  "ztreamer-daemon",

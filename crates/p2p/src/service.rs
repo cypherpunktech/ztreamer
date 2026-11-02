@@ -9,7 +9,7 @@ use std::{
 use prost::Message as _;
 use tokio_stream::StreamExt as _;
 use tonic::Status;
-use tracing::{Instrument, Span, field::Empty};
+use tracing::{Instrument, Span, debug, field::Empty};
 use zakura_network::zakura::{
     CustomService, Frame, FramedSend, LOCAL_MAX_CONTROL_FRAME_BYTES, Peer, Service, Stream,
     ZakuraConnId, ZakuraPeerId, ZakuraServiceId,
@@ -225,7 +225,9 @@ impl Service for P2pCompactService {
                 let request = match decoder.push(frame.message_type, frame.flags, frame.payload) {
                     Ok(Some(request)) => request,
                     Ok(None) => continue,
-                    Err(_) => {
+                    Err(error) => {
+                        let (peer_id, conn_id) = (&client.peer_id, client.conn_id);
+                        debug!(peer_id, conn_id, %error, "the peer sent a frame that is not valid");
                         connection_cancel.cancel();
                         break;
                     }

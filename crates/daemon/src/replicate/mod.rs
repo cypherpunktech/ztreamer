@@ -153,7 +153,7 @@ impl Replica {
             verify_sample: SamplePlan { per_range: SamplePlan::PER_RANGE, seed },
             import_workers: ImportConfig::default_import_workers(),
         };
-        info!(source = %self.source, from = ?sealed, import_state = "fetching");
+        info!(source = %self.source, sealed_through = sealed, "importing sealed ranges");
 
         let (stop, stopped) = watch::channel(false);
         let span = tracing::info_span!(

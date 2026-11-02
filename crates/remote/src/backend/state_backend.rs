@@ -229,7 +229,7 @@ impl StateBackend for RemoteBackend {
             .filter_map(|(id, fetched)| {
                 future::ready(match fetched {
                     Err(BackendError::Unavailable(error)) => {
-                        tracing::warn!(txid = %id, %error, "remote zakura: skipped a mempool transaction");
+                        tracing::debug!(txid = %id, %error, "skipped a mempool transaction");
                         None
                     }
                     fetched => fetched.transpose(),
