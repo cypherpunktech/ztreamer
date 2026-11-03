@@ -14,7 +14,7 @@ use zakura_chain::{
 
 use ztreamer_backend::StateBackend;
 
-use ztreamer_chain::codec::{CompactBlockRecord, StoredBlock};
+use ztreamer_chain::codec::StoredBlock;
 use ztreamer_index::index::Index;
 use ztreamer_protocol::{RpcStream, proto};
 use ztreamer_sync::head::ServingSnapshot;
@@ -106,59 +106,39 @@ impl CompactService {
         self.snapshots.borrow().clone()
     }
 
-    async fn record(&self, request: proto::BlockId) -> Result<CompactBlockRecord, Status> {
-        self.record_as(request).await
-    }
-
     async fn record_as<T: StoredBlock + Send + 'static>(
         &self,
         request: proto::BlockId,
     ) -> Result<T, Status> {
         let snapshot = self.snapshot();
         ensure_ready(&snapshot)?;
-        if request.hash.is_empty() {
-            let height = u32::try_from(request.height)
-                .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
-            if let Some(record) = snapshot.volatile(height) {
-                ensure_tip_ready(&snapshot)?;
-                return Ok(T::from_record(record));
+        let key = BlockKey::try_from(request)?;
+        let volatile = match key {
+            BlockKey::Height(height) => snapshot.volatile(height),
+            BlockKey::Hash(hash) => {
+                snapshot.volatile_head.iter().find(|record| record.hash == hash)
             }
-        } else {
-            let hash = request
-                .hash
-                .as_slice()
-                .try_into()
-                .map(block::Hash)
-                .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            if let Some(record) = snapshot.volatile_head.iter().find(|record| record.hash == hash) {
-                ensure_tip_ready(&snapshot)?;
-                return Ok(T::from_record(record));
-            }
+        };
+        if let Some(record) = volatile {
+            ensure_tip_ready(&snapshot)?;
+            return Ok(T::from_record(record));
         }
         let index = Arc::clone(&self.index);
         let generation = snapshot.generation;
         let span = Span::current();
-        let lookup = if request.hash.is_empty() {
-            let height = u32::try_from(request.height)
-                .map_err(|_| Status::invalid_argument("block height exceeds u32"))?;
-            tokio::task::spawn_blocking(move || {
-                span.in_scope(|| index.snapshot(generation)?.block(height).map(Some))
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| {
+                let index = index.snapshot(generation)?;
+                match key {
+                    BlockKey::Height(height) => index.block(height).map(Some),
+                    BlockKey::Hash(hash) => index.block_by_hash(hash),
+                }
             })
-        } else {
-            let hash = request
-                .hash
-                .try_into()
-                .map(block::Hash)
-                .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))?;
-            tokio::task::spawn_blocking(move || {
-                span.in_scope(|| index.snapshot(generation)?.block_by_hash(hash))
-            })
-        };
-        lookup
-            .await
-            .map_err(|error| Status::unavailable(format!("LMDB reader failed: {error}")))?
-            .map_err(Status::from)?
-            .ok_or_else(|| Status::not_found("block is not in the indexed canonical chain"))
+        })
+        .await
+        .map_err(|error| Status::unavailable(format!("LMDB reader failed: {error}")))?
+        .map_err(Status::from)?
+        .ok_or_else(|| Status::not_found("block is not in the indexed canonical chain"))
     }
 
     /// Answers `GetLatestBlock`.
@@ -257,6 +237,31 @@ impl CompactService {
                 })
             })
             .transpose()
+    }
+}
+
+/// The block that a `BlockId` request names: by height if the hash is empty, else by hash.
+#[derive(Clone, Copy, Debug)]
+enum BlockKey {
+    Height(u32),
+    Hash(block::Hash),
+}
+
+impl TryFrom<proto::BlockId> for BlockKey {
+    type Error = Status;
+
+    fn try_from(request: proto::BlockId) -> Result<Self, Status> {
+        if request.hash.is_empty() {
+            u32::try_from(request.height)
+                .map(Self::Height)
+                .map_err(|_| Status::invalid_argument("block height exceeds u32"))
+        } else {
+            request
+                .hash
+                .try_into()
+                .map(|hash| Self::Hash(block::Hash(hash)))
+                .map_err(|_| Status::invalid_argument("block hash must be 32 bytes"))
+        }
     }
 }
 

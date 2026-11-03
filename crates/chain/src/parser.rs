@@ -29,15 +29,6 @@ const ORCHARD_ACTION_BYTES: usize = 820;
 const BCTV14_JOINSPLIT_BYTES: usize = 1_802;
 const GROTH16_JOINSPLIT_BYTES: usize = 1_698;
 
-impl CompactTransaction {
-    const fn has_payload(&self) -> bool {
-        !self.sapling_spends.is_empty()
-            || !self.sapling_outputs.is_empty()
-            || !self.orchard_actions.is_empty()
-            || !self.ironwood_actions.is_empty()
-    }
-}
-
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum CompactParseError {
     #[error("block {height} has a truncated header")]
@@ -79,6 +70,70 @@ pub enum TransactionParseError {
     TrailingBytes { offset: usize },
 }
 
+/// The compact transactions of one block, and the commitments that all its transactions add to
+/// each pool.
+struct BlockTransactions {
+    height: u32,
+    transactions: Vec<CompactTransaction>,
+    sapling_additions: usize,
+    orchard_additions: usize,
+    ironwood_additions: usize,
+}
+
+impl BlockTransactions {
+    const fn new(height: u32) -> Self {
+        Self {
+            height,
+            transactions: Vec::new(),
+            sapling_additions: 0,
+            orchard_additions: 0,
+            ironwood_additions: 0,
+        }
+    }
+
+    /// Adds the commitments of `transaction`. Keeps `transaction` only if it has shielded data.
+    fn push(&mut self, transaction: CompactTransaction) -> Result<(), CompactParseError> {
+        let overflow = CompactParseError::CommitmentCount { height: self.height };
+        self.sapling_additions = self
+            .sapling_additions
+            .checked_add(transaction.sapling_outputs.len())
+            .ok_or(overflow)?;
+        self.orchard_additions = self
+            .orchard_additions
+            .checked_add(transaction.orchard_actions.len())
+            .ok_or(overflow)?;
+        self.ironwood_additions = self
+            .ironwood_additions
+            .checked_add(transaction.ironwood_actions.len())
+            .ok_or(overflow)?;
+        if transaction.has_payload() {
+            self.transactions.push(transaction);
+        }
+        Ok(())
+    }
+
+    /// The parsed block with these transactions.
+    fn into_block(
+        self,
+        hash: block::Hash,
+        previous_hash: block::Hash,
+        time: u32,
+    ) -> Result<ParsedCompactBlock, CompactParseError> {
+        let height = self.height;
+        let overflow = |_| CompactParseError::CommitmentCount { height };
+        Ok(ParsedCompactBlock {
+            height,
+            hash,
+            previous_hash,
+            time,
+            transactions: self.transactions,
+            sapling_additions: self.sapling_additions.try_into().map_err(overflow)?,
+            orchard_additions: self.orchard_additions.try_into().map_err(overflow)?,
+            ironwood_additions: self.ironwood_additions.try_into().map_err(overflow)?,
+        })
+    }
+}
+
 pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactParseError> {
     let height = block.height.0;
     let mut reader = Reader::new(&block.bytes);
@@ -111,10 +166,7 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
             .ok_or(CompactParseError::TruncatedHeader { height })?,
     );
 
-    let mut transactions = Vec::new();
-    let mut sapling_additions = 0usize;
-    let mut orchard_additions = 0usize;
-    let mut ironwood_additions = 0usize;
+    let mut transactions = BlockTransactions::new(height);
     for (index, txid) in block.txids.iter().enumerate() {
         let start = reader.offset;
         let compact = parse_transaction_from(&mut reader, *txid, index as u64)
@@ -126,37 +178,10 @@ pub fn parse_block(block: &RawIndexBlock) -> Result<ParsedCompactBlock, CompactP
                 source: TransactionParseError::TooLarge,
             });
         }
-        sapling_additions = sapling_additions
-            .checked_add(compact.sapling_outputs.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        orchard_additions = orchard_additions
-            .checked_add(compact.orchard_actions.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        ironwood_additions = ironwood_additions
-            .checked_add(compact.ironwood_actions.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        if compact.has_payload() {
-            transactions.push(compact);
-        }
+        transactions.push(compact)?;
     }
     reader.finish().map_err(|source| CompactParseError::Framing { height, source })?;
-
-    Ok(ParsedCompactBlock {
-        height,
-        hash: block.hash,
-        previous_hash,
-        time,
-        transactions,
-        sapling_additions: sapling_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-        orchard_additions: orchard_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-        ironwood_additions: ironwood_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-    })
+    transactions.into_block(block.hash, previous_hash, time)
 }
 
 /// Parses a block from its stored parts: the header fields the index keeps and each transaction's
@@ -170,42 +195,13 @@ pub fn parse_stored_block<'a>(
     time: u32,
     transactions: impl IntoIterator<Item = (&'a [u8], transaction::Hash)>,
 ) -> Result<ParsedCompactBlock, CompactParseError> {
-    let mut compact = Vec::new();
-    let mut sapling_additions = 0usize;
-    let mut orchard_additions = 0usize;
-    let mut ironwood_additions = 0usize;
+    let mut compact = BlockTransactions::new(height);
     for (index, (bytes, txid)) in transactions.into_iter().enumerate() {
         let transaction = parse_transaction(bytes, txid, index as u64)
             .map_err(|source| CompactParseError::Transaction { height, index, source })?;
-        sapling_additions = sapling_additions
-            .checked_add(transaction.sapling_outputs.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        orchard_additions = orchard_additions
-            .checked_add(transaction.orchard_actions.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        ironwood_additions = ironwood_additions
-            .checked_add(transaction.ironwood_actions.len())
-            .ok_or(CompactParseError::CommitmentCount { height })?;
-        if transaction.has_payload() {
-            compact.push(transaction);
-        }
+        compact.push(transaction)?;
     }
-    Ok(ParsedCompactBlock {
-        height,
-        hash,
-        previous_hash,
-        time,
-        transactions: compact,
-        sapling_additions: sapling_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-        orchard_additions: orchard_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-        ironwood_additions: ironwood_additions
-            .try_into()
-            .map_err(|_| CompactParseError::CommitmentCount { height })?,
-    })
+    compact.into_block(hash, previous_hash, time)
 }
 
 pub fn parse_transaction(

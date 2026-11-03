@@ -119,7 +119,7 @@ impl Launcher {
         stage: &StageContext<'_>,
     ) -> Result<ControlFlow<(), CaughtUp<C::Head>>> {
         let wallet = components.wallet().await?;
-        let tip = IndexTip::read(stage.index).await?;
+        let tip = IndexTip::read(stage).await?;
         let ControlFlow::Continue(Tail { finalized, head }) =
             components.tail(tip, stage.shutdown).await?
         else {
