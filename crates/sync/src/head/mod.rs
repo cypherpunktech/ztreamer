@@ -408,9 +408,7 @@ async fn sync_extension_once(
     mut state: IndexState,
     config: PipelineConfig,
 ) -> Result<(IndexState, Vec<CompactBlockRecord>), HeadSyncError> {
-    let start = state
-        .durable_tip()
-        .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
+    let start = state.next_height().ok_or(IngestError::Overflow)?;
     let previous_hash = state.durable_tip().map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
     let prepared = poll_canonical_head(source, start, previous_hash, &[]).await?.blocks;
     let Some(visible_tip) = prepared.last().map(|block| block.height) else {
