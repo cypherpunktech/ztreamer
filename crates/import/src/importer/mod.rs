@@ -443,12 +443,7 @@ impl Importer {
 
     /// Reads the block record at `height` from the index.
     fn read_block(index: &Index, height: u32) -> Result<CompactBlockRecord, IndexError> {
-        let mut found = None;
-        index.latest()?.read_blocks::<CompactBlockRecord>(height, height, |record| {
-            found = Some(record);
-            false
-        })?;
-        found.ok_or(IndexError::Coverage { height })
+        index.latest()?.block(height)
     }
 
     /// Runs an index call on the blocking thread pool.

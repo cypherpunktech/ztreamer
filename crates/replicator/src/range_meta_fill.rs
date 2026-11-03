@@ -339,12 +339,7 @@ impl RangeRead {
 
     /// The record at `height` in the current generation.
     fn record(index: &Index, height: u32) -> Result<CompactBlockRecord, FillError> {
-        let mut found = None;
-        index.latest()?.read_blocks::<CompactBlockRecord>(height, height, |record| {
-            found = Some(record);
-            false
-        })?;
-        Ok(found.ok_or(IndexError::Coverage { height })?)
+        Ok(index.latest()?.block(height)?)
     }
 }
 
