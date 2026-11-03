@@ -111,6 +111,18 @@ ztreamerd export-snapshot --index-dir ztreamer-index --out snapshot --signing-ke
 
 This command writes the sealed ranges of an index as a snapshot. The remote mode can import this snapshot. The signing key is a raw 32-byte Ed25519 seed. An export into the same directory writes only the new ranges. Give `--index-dir` and `--index-map-size` after the subcommand name.
 
+## Snapshot verification
+
+```console
+cargo install --locked --git https://github.com/cypherpunktech/ztreamer ztreamer-verify
+ztreamer-verify --snapshot-url https://snapshot.ztreamer.sh/mainnet --node http://user:password@127.0.0.1:8232
+```
+
+`ztreamer-verify` checks each epoch of a published snapshot with the checks of a remote-mode import, and writes no index. It exits with 0 only if each epoch passes.
+
+- Without `--node`, it checks the signatures with the built-in key, the digest of each blob, the hash links, the tree sizes, and each frontier and subtree root of the rebuilt trees. A pass proves that the files are the files that the key signed, and that the remote mode reads them. It does not prove that the snapshot is the chain.
+- With `--node`, the zakura node also attests the end of each epoch and samples two blocks of each range, as in an import. A pass proves that an empty replica on that node accepts the snapshot.
+
 ## Index size
 
 `--index-map-size` sets the maximum LMDB map size. The default is 64 GiB. On 2026-10-27, the mainnet index at height 3,532,489 was 17.3 GiB.

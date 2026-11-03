@@ -4916,6 +4916,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ztreamer-verify"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ed25519-zebra",
+ "eyre",
+ "getrandom 0.4.3",
+ "http",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ztreamer-import",
+ "ztreamer-index",
+ "ztreamer-remote",
+ "ztreamer-snapshot",
+]
+
+[[package]]
 name = "ztreamerd"
 version = "0.1.0"
 dependencies = [
