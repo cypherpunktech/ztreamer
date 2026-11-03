@@ -13,8 +13,10 @@
 //! # Epochs
 //!
 //! An epoch is a group of consecutive ranges. A replica asks the node for the tree state once
-//! for each epoch. An epoch closes at [`MAX_RANGES`] ranges, or when its ranges add
-//! [`MAX_COMMITMENTS`] note commitments. The first limit that a range reaches closes the epoch.
+//! for each epoch. [`ManifestEpoch::rule_closes`] gives the rule: an epoch closes at
+//! [`MAX_RANGES`](ztreamer_snapshot::manifest_entry::MAX_RANGES) ranges, or when its ranges add
+//! [`MAX_COMMITMENTS`](ztreamer_snapshot::manifest_entry::MAX_COMMITMENTS) note commitments. The
+//! first limit that a range reaches closes the epoch.
 //! The filler reads the rows that exist in height order. Thus a restart continues the same
 //! grouping.
 
@@ -40,7 +42,8 @@ use ztreamer_index::index::{
     range_meta::{Attested, NodeId, RangeMeta, VerifyState},
 };
 use ztreamer_snapshot::{
-    manifest_entry::{BlobDigest, Frontiers, MAX_COMMITMENTS, MAX_RANGES, ManifestEntry},
+    epoch::Epoch as ManifestEpoch,
+    manifest_entry::{BlobDigest, Frontiers, ManifestEntry},
     pool::{PoolRoots, SubtreeNode, SubtreeRoot},
 };
 
@@ -390,8 +393,10 @@ impl Epoch {
     /// Returns `true` if the next range closes the epoch. `end_tree_sizes` are the tree sizes at
     /// the end of that range.
     const fn closes_at(self, end_tree_sizes: TreeSizes) -> bool {
-        self.ranges + 1 >= MAX_RANGES
-            || end_tree_sizes.total().saturating_sub(self.start_commitments) >= MAX_COMMITMENTS
+        ManifestEpoch::rule_closes(
+            self.ranges + 1,
+            end_tree_sizes.total().saturating_sub(self.start_commitments),
+        )
     }
 
     /// Adds the next range, with the `epoch_end` and `end_tree_sizes` of its row.
