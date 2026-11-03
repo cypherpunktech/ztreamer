@@ -31,11 +31,11 @@ use ztreamer_snapshot::layout::SNAPSHOT_PUBKEY;
 )]
 struct Cli {
     /// Base URL of the snapshot: the directory of `latest.json`, for example
-    /// https://snapshot.ztreamer.sh/mainnet.
+    /// `https://snapshot.ztreamer.sh/mainnet`.
     #[arg(long, value_name = "URL")]
     snapshot_url: Uri,
 
-    /// JSON-RPC URL of a zakura node, for example http://user:password@127.0.0.1:8232. The node
+    /// JSON-RPC URL of a zakura node, for example `http://user:password@127.0.0.1:8232`. The node
     /// attests and samples each epoch. Without this flag, the check does not prove that the
     /// snapshot is the chain.
     #[arg(long, value_name = "URL")]
