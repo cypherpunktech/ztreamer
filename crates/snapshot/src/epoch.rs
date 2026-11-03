@@ -26,6 +26,13 @@ pub struct Epoch<'a> {
 }
 
 impl<'a> Epoch<'a> {
+    /// Returns `true` if the epoch rule closes an epoch of `ranges` ranges that adds
+    /// `commitments` note commitments: it has [`MAX_RANGES`] ranges, or it adds
+    /// [`MAX_COMMITMENTS`] note commitments or more.
+    pub const fn rule_closes(ranges: usize, commitments: u64) -> bool {
+        ranges >= MAX_RANGES || commitments >= MAX_COMMITMENTS
+    }
+
     /// The entries of the epoch, in height order. Never empty.
     pub const fn entries(&self) -> &'a [ManifestEntry] {
         self.entries
@@ -125,13 +132,13 @@ impl<'a> Iterator for Epochs<'a> {
         let added = |entry: &ManifestEntry| entry.end_tree_sizes.total().saturating_sub(base);
         let len = rest
             .iter()
-            .take(MAX_RANGES)
-            .position(|entry| added(entry) >= MAX_COMMITMENTS)
-            .map_or(rest.len().min(MAX_RANGES), |at| at + 1);
+            .enumerate()
+            .position(|(at, entry)| Epoch::rule_closes(at + 1, added(entry)))
+            .map_or(rest.len(), |at| at + 1);
         let entries = &rest[..len];
         self.start += len;
         let last = entries.last().expect("`rest` is not empty, thus `len` is at least 1");
-        let closed_by_rule = len >= MAX_RANGES || added(last) >= MAX_COMMITMENTS;
+        let closed_by_rule = Epoch::rule_closes(len, added(last));
         Some(Epoch { entries, previous, closed_by_rule })
     }
 }
