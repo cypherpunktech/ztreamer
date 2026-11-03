@@ -30,10 +30,13 @@ impl CompactService {
         request: proto::BlockId,
         nullifiers: bool,
     ) -> Result<EncodedCompactBlock, Status> {
-        if nullifiers {
-            return self.block(request, true).await.map(Into::into);
+        let block = self.record_as::<EncodedBlockRecord>(request).await?.block;
+        if !nullifiers {
+            return Ok(block);
         }
-        Ok(self.record_as::<EncodedBlockRecord>(request).await?.block)
+        PoolSelection::from_request(&[])
+            .expect("empty pool selection is valid")
+            .project_encoded_block(&block, true)
     }
 
     /// Answers `GetBlockRange`, or `GetBlockRangeNullifiers` when `nullifiers` is set.
@@ -43,11 +46,18 @@ impl CompactService {
         nullifiers: bool,
     ) -> Result<RpcStream<EncodedCompactBlock>, Status> {
         let pools = PoolSelection::from_request(&request.pool_types)?;
-        if !nullifiers && pools.is_all() {
-            self.range_as(request, |record: EncodedBlockRecord| record.block).await
-        } else {
-            Ok(Box::pin(self.range(request, nullifiers).await?.map(|block| block.map(Into::into))))
+        if pools.transparent {
+            return Ok(Box::pin(
+                self.range(request, nullifiers).await?.map(|block| block.map(Into::into)),
+            ));
         }
+        if !nullifiers && pools.is_all() {
+            return self.range_as(request, |record: EncodedBlockRecord| Ok(record.block)).await;
+        }
+        self.range_as(request, move |record: EncodedBlockRecord| {
+            pools.project_encoded_block(&record.block, nullifiers)
+        })
+        .await
     }
 
     /// Streams decoded blocks with the requested pool/nullifier projection.
@@ -59,7 +69,7 @@ impl CompactService {
         let pools = PoolSelection::from_request(&request.pool_types)?;
         let blocks = self
             .range_as(request, move |record: ProtobufBlockRecord| {
-                project_block(record.0, pools, nullifiers)
+                Ok(project_block(record.0, pools, nullifiers))
             })
             .await?;
         if !pools.transparent {
@@ -105,7 +115,7 @@ impl CompactService {
     async fn range_as<T: StoredBlock + Send + 'static, B: Send + 'static>(
         &self,
         request: proto::BlockRange,
-        project: impl Fn(T) -> B + Send + 'static,
+        project: impl Fn(T) -> Result<B, Status> + Send + 'static,
     ) -> Result<RpcStream<B>, Status> {
         let (start, end) = range_heights(&request)?;
         let snapshot = self.snapshot();
@@ -145,7 +155,12 @@ impl CompactService {
                 let _ = &permit;
                 if let Some(record) = records.next() {
                     last = Some((record.hash(), record.previous_hash()));
-                    return Some(Ok(project(record)));
+                    let block = project(record);
+                    if block.is_err() {
+                        records = Vec::new().into_iter();
+                        cursor = None;
+                    }
+                    return Some(block);
                 }
                 let height = cursor?;
                 let mut chunk_end = if ascending {

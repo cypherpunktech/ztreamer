@@ -9,11 +9,11 @@ workspace = true
 
 [features]
 # Shared test, benchmark and example support in `ztreamer_service::test_utils`.
-test-utils = ["dep:prost", "dep:sapling-crypto", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-chain/test-utils", "ztreamer-index/test-utils"]
+test-utils = ["dep:sapling-crypto", "dep:tempfile", "tokio/net", "tokio-stream/net", "ztreamer-chain/test-utils", "ztreamer-index/test-utils"]
 
 [dependencies]
 hex = "0.4"
-prost = { version = "0.14.4", optional = true }
+prost = "0.14.4"
 sapling-crypto = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
