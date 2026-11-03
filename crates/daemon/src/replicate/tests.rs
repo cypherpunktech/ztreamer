@@ -5,8 +5,9 @@ use ed25519_zebra::SigningKey;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
-use zakura_chain::{block::Block, serialization::ZcashSerialize as _};
+use zakura_chain::{block::Block, parameters::Network, serialization::ZcashSerialize as _};
 use ztreamer_chain::{
     codec::{CompactBlockRecord, RANGE_SIZE},
     test_utils::grow_chain,
@@ -17,7 +18,7 @@ use ztreamer_import::{
     test_utils::{FileServer, SourceIndex},
 };
 use ztreamer_index::{
-    index::{SEAL_DEPTH, range_meta::VerifyState},
+    index::{Index, SEAL_DEPTH, range_meta::VerifyState},
     test_utils::range_meta_row,
 };
 use ztreamer_protocol::{
