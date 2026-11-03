@@ -215,6 +215,20 @@ impl OrderedBuilder {
         self.generation = self.generation.checked_add(1).ok_or(IngestError::Overflow)?;
         Ok(Some(WriteBatch { base_generation, seal_through, records }))
     }
+
+    /// Builds batches through `through`, without a seal, until no batch is left. Returns their
+    /// records in height order, and does not write them to the index.
+    pub fn drain_records(
+        &mut self,
+        through: u32,
+        max_batch_bytes: usize,
+    ) -> Result<Vec<CompactBlockRecord>, IngestError> {
+        let mut records = Vec::new();
+        while let Some(batch) = self.build_batch(Some(through), None, max_batch_bytes)? {
+            records.extend(batch.into_records());
+        }
+        Ok(records)
+    }
 }
 
 #[cfg(test)]
