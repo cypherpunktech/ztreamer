@@ -290,8 +290,7 @@ pub(crate) struct ReplicaImport {
 impl HistoricalSource for ReplicaImport {
     async fn fill(self, stage: &StageContext<'_>) -> Result<ControlFlow<()>> {
         let Self { node, info } = self;
-        let StageContext { index, network, shutdown, .. } = stage;
-        node.replica.import(&node.client, node.id(), &info, network, index, shutdown).await
+        node.replica.import(&node.client, node.id(), &info, stage).await
     }
 }
 

@@ -15,9 +15,8 @@ use ed25519_zebra::VerificationKey;
 use eyre::{Result, WrapErr, ensure, eyre};
 use http::Uri;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 use tracing::{Instrument as _, info};
-use zakura_chain::{block::Height, parameters::Network};
+use zakura_chain::block::Height;
 use zakura_rpc::client::GetBlockchainInfoResponse;
 use ztreamer_import::{
     attest::JsonRpcAttestor,
@@ -25,10 +24,12 @@ use ztreamer_import::{
     importer::{ImportConfig, ImportError, Importer, TrustedNode},
     sample::{JsonRpcSampler, SamplePlan},
 };
-use ztreamer_index::index::{Index, range_meta::NodeId};
+use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_remote::RemoteBackend;
 use ztreamer_remote::ZakuraClient;
 use ztreamer_snapshot::layout::SNAPSHOT_PUBKEY;
+
+use crate::node::StageContext;
 
 /// The source of an import: a `--replicate-from` value.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,10 +97,10 @@ impl Replica {
         Self { source, key }
     }
 
-    /// Imports the epochs of the manifest above the sealed tip of `index`, checked against the
-    /// node of `client`. Each installed row names the node as `id`. `info` is the
-    /// `getblockchaininfo` answer of the node, and `network` the network of its chain. Breaks on
-    /// shutdown.
+    /// Imports the epochs of the manifest above the sealed tip of the index of `stage`, checked
+    /// against the node of `client`. Each installed row names the node as `id`. `info` is the
+    /// `getblockchaininfo` answer of the node, and the network of `stage` the network of its
+    /// chain. Breaks on the shutdown of `stage`.
     ///
     /// The refusals of the module docs come first. An index that is sealed at or above the
     /// manifest needs no import. The import starts at the sealed tip, also inside an epoch of
@@ -110,24 +111,17 @@ impl Replica {
         client: &ZakuraClient,
         id: NodeId,
         info: &GetBlockchainInfoResponse,
-        network: &Network,
-        index: &Arc<Index>,
-        shutdown: &CancellationToken,
+        stage: &StageContext<'_>,
     ) -> Result<ControlFlow<()>> {
-        // `RemoteNode::sources` checks the chain and the genesis block again, after the import. The
-        // import can take hours, and in that time the node can restart on another chain, or
-        // another node can answer at the URL. That second check refuses such a node before the
-        // daemon serves from it.
+        let &StageContext { index, network, shutdown, .. } = stage;
+        // `RemoteComponents::wallet` checks the chain and the genesis block again, after the
+        // import. The import can take hours, and in that time the node can restart on another
+        // chain, or another node can answer at the URL. That second check refuses such a node
+        // before the daemon serves from it.
         RemoteBackend::connect(client.clone(), network.clone())
             .await
             .wrap_err("check the chain of the remote zakura node")?;
-        let sealed = {
-            let (index, span) = (Arc::clone(index), tracing::Span::current());
-            tokio::task::spawn_blocking(move || span.in_scope(|| index.state()))
-                .await
-                .wrap_err("index state task panicked")??
-                .sealed_through()
-        };
+        let sealed = stage.index_state().await?.sealed_through();
         // The samples and the tail read the block bodies from the next block on.
         let next = Height(sealed.map_or(0, |sealed| sealed + 1));
         let first = info.prune_height().unwrap_or(Height::MIN);
