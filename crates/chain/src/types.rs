@@ -117,6 +117,17 @@ pub struct CompactTransaction {
     pub ironwood_actions: Vec<CompactShieldedAction>,
 }
 
+impl CompactTransaction {
+    /// Returns `true` if the transaction has a Sapling spend or output, or an Orchard or
+    /// Ironwood action.
+    pub(crate) const fn has_payload(&self) -> bool {
+        !self.sapling_spends.is_empty()
+            || !self.sapling_outputs.is_empty()
+            || !self.orchard_actions.is_empty()
+            || !self.ironwood_actions.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Parser output that later gets converted into a
 /// [`crate::codec::CompactBlockRecord`]
