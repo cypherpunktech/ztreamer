@@ -7,7 +7,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 use tokio::sync::Semaphore;
 use tracing::{Span, field::Empty};
 use ztreamer_blocking::BlockingTask;
@@ -15,7 +14,7 @@ use ztreamer_index::index::{
     CheckedRange, IndexState,
     range_meta::{RangeMeta, VerifyState},
 };
-use ztreamer_snapshot::manifest_entry::{Frontiers, MAX_RANGES, ManifestEntry};
+use ztreamer_snapshot::manifest_entry::{Frontiers, ManifestEntry};
 
 use super::{ImportError, Importer, MAX_BLOB_BYTES_BEFORE_INSTALL};
 use crate::proof::EpochProof;
@@ -23,15 +22,6 @@ use ztreamer_snapshot::{
     epoch::{Epoch, Epochs},
     manifest::Manifest,
 };
-
-/// The blob fetches of one epoch that run at the same time: all the blobs of the epoch. The
-/// epoch holds the bytes of its blobs in the byte budget before its fetch, thus this adds no
-/// memory. The request limit of the source ([`PEER_RANGE_STREAMS`], [`HTTP_BLOB_REQUESTS`]) sets
-/// the requests on the wire.
-///
-/// [`PEER_RANGE_STREAMS`]: crate::fetch::PEER_RANGE_STREAMS
-/// [`HTTP_BLOB_REQUESTS`]: crate::fetch::HTTP_BLOB_REQUESTS
-const BLOB_FETCHES_PER_EPOCH: usize = MAX_RANGES;
 
 /// The checked ranges of an epoch and their `range_meta` rows, in height order.
 pub(crate) type VerifiedRows = Vec<(CheckedRange, RangeMeta)>;
@@ -123,21 +113,9 @@ impl EpochImport {
         self: Arc<Self>,
         at: usize,
     ) -> Result<VerifiedRows, ImportError> {
-        let blobs = self.fetch_blobs(at).await?;
+        let blobs = self.importer.fetcher.epoch_blobs(&self.manifest_epoch(at)).await?;
         let (ranges, proof) = self.verify_on_blocking_pool(at, blobs).await?;
         self.attest_and_sample(at, ranges, proof).await
-    }
-
-    /// The blobs of the epoch at `at`, from the source, in height order. At most
-    /// [`BLOB_FETCHES_PER_EPOCH`] fetches run at the same time. The first failed blob in height
-    /// order stops the fetch with its error, and the drop stops the other fetches.
-    async fn fetch_blobs(&self, at: usize) -> Result<Vec<Bytes>, ImportError> {
-        let fetcher = &self.importer.fetcher;
-        // A stream that maps with a closure makes `Importer::run` not `Send` (rust#102211). The
-        // futures in the `Vec` do no work until `buffered` polls them.
-        let fetches: Vec<_> =
-            self.manifest_epoch(at).entries().iter().map(|entry| fetcher.blob(entry)).collect();
-        Ok(stream::iter(fetches).buffered(BLOB_FETCHES_PER_EPOCH).try_collect().await?)
     }
 
     /// Runs [`EpochProof::rebuild`] for the epoch at `at` on the blocking thread pool, with one of
