@@ -89,10 +89,7 @@ impl<'env> IndexWriter<'env> {
         let EncodedBatch { base_generation, seal_through, blocks, end_tree_sizes } = batch;
         let state = self.state();
         let first = blocks.first().expect("builders never emit empty batches");
-        let expected_height = match state.durable_tip {
-            Some(tip) => tip.height.checked_add(1).ok_or(IndexError::Overflow)?,
-            None => 0,
-        };
+        let expected_height = state.next_height().ok_or(IndexError::Overflow)?;
         if first.height != expected_height
             || state.durable_tip.is_some_and(|tip| first.previous_hash != tip.hash)
         {

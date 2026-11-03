@@ -88,10 +88,7 @@ pub fn partial_range_flush_threshold(max_pending_bytes: usize, max_batch_bytes: 
 
 impl OrderedBuilder {
     pub fn new(state: IndexState, max_pending_bytes: usize) -> Result<Self, IngestError> {
-        let next_height = match state.durable_tip {
-            Some(tip) => tip.height.checked_add(1).ok_or(IngestError::Overflow)?,
-            None => 0,
-        };
+        let next_height = state.next_height().ok_or(IngestError::Overflow)?;
         Ok(Self {
             next_height,
             previous_hash: state.durable_tip.map(|tip| tip.hash),

@@ -278,8 +278,7 @@ impl<'a, S: FinalizedBlockSource> HistoricalPipeline<'a, S> {
         // read local resume point
         let initial_state = self.index.state()?;
         let durable_tip = initial_state.durable_tip();
-        let start = durable_tip
-            .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
+        let start = initial_state.next_height().ok_or(IngestError::Overflow)?;
 
         let (tip_height, tip_hash) = self.db.tip()?.ok_or(PipelineError::NoSourceTip)?;
         // The live-head reconciler validates durable records newer than Zakura's finalized tip.

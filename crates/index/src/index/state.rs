@@ -84,6 +84,12 @@ impl IndexState {
         Self { durable_tip: Some(tip), tree_sizes, ..self }
     }
 
+    /// Returns the height above the durable tip: `durable_tip + 1`, or 0 if the index has no
+    /// block. Returns `None` if the height overflows.
+    pub fn next_height(&self) -> Option<u32> {
+        self.durable_tip.map_or(Some(0), |tip| tip.height.checked_add(1))
+    }
+
     /// Returns the first height of the next range to seal: `sealed_through + 1`, or 0 if no range
     /// is sealed.
     pub(crate) fn next_range_start(&self) -> Result<u32, IndexError> {
