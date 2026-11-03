@@ -88,10 +88,7 @@ pub fn partial_range_flush_threshold(max_pending_bytes: usize, max_batch_bytes: 
 
 impl OrderedBuilder {
     pub fn new(state: IndexState, max_pending_bytes: usize) -> Result<Self, IngestError> {
-        let next_height = match state.durable_tip {
-            Some(tip) => tip.height.checked_add(1).ok_or(IngestError::Overflow)?,
-            None => 0,
-        };
+        let next_height = state.next_height().ok_or(IngestError::Overflow)?;
         Ok(Self {
             next_height,
             previous_hash: state.durable_tip.map(|tip| tip.hash),
@@ -188,23 +185,10 @@ impl OrderedBuilder {
             if self.previous_hash.is_some_and(|previous| block.previous_hash != previous) {
                 return Err(IngestError::Parent { height: block.height });
             }
-            let end_tree_sizes = TreeSizes {
-                sapling: self
-                    .tree_sizes
-                    .sapling
-                    .checked_add(block.sapling_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-                orchard: self
-                    .tree_sizes
-                    .orchard
-                    .checked_add(block.orchard_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-                ironwood: self
-                    .tree_sizes
-                    .ironwood
-                    .checked_add(block.ironwood_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-            };
+            let end_tree_sizes = self
+                .tree_sizes
+                .checked_add(block.additions())
+                .ok_or(IngestError::TreeSize { height: block.height })?;
             let next_height = self.next_height.checked_add(1).ok_or(IngestError::Overflow)?;
             let (block, bytes) =
                 self.pending.remove(&self.next_height).expect("the pending block was just checked");
@@ -230,6 +214,20 @@ impl OrderedBuilder {
         }
         self.generation = self.generation.checked_add(1).ok_or(IngestError::Overflow)?;
         Ok(Some(WriteBatch { base_generation, seal_through, records }))
+    }
+
+    /// Builds batches through `through`, without a seal, until no batch is left. Returns their
+    /// records in height order, and does not write them to the index.
+    pub fn drain_records(
+        &mut self,
+        through: u32,
+        max_batch_bytes: usize,
+    ) -> Result<Vec<CompactBlockRecord>, IngestError> {
+        let mut records = Vec::new();
+        while let Some(batch) = self.build_batch(Some(through), None, max_batch_bytes)? {
+            records.extend(batch.into_records());
+        }
+        Ok(records)
     }
 }
 

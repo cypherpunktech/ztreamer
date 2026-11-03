@@ -4,7 +4,7 @@
 //! rules between the tables. [`IndexWriter`](super::writer::IndexWriter) does that. The docs of
 //! the `index` module give the full table layout, the rules, and an example.
 
-use std::convert::Infallible;
+use std::{convert::Infallible, marker::PhantomData};
 
 use heed::{
     Database, Env, RoIter, RoTxn, RwTxn,
@@ -42,8 +42,8 @@ impl Tables {
     pub(crate) fn open(env: &Env, txn: &mut RwTxn<'_>) -> Result<Self, IndexError> {
         Ok(Self {
             metadata: Metadata::new(env.create_database(txn, Some("metadata"))?),
-            sealed_ranges: SealedRanges(env.create_database(txn, Some("sealed_ranges"))?),
-            mutable_blocks: MutableBlocks(env.create_database(txn, Some("mutable_blocks"))?),
+            sealed_ranges: SealedRanges::new(env.create_database(txn, Some("sealed_ranges"))?),
+            mutable_blocks: MutableBlocks::new(env.create_database(txn, Some("mutable_blocks"))?),
             hash_to_height: HashIndex(env.create_database(txn, Some("hash_to_height"))?),
             range_meta: RangeMetaTable::new(env.create_database(txn, Some("range_meta"))?),
         })
@@ -76,37 +76,22 @@ impl Tables {
     }
 }
 
-/// Packed ranges of [`RANGE_SIZE`] blocks.
-///
-/// - Key: the first height of the range, `u32` big-endian. It is a multiple of [`RANGE_SIZE`].
-/// - Value: the records of the range, packed by `codec::write_range`, which gives the byte
-///   layout.
-///
-/// The ranges cover the heights from 0 to `sealed_through`.
+/// A table with a `u32` big-endian height key and a byte value. `M` is [`Sealed`] or
+/// [`Mutable`], and selects the methods that only one of the two tables has.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SealedRanges(HeightDb);
+pub(crate) struct HeightTable<M>(HeightDb, PhantomData<M>);
 
-impl SealedRanges {
-    /// Finds the range that holds `height`, or `None` if no range starts at
-    /// [`range_start`]`(height)`.
-    pub(crate) fn find<'txn>(
-        &self,
-        txn: &'txn RoTxn<'_>,
-        height: u32,
-    ) -> Result<Option<SealedRange<'txn>>, IndexError> {
-        let start = range_start(height);
-        let Some(bytes) = self.get(txn, start)? else {
-            return Ok(None);
-        };
-        Ok(Some(SealedRange::new(start, bytes)?))
+impl<M> HeightTable<M> {
+    const fn new(db: HeightDb) -> Self {
+        Self(db, PhantomData)
     }
 
     pub(crate) fn get<'txn>(
         &self,
         txn: &'txn RoTxn<'_>,
-        start: u32,
+        height: u32,
     ) -> Result<Option<&'txn [u8]>, IndexError> {
-        Ok(self.0.get(txn, &start)?)
+        Ok(self.0.get(txn, &height)?)
     }
 
     pub(crate) fn iter<'txn>(&self, txn: &'txn RoTxn<'_>) -> Result<HeightIter<'txn>, IndexError> {
@@ -124,14 +109,43 @@ impl SealedRanges {
     pub(crate) fn put(
         &self,
         txn: &mut RwTxn<'_>,
-        start: u32,
-        packed: &[u8],
+        height: u32,
+        bytes: &[u8],
     ) -> Result<(), IndexError> {
-        Ok(self.0.put(txn, &start, packed)?)
+        Ok(self.0.put(txn, &height, bytes)?)
     }
 
-    pub(crate) fn delete(&self, txn: &mut RwTxn<'_>, start: u32) -> Result<bool, IndexError> {
-        Ok(self.0.delete(txn, &start)?)
+    pub(crate) fn delete(&self, txn: &mut RwTxn<'_>, height: u32) -> Result<bool, IndexError> {
+        Ok(self.0.delete(txn, &height)?)
+    }
+}
+
+/// The marker of [`SealedRanges`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Sealed {}
+
+/// Packed ranges of [`RANGE_SIZE`] blocks.
+///
+/// - Key: the first height of the range, `u32` big-endian. It is a multiple of [`RANGE_SIZE`].
+/// - Value: the records of the range, packed by `codec::write_range`, which gives the byte
+///   layout.
+///
+/// The ranges cover the heights from 0 to `sealed_through`.
+pub(crate) type SealedRanges = HeightTable<Sealed>;
+
+impl HeightTable<Sealed> {
+    /// Finds the range that holds `height`, or `None` if no range starts at
+    /// [`range_start`]`(height)`.
+    pub(crate) fn find<'txn>(
+        &self,
+        txn: &'txn RoTxn<'_>,
+        height: u32,
+    ) -> Result<Option<SealedRange<'txn>>, IndexError> {
+        let start = range_start(height);
+        let Some(bytes) = self.get(txn, start)? else {
+            return Ok(None);
+        };
+        Ok(Some(SealedRange::new(start, bytes)?))
     }
 }
 
@@ -255,6 +269,10 @@ impl RangeChain {
     }
 }
 
+/// The marker of [`MutableBlocks`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Mutable {}
+
 /// One encoded block for each height above the sealed ranges.
 ///
 /// - Key: the height, `u32` big-endian.
@@ -263,43 +281,9 @@ impl RangeChain {
 ///
 /// The rows cover the heights from `sealed_through + 1` to the durable tip. A seal copies the
 /// row bytes into a range without a new encode.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct MutableBlocks(HeightDb);
+pub(crate) type MutableBlocks = HeightTable<Mutable>;
 
-impl MutableBlocks {
-    pub(crate) fn get<'txn>(
-        &self,
-        txn: &'txn RoTxn<'_>,
-        height: u32,
-    ) -> Result<Option<&'txn [u8]>, IndexError> {
-        Ok(self.0.get(txn, &height)?)
-    }
-
-    pub(crate) fn iter<'txn>(&self, txn: &'txn RoTxn<'_>) -> Result<HeightIter<'txn>, IndexError> {
-        Ok(self.0.iter(txn)?)
-    }
-
-    pub(crate) fn len(&self, txn: &RoTxn<'_>) -> Result<u64, IndexError> {
-        Ok(self.0.len(txn)?)
-    }
-
-    pub(crate) fn is_empty(&self, txn: &RoTxn<'_>) -> Result<bool, IndexError> {
-        Ok(self.0.is_empty(txn)?)
-    }
-
-    pub(crate) fn put(
-        &self,
-        txn: &mut RwTxn<'_>,
-        height: u32,
-        bytes: &[u8],
-    ) -> Result<(), IndexError> {
-        Ok(self.0.put(txn, &height, bytes)?)
-    }
-
-    pub(crate) fn delete(&self, txn: &mut RwTxn<'_>, height: u32) -> Result<bool, IndexError> {
-        Ok(self.0.delete(txn, &height)?)
-    }
-
+impl HeightTable<Mutable> {
     /// Deletes the row at each height. A height without a row is skipped.
     pub(crate) fn delete_range(
         &self,

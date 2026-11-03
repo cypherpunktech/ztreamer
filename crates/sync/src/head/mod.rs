@@ -308,9 +308,7 @@ async fn replace_suffix(
     for block in suffix.blocks.into_iter().filter(|block| block.height > common.height) {
         builder.push(block)?;
     }
-    while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        canonical.extend(batch.into_records());
-    }
+    canonical.extend(builder.drain_records(visible_tip, config.max_batch_bytes)?);
 
     let new_durable_through = visible_tip.checked_sub(PERSIST_DEPTH);
     let durable_tip =
@@ -378,10 +376,7 @@ pub async fn recover_deep_reorg(
     for block in prepared {
         builder.push(block)?;
     }
-    let mut canonical = Vec::new();
-    while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        canonical.extend(batch.into_records());
-    }
+    let canonical = builder.drain_records(visible_tip, config.max_batch_bytes)?;
 
     let durable_tip =
         visible_tip.checked_sub(PERSIST_DEPTH).map_or(matching, |height| height.max(matching));
@@ -408,9 +403,7 @@ async fn sync_extension_once(
     mut state: IndexState,
     config: PipelineConfig,
 ) -> Result<(IndexState, Vec<CompactBlockRecord>), HeadSyncError> {
-    let start = state
-        .durable_tip()
-        .map_or(Ok(0), |tip| tip.height.checked_add(1).ok_or(IngestError::Overflow))?;
+    let start = state.next_height().ok_or(IngestError::Overflow)?;
     let previous_hash = state.durable_tip().map_or(GENESIS_PREVIOUS_BLOCK_HASH, |tip| tip.hash);
     let prepared = poll_canonical_head(source, start, previous_hash, &[]).await?.blocks;
     let Some(visible_tip) = prepared.last().map(|block| block.height) else {
@@ -429,10 +422,7 @@ async fn sync_extension_once(
         state = index.write(batch)?;
     }
 
-    let mut volatile = Vec::new();
-    while let Some(batch) = builder.build_batch(Some(visible_tip), None, config.max_batch_bytes)? {
-        volatile.extend(batch.into_records());
-    }
+    let volatile = builder.drain_records(visible_tip, config.max_batch_bytes)?;
     Ok((state, volatile))
 }
 

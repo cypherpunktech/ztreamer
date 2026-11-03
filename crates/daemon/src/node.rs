@@ -8,7 +8,7 @@ use eyre::{Result, WrapErr};
 use tokio_util::sync::CancellationToken;
 use zakura_chain::parameters::Network;
 use ztreamer_backend::StateBackend;
-use ztreamer_index::index::{BlockId, Index, range_meta::NodeId};
+use ztreamer_index::index::{BlockId, Index, IndexState, range_meta::NodeId};
 use ztreamer_service::{CompactService, NodeVersion};
 use ztreamer_sync::{head::CanonicalBlockSource, pipeline::FinalizedBlockSource};
 
@@ -105,18 +105,24 @@ pub(crate) struct StageContext<'a> {
     pub(crate) shutdown: &'a CancellationToken,
 }
 
+impl StageContext<'_> {
+    /// Reads the state of the index on a blocking thread.
+    pub(crate) async fn index_state(&self) -> Result<IndexState> {
+        let (index, span) = (Arc::clone(self.index), tracing::Span::current());
+        Ok(tokio::task::spawn_blocking(move || span.in_scope(|| index.state()))
+            .await
+            .wrap_err("index state task panicked")??)
+    }
+}
+
 /// The durable tip of the index. The node must serve the blocks above it before the catch-up.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IndexTip(Option<BlockId>);
 
 impl IndexTip {
-    /// Reads the durable tip of `index` on a blocking thread.
-    pub(crate) async fn read(index: &Arc<Index>) -> Result<Self> {
-        let (index, span) = (Arc::clone(index), tracing::Span::current());
-        let state = tokio::task::spawn_blocking(move || span.in_scope(|| index.state()))
-            .await
-            .wrap_err("index state task panicked")??;
-        Ok(Self(state.durable_tip()))
+    /// Reads the durable tip of the index of `stage` on a blocking thread.
+    pub(crate) async fn read(stage: &StageContext<'_>) -> Result<Self> {
+        Ok(Self(stage.index_state().await?.durable_tip()))
     }
 
     /// The height of the tip. `None` for an empty index.

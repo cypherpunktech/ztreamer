@@ -7,14 +7,15 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 use tracing::Span;
 use zakura_chain::subtree::NoteCommitmentSubtreeIndex;
+use ztreamer_chain::codec::CompactBlockRecord;
 use ztreamer_protocol::proto;
 
-use super::{CompactService, RpcStream, ServingSnapshot, ensure_tip_ready};
+use super::{CompactService, RpcStream, ServingSnapshot};
 
 impl CompactService {
     /// Answers `GetTreeState`.
     pub async fn tree_state(&self, request: proto::BlockId) -> Result<proto::TreeState, Status> {
-        let record = self.record(request).await?;
+        let record = self.record_as::<CompactBlockRecord>(request).await?;
         let hash = record.hash;
         let trees = self.backend.tree_state(hash).await?;
 
@@ -79,12 +80,7 @@ impl CompactService {
 
     /// Answers `GetLatestTreeState`.
     pub async fn latest_tree_state(&self) -> Result<proto::TreeState, Status> {
-        let snapshot = self.snapshot();
-        ensure_tip_ready(&snapshot)?;
-        let tip =
-            snapshot.visible_tip.ok_or_else(|| Status::unavailable("compact index is empty"))?;
-        self.tree_state(proto::BlockId { height: u64::from(tip.height), hash: tip.hash.0.to_vec() })
-            .await
+        self.tree_state(self.latest_block()?).await
     }
 
     /// Answers `GetSubtreeRoots`.
