@@ -236,12 +236,7 @@ impl CompactBlockRecord {
     /// Checks the rules that a stored record must obey and that the protobuf decode does not
     /// check: each compact transaction must contain shielded data, as emitted by the parser.
     pub fn check(&self) -> Result<(), CodecError> {
-        if self.transactions.iter().any(|tx| {
-            tx.sapling_spends.is_empty()
-                && tx.sapling_outputs.is_empty()
-                && tx.orchard_actions.is_empty()
-                && tx.ironwood_actions.is_empty()
-        }) {
+        if self.transactions.iter().any(|tx| !tx.has_payload()) {
             return Err(CodecError::InvalidRecord);
         }
         Ok(())
