@@ -23,8 +23,9 @@
 //! manifest entry before it, and the rebuild of the epoch before checks them byte for byte.
 //! Thus the epochs can verify at the same time.
 //!
-//! A failed epoch stops the verification with the error of the first failed epoch in height
-//! order.
+//! The epochs end in any order: a slow epoch does not stop the start of the next epochs. The
+//! first epoch that fails stops the verification with its error, and the drop stops the other
+//! epochs.
 //!
 //! [`EpochProof::rebuild`]: crate::proof::EpochProof::rebuild
 //! [`EpochProof::attest`]: crate::proof::EpochProof::attest
@@ -144,12 +145,12 @@ impl SnapshotVerifier {
         let workers = thread::available_parallelism().map_or(1, NonZeroUsize::get);
         let blob_byte_budget = Semaphore::new(MAX_BLOB_BYTES_BEFORE_INSTALL as usize);
         let epochs = manifest.epochs().count();
-        // The futures in the `Vec` do no work until `buffered` polls them, in height order.
-        // Thus the epochs take their parts of the budget in height order.
+        // The futures in the `Vec` do no work until `buffer_unordered` polls them, and it starts
+        // them in height order. Thus the epochs take their parts of the budget in height order.
         let checks: Vec<_> =
             (0..epochs).map(|at| self.verify_epoch(&manifest, at, &blob_byte_budget)).collect();
         let sampled_heights = stream::iter(checks)
-            .buffered(workers)
+            .buffer_unordered(workers)
             .try_fold(0, |sum, sampled| future::ready(Ok(sum + sampled)))
             .await?;
         let entries = manifest.entries();
