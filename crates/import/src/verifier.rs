@@ -2,15 +2,17 @@
 //!
 //! [`SnapshotVerifier::run`] reads the manifest of the source. It refuses a manifest for a
 //! network that it does not know, or with another genesis block than that network. Then it
-//! checks each epoch of the manifest, at most one for each core at a time. The work on one
+//! checks each epoch of the manifest, at most two for each core at a time. The work on one
 //! epoch is:
 //!
 //! 1. Take its part of a byte budget of [`MAX_BLOB_BYTES_BEFORE_INSTALL`], in height order.
 //!    The epoch keeps it until its checks end.
 //! 2. Fetch its blobs with [`Fetcher::epoch_blobs`].
-//! 3. Run [`EpochProof::rebuild`] on the blocking thread pool.
+//! 3. Run [`EpochProof::rebuild`] on the blocking thread pool. At most one epoch for each core
+//!    does this at the same time.
 //! 4. With a [`NodeCheck`], run [`EpochProof::attest`] and [`SamplePlan::sample`] against its
-//!    node at the same time.
+//!    node at the same time. Thus the node calls of an epoch overlap the rebuild of the next
+//!    epochs.
 //!
 //! These are the checks of [`Importer::run`](crate::importer::Importer::run) on each epoch.
 //! Thus a verification with a node passes only if an empty replica on that node accepts the
@@ -144,13 +146,15 @@ impl SnapshotVerifier {
         }
         let workers = thread::available_parallelism().map_or(1, NonZeroUsize::get);
         let blob_byte_budget = Semaphore::new(MAX_BLOB_BYTES_BEFORE_INSTALL as usize);
+        let rebuild_permits = Semaphore::new(workers);
         let epochs = manifest.epochs().count();
         // The futures in the `Vec` do no work until `buffer_unordered` polls them, and it starts
         // them in height order. Thus the epochs take their parts of the budget in height order.
-        let checks: Vec<_> =
-            (0..epochs).map(|at| self.verify_epoch(&manifest, at, &blob_byte_budget)).collect();
+        let checks: Vec<_> = (0..epochs)
+            .map(|at| self.verify_epoch(&manifest, at, &blob_byte_budget, &rebuild_permits))
+            .collect();
         let sampled_heights = stream::iter(checks)
-            .buffer_unordered(workers)
+            .buffer_unordered(2 * workers)
             .try_fold(0, |sum, sampled| future::ready(Ok(sum + sampled)))
             .await?;
         let entries = manifest.entries();
@@ -163,13 +167,14 @@ impl SnapshotVerifier {
         })
     }
 
-    /// Checks the epoch at position `at` in `manifest`. Gives the number of heights that the
-    /// node sampled.
+    /// Checks the epoch at position `at` in `manifest`. The rebuild holds one of
+    /// `rebuild_permits`. Gives the number of heights that the node sampled.
     async fn verify_epoch(
         &self,
         manifest: &Arc<Manifest>,
         at: usize,
         blob_byte_budget: &Semaphore,
+        rebuild_permits: &Semaphore,
     ) -> Result<usize, VerifyError> {
         let epoch = manifest.epochs().nth(at).expect("`run` takes `at` from the epochs");
         let bytes: u64 = epoch.entries().iter().map(|entry| entry.blob_len).sum();
@@ -179,6 +184,8 @@ impl SnapshotVerifier {
             blob_byte_budget.acquire_many(bytes).await.expect("the budget is never closed");
         let blobs = self.fetcher.epoch_blobs(&epoch).await?;
         let in_epoch = |source| VerifyError::Epoch { epoch: epoch.end_height(), source };
+        let rebuild_permit =
+            rebuild_permits.acquire().await.expect("the rebuild permits are never closed");
         let rebuild = {
             let manifest = Arc::clone(manifest);
             BlockingTask::spawn(move || {
@@ -189,6 +196,7 @@ impl SnapshotVerifier {
             })
         };
         let (proof, blobs) = rebuild.join().await?;
+        drop(rebuild_permit);
         let proof = proof.map_err(|reject| in_epoch(reject.into()))?;
         let Some(check) = &self.node else {
             info!(end_height = epoch.end_height(), "verified epoch");
