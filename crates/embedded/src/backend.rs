@@ -69,18 +69,16 @@ fn unexpected(what: &str) -> BackendError {
 }
 
 /// Zakura's mempool futures are not `Send`, so they run on a blocking thread with their own
-/// `block_on`.
-async fn block_on_node<T, E, F>(call: F) -> Result<T, BackendError>
+/// `block_on`. Returns the output of `call`, or `Unavailable` if the blocking task fails.
+async fn block_on_node<T, F>(call: F) -> Result<T, BackendError>
 where
-    F: FnOnce() -> Result<T, E> + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
-    E: std::fmt::Display + Send + 'static,
 {
     let span = tracing::Span::current();
     tokio::task::spawn_blocking(move || span.in_scope(call))
         .await
-        .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?
-        .map_err(|error| BackendError::Unavailable(error.to_string()))
+        .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))
 }
 
 #[tonic::async_trait]
@@ -216,12 +214,9 @@ impl StateBackend for InProcessBackend {
     async fn mempool_transactions(&self) -> Result<Vec<UnminedTx>, BackendError> {
         let node = self.node()?.clone();
         let runtime = tokio::runtime::Handle::current();
-        block_on_node(move || {
-            runtime
-                .block_on(node.mempool_transactions())
-                .map_err(|error| format!("Zakura mempool query failed: {error}"))
-        })
-        .await
+        block_on_node(move || runtime.block_on(node.mempool_transactions())).await?.map_err(
+            |error| BackendError::Unavailable(format!("Zakura mempool query failed: {error}")),
+        )
     }
 
     async fn submit_transaction(
@@ -230,19 +225,12 @@ impl StateBackend for InProcessBackend {
     ) -> Result<transaction::Hash, BackendError> {
         let node = self.node()?.clone();
         let runtime = tokio::runtime::Handle::current();
-        let span = tracing::Span::current();
-        let submitted = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                runtime
-                    .block_on(node.submit_transaction(transaction))
-                    .map_err(|error| error.to_string())
+        block_on_node(move || runtime.block_on(node.submit_transaction(transaction)))
+            .await?
+            .map(|id| id.mined_id())
+            .map_err(|error| {
+                BackendError::Rejected(format!("Zakura rejected transaction: {error}"))
             })
-        })
-        .await
-        .map_err(|error| BackendError::Unavailable(format!("Zakura task failed: {error}")))?;
-        submitted.map(|id| id.mined_id()).map_err(|error| {
-            BackendError::Rejected(format!("Zakura rejected transaction: {error}"))
-        })
     }
 }
 
