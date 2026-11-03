@@ -1,5 +1,7 @@
 //! Compact index record projection, shielded-pool filtering, and protobuf response construction.
 
+mod fields;
+
 use std::collections::HashSet;
 
 use tonic::Status;
@@ -8,10 +10,23 @@ use zakura_chain::{
     transaction,
 };
 use ztreamer_chain::{
+    codec::CodecError,
     parser::parse_transaction,
     types::{CompactShieldedAction, CompactTransaction},
 };
-use ztreamer_protocol::proto;
+use ztreamer_index::index::IndexError;
+use ztreamer_protocol::{EncodedCompactBlock, proto};
+
+use fields::{WireField, WireFields};
+
+// Field numbers in `compact_formats.proto`.
+const BLOCK_VTX: u64 = 7;
+const BLOCK_CHAIN_METADATA: u64 = 8;
+const TX_SPENDS: u64 = 4;
+const TX_OUTPUTS: u64 = 5;
+const TX_ACTIONS: u64 = 6;
+const TX_IRONWOOD_ACTIONS: u64 = 9;
+const ACTION_NULLIFIER: u64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PoolSelection {
@@ -50,6 +65,87 @@ impl PoolSelection {
             }
         }
         Ok(selection)
+    }
+
+    /// Projects an encoded compact block as [`project_block`] does, without a decode. It copies
+    /// each field that it keeps as encoded, and skips each field that it drops. For a block that
+    /// Prost encoded, the result has the same bytes as the encoding of the [`project_block`]
+    /// result. It does not add transparent data.
+    pub(crate) fn project_encoded_block(
+        self,
+        block: &EncodedCompactBlock,
+        nullifiers: bool,
+    ) -> Result<EncodedCompactBlock, Status> {
+        let projected = self
+            .project_block_fields(&block.to_bytes(), nullifiers)
+            .map_err(|error| Status::from(IndexError::from(error)))?;
+        Ok(EncodedCompactBlock::from_encoded(projected.into()))
+    }
+
+    fn project_block_fields(self, block: &[u8], nullifiers: bool) -> Result<Vec<u8>, CodecError> {
+        let mut projected = Vec::new();
+        let mut transaction = Vec::new();
+        for field in WireFields::new(block) {
+            let field = field?;
+            match field.number {
+                BLOCK_VTX => {
+                    transaction.clear();
+                    let shielded =
+                        self.project_transaction_fields(field.value, nullifiers, &mut transaction)?;
+                    // As in `project_block`, a nullifier projection keeps each transaction.
+                    if shielded || nullifiers {
+                        WireField::write_len(BLOCK_VTX, &transaction, &mut projected);
+                    }
+                }
+                BLOCK_CHAIN_METADATA if nullifiers => {
+                    WireField::write_len(BLOCK_CHAIN_METADATA, &[], &mut projected);
+                }
+                _ => projected.extend_from_slice(field.bytes),
+            }
+        }
+        Ok(projected)
+    }
+
+    /// Writes the projection of one encoded compact transaction at the end of `out`. Returns
+    /// `true` if the projection keeps shielded data.
+    fn project_transaction_fields(
+        self,
+        transaction: &[u8],
+        nullifiers: bool,
+        out: &mut Vec<u8>,
+    ) -> Result<bool, CodecError> {
+        let mut shielded = false;
+        let mut action = Vec::new();
+        for field in WireFields::new(transaction) {
+            let field = field?;
+            let keep = match field.number {
+                TX_SPENDS => self.sapling,
+                TX_OUTPUTS => self.sapling && !nullifiers,
+                TX_ACTIONS => self.orchard,
+                TX_IRONWOOD_ACTIONS => self.ironwood,
+                _ => {
+                    out.extend_from_slice(field.bytes);
+                    continue;
+                }
+            };
+            if !keep {
+                continue;
+            }
+            shielded = true;
+            if !nullifiers || field.number == TX_SPENDS {
+                out.extend_from_slice(field.bytes);
+                continue;
+            }
+            action.clear();
+            for action_field in WireFields::new(field.value) {
+                let action_field = action_field?;
+                if action_field.number == ACTION_NULLIFIER {
+                    action.extend_from_slice(action_field.bytes);
+                }
+            }
+            WireField::write_len(field.number, &action, out);
+        }
+        Ok(shielded)
     }
 }
 

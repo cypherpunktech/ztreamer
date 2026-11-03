@@ -1,4 +1,5 @@
 use super::*;
+use prost::Message as _;
 use zakura_chain::{
     block::{self, Block},
     serialization::ZcashSerialize as _,
@@ -8,30 +9,13 @@ use zakura_test::vectors::{BLOCK_MAINNET_949496_BYTES, BLOCK_TESTNET_1842421_BYT
 use ztreamer_chain::{
     codec::{CompactBlockRecord, TreeSizes},
     parser::parse_block,
+    test_utils::mixed_records,
     types::{CompactSaplingOutput, CompactShieldedAction, CompactTransaction, RawIndexBlock},
 };
 
 #[test]
 fn validates_pools_and_projects_full_and_nullifier_blocks() {
-    let record = CompactBlockRecord {
-        height: 7,
-        hash: block::Hash([1; 32]),
-        previous_hash: block::Hash([2; 32]),
-        time: 3,
-        transactions: vec![CompactTransaction {
-            index: 5,
-            txid: transaction::Hash([6; 32]),
-            sapling_spends: vec![[7; 32]],
-            sapling_outputs: vec![CompactSaplingOutput {
-                cmu: [8; 32],
-                ephemeral_key: [9; 32],
-                ciphertext: [10; 52],
-            }],
-            orchard_actions: vec![action(11)],
-            ironwood_actions: vec![action(12)],
-        }],
-        end_tree_sizes: TreeSizes { sapling: 13, orchard: 14, ironwood: 15 },
-    };
+    let record = every_pool_record();
 
     let orchard = project_block(
         record.to_proto(),
@@ -59,6 +43,38 @@ fn validates_pools_and_projects_full_and_nullifier_blocks() {
         PoolSelection::from_request(&[99]).unwrap_err().code(),
         tonic::Code::InvalidArgument
     );
+}
+
+#[test]
+fn encoded_projection_gives_the_bytes_of_the_decoded_projection() {
+    let mut records = mixed_records(20);
+    records.push(every_pool_record());
+    let pool_types = [
+        proto::PoolType::Sapling as i32,
+        proto::PoolType::Orchard as i32,
+        proto::PoolType::Ironwood as i32,
+    ];
+    for record in &records {
+        let encoded = EncodedCompactBlock::from(record.to_proto());
+        for subset in 0..8 {
+            let requested: Vec<_> =
+                (0..3).filter(|bit| subset & (1 << bit) != 0).map(|bit| pool_types[bit]).collect();
+            let pools = PoolSelection::from_request(&requested).unwrap();
+            for nullifiers in [false, true] {
+                let expected = project_block(record.to_proto(), pools, nullifiers).encode_to_vec();
+                let projected = pools.project_encoded_block(&encoded, nullifiers).unwrap();
+                assert_eq!(projected.to_bytes(), expected, "{requested:?} {nullifiers}");
+            }
+        }
+    }
+}
+
+#[test]
+fn encoded_projection_refuses_a_truncated_block() {
+    let encoded = every_pool_record().to_proto().encode_to_vec();
+    let truncated = EncodedCompactBlock::from_encoded(encoded[..encoded.len() - 1].to_vec().into());
+    let error = all_pools().project_encoded_block(&truncated, true).unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Internal);
 }
 
 #[test]
@@ -307,6 +323,29 @@ fn unparsable_mempool_transactions_fail_the_request_unless_excluded() {
 #[test]
 fn an_empty_mempool_projects_to_nothing() {
     assert!(compact_mempool_txs(&[], all_pools(), &[vec![1]]).unwrap().is_empty());
+}
+
+/// A record with one transaction that has data in each shielded pool.
+fn every_pool_record() -> CompactBlockRecord {
+    CompactBlockRecord {
+        height: 7,
+        hash: block::Hash([1; 32]),
+        previous_hash: block::Hash([2; 32]),
+        time: 3,
+        transactions: vec![CompactTransaction {
+            index: 5,
+            txid: transaction::Hash([6; 32]),
+            sapling_spends: vec![[7; 32]],
+            sapling_outputs: vec![CompactSaplingOutput {
+                cmu: [8; 32],
+                ephemeral_key: [9; 32],
+                ciphertext: [10; 52],
+            }],
+            orchard_actions: vec![action(11)],
+            ironwood_actions: vec![action(12)],
+        }],
+        end_tree_sizes: TreeSizes { sapling: 13, orchard: 14, ironwood: 15 },
+    }
 }
 
 fn all_pools() -> PoolSelection {

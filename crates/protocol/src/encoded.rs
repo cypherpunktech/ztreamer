@@ -24,6 +24,15 @@ impl EncodedCompactBlock {
         Self(Repr::Encoded(bytes))
     }
 
+    /// The protobuf encoding of the block, without a length prefix. An encoded block gives its
+    /// bytes without a copy.
+    pub fn to_bytes(&self) -> Bytes {
+        match &self.0 {
+            Repr::Encoded(bytes) => bytes.clone(),
+            Repr::Decoded(block) => block.encode_to_vec().into(),
+        }
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     pub fn into_decoded(self) -> Result<proto::CompactBlock, DecodeError> {
         match self.0 {
