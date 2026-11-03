@@ -21,12 +21,14 @@
 //! [`Fetcher`] reads complete blobs from a source. It continues a cut transfer from the last
 //! byte that it received, and it checks the length and the BLAKE3 digest of each blob against
 //! its manifest entry. A blob that fails this check is [`FetchError::Digest`].
+//! [`Fetcher::epoch_blobs`] reads the blobs of an epoch at the same time.
 
 use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use ed25519_zebra::VerificationKey;
+use futures_util::{TryStreamExt as _, stream};
 use http::{Request, StatusCode, Uri, header::RANGE};
 use http_body_util::{BodyExt as _, Empty};
 use tokio::sync::Semaphore;
@@ -38,10 +40,13 @@ use ztreamer_protocol::replicate::{
     self, GetRangeRequest, ListRangesRequest, RangeChunk, replicator_client::ReplicatorClient,
 };
 use ztreamer_remote::HttpsClient;
-use ztreamer_snapshot::manifest_entry::{BlobMismatch, MANIFEST_VERSION, ManifestEntry, WireError};
+use ztreamer_snapshot::manifest_entry::{
+    BlobMismatch, MANIFEST_VERSION, MAX_RANGES, ManifestEntry, WireError,
+};
 
 use crate::importer::MAX_BLOB_BYTES_BEFORE_INSTALL;
 use ztreamer_snapshot::{
+    epoch::Epoch,
     layout::{ManifestPath, ManifestPointer, PointerError, RangePath, SignatureFile},
     manifest::{Manifest, ManifestError},
 };
@@ -68,6 +73,12 @@ pub const PEER_RANGE_STREAMS: usize = 4;
 /// HTTP/1 connection. Thus the limit keeps the connections to one server low when many epochs
 /// fetch at the same time.
 pub(crate) const HTTP_BLOB_REQUESTS: usize = 32;
+
+/// The blob fetches of one epoch that run at the same time: all the blobs of the epoch. The
+/// importer holds the bytes of the blobs of an epoch in its byte budget before the fetch, thus
+/// this adds no memory. The request limit of the source ([`PEER_RANGE_STREAMS`],
+/// [`HTTP_BLOB_REQUESTS`]) sets the requests on the wire.
+const BLOB_FETCHES_PER_EPOCH: usize = MAX_RANGES;
 
 /// A source of sealed ranges.
 ///
@@ -315,6 +326,20 @@ impl Fetcher {
             .check_blob(&blob)
             .map(|()| blob.freeze())
             .map_err(|mismatch| FetchError::Digest { start_height: entry.start_height, mismatch })
+    }
+
+    /// The blobs of `epoch`, in height order, each from [`Fetcher::blob`]. All the blobs of the
+    /// epoch, at most [`MAX_RANGES`], fetch at the same time. The first failed blob in height
+    /// order stops the fetch with its error, and the drop stops the other fetches.
+    pub async fn epoch_blobs(&self, epoch: &Epoch<'_>) -> Result<Vec<Bytes>, FetchError> {
+        // A stream that maps with a closure makes `Importer::run` not `Send` (rust#102211). The
+        // futures in the `Vec` do no work until `buffered` polls them.
+        let fetches: Vec<_> = epoch.entries().iter().map(|entry| self.blob(entry)).collect();
+        // `tokio_stream::StreamExt` is in scope for `timeout`, thus the call names the trait of
+        // `buffered`: two traits with `map` and `next` in scope make those calls ambiguous.
+        stream::StreamExt::buffered(stream::iter(fetches), BLOB_FETCHES_PER_EPOCH)
+            .try_collect()
+            .await
     }
 
     /// Appends the bytes of the blob of `entry` from `blob.len()` to `blob`, with one request.
