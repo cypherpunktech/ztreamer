@@ -6,6 +6,8 @@
 //! replica verifies the ranges in [epochs](ztreamer_snapshot::epoch::Epoch): the start frontier of
 //! an epoch is the frontier that the previous epoch attested, each frontier in the manifest inside
 //! the epoch is a checkpoint, and the node attests the end roots of the epoch with one call.
+//! The [`verifier`] does the same checks on each epoch of a source, with or without a node, and
+//! installs nothing.
 //!
 //! The source side is `ztreamer-replicator`; the format both sides use is `ztreamer-snapshot`.
 //! This crate does not depend on the wallet service.
@@ -20,3 +22,4 @@ pub mod range;
 pub mod sample;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+pub mod verifier;
