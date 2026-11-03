@@ -188,23 +188,10 @@ impl OrderedBuilder {
             if self.previous_hash.is_some_and(|previous| block.previous_hash != previous) {
                 return Err(IngestError::Parent { height: block.height });
             }
-            let end_tree_sizes = TreeSizes {
-                sapling: self
-                    .tree_sizes
-                    .sapling
-                    .checked_add(block.sapling_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-                orchard: self
-                    .tree_sizes
-                    .orchard
-                    .checked_add(block.orchard_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-                ironwood: self
-                    .tree_sizes
-                    .ironwood
-                    .checked_add(block.ironwood_additions)
-                    .ok_or(IngestError::TreeSize { height: block.height })?,
-            };
+            let end_tree_sizes = self
+                .tree_sizes
+                .checked_add(block.additions())
+                .ok_or(IngestError::TreeSize { height: block.height })?;
             let next_height = self.next_height.checked_add(1).ok_or(IngestError::Overflow)?;
             let (block, bytes) =
                 self.pending.remove(&self.next_height).expect("the pending block was just checked");

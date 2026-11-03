@@ -132,21 +132,26 @@ pub struct ParsedCompactBlock {
 }
 
 impl ParsedCompactBlock {
-    /// The record that the index stores for this block, after the tree sizes `before` the block.
-    /// Returns `None` if a tree size overflows.
-    pub fn into_record(self, before: TreeSizes) -> Option<CompactBlockRecord> {
-        let additions = TreeSizes {
+    /// The note commitments that the block adds to each pool.
+    pub const fn additions(&self) -> TreeSizes {
+        TreeSizes {
             sapling: self.sapling_additions,
             orchard: self.orchard_additions,
             ironwood: self.ironwood_additions,
-        };
+        }
+    }
+
+    /// The record that the index stores for this block, after the tree sizes `before` the block.
+    /// Returns `None` if a tree size overflows.
+    pub fn into_record(self, before: TreeSizes) -> Option<CompactBlockRecord> {
+        let end_tree_sizes = before.checked_add(self.additions())?;
         Some(CompactBlockRecord {
             height: self.height,
             hash: self.hash,
             previous_hash: self.previous_hash,
             time: self.time,
             transactions: self.transactions,
-            end_tree_sizes: before.checked_add(additions)?,
+            end_tree_sizes,
         })
     }
 }
