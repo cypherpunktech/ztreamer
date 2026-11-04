@@ -33,7 +33,7 @@ http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", optional = true }
 hyper-util = { version = "0.1", features = ["tokio"], optional = true }
 incrementalmerkletree.workspace = true
-lru = "0.18"
+lru = "0.19"
 percent-encoding = "2"
 sapling-crypto.workspace = true
 serde = { version = "1", features = ["derive"] }
