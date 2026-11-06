@@ -23,6 +23,7 @@ use ztreamer_sync::head::{CanonicalBlockSource, HeadFollower, HeadSyncError};
 
 use crate::{
     DaemonConfig,
+    health::HealthTask,
     index_pass::{IndexPass, PassKind},
     lifecycle::{Supervisor, TaskSet},
     node::{HistoricalSource, IndexTip, Node, NodeComponents, StageContext, Tail},
@@ -167,11 +168,14 @@ impl Launcher {
             RangeMetaFiller::new(Arc::clone(stage.index), compact.backend(), components.id());
         let replicator =
             ReplicatorService::new(Arc::clone(stage.index), follower.subscribe(), stage.network);
+        let (reporter, health_service) = tonic_health::server::health_reporter();
+        let health = HealthTask::new(reporter, follower.subscribe()).await;
         let router = grpc_server
+            .add_service(health_service)
             .add_service(CompactTxStreamerServer::new(compact))
             .add_service(ReplicatorServer::new(replicator));
 
-        // The supervisor drains the three tasks before it gives a result, also on failure. Thus
+        // The supervisor drains the tasks before it gives a result, also on failure. Thus
         // the caller can close the index: the filler holds it no more.
         let address = config.servers.grpc_listen;
         let grpc = GrpcTask { router, address, tls: config.servers.tls.is_some() };
@@ -179,6 +183,7 @@ impl Launcher {
         let follower = HeadFollowerTask { follower, source: head, pipeline: stage.sync.pipeline };
         let shutdown = stage.shutdown;
         tasks.spawn("gRPC", TASK_STOPPED, grpc.run(shutdown.clone()));
+        tasks.spawn("gRPC health", TASK_STOPPED, health.run(shutdown.clone()));
         tasks.spawn("head follower", TASK_STOPPED, follower.run(shutdown.clone()));
         tasks.spawn("range_meta filler", TASK_STOPPED, filler.run(shutdown.clone()));
         shutdown.cancelled().await;

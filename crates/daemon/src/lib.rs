@@ -8,6 +8,7 @@
 mod config;
 mod daemon;
 mod embedded;
+mod health;
 mod index_pass;
 mod launcher;
 mod lifecycle;
