@@ -75,7 +75,7 @@ impl StateBackend for RemoteBackend {
             return Ok(None);
         };
         let transaction = Arc::new(fetched.decode().await?);
-        Ok(Some(MinedTransaction { transaction, height }))
+        Ok(Some(MinedTransaction { transaction: transaction.into(), height }))
     }
 
     async fn tree_state(&self, hash: block::Hash) -> Result<TreeState, BackendError> {

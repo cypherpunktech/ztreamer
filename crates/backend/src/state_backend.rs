@@ -17,7 +17,7 @@ use zakura_chain::{
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
-pub use zakura_node_services::block_memory::BlockHandle;
+pub use zakura_node_services::block_memory::{BlockHandle, TransactionHandle};
 use ztreamer_snapshot::{manifest_entry::Frontiers, pool::PoolRoots};
 
 use crate::BackendError;
@@ -104,8 +104,8 @@ pub type Subtrees<Node> = BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSub
 /// A transaction in the best chain and the height it was mined at.
 #[derive(Clone, Debug)]
 pub struct MinedTransaction {
-    /// The transaction.
-    pub transaction: Arc<Transaction>,
+    /// The transaction, retaining the embedded node's memory reservation while held.
+    pub transaction: TransactionHandle,
     /// The height of the block that holds it.
     pub height: block::Height,
 }
