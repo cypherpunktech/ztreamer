@@ -76,7 +76,7 @@ With no credentials and a loopback URL, ztreamerd uses the default zakura cookie
 
 | Listener | Flag | Default | Serves |
 | --- | --- | --- | --- |
-| gRPC | `--grpc-listen` | `127.0.0.1:9067` | `CompactTxStreamer`, Replicator and standard gRPC health |
+| gRPC | `--grpc-listen` | `127.0.0.1:9067` | `CompactTxStreamer` and Replicator |
 | Prometheus | `--metrics-listen` | `127.0.0.1:9999` | Metrics |
 
 The gRPC listener uses plaintext. For TLS, give a PEM certificate chain and its PEM private key:
@@ -89,12 +89,6 @@ ztreamerd --zakura-config zakura.toml \
 ```
 
 Restart ztreamerd after a certificate change. The Prometheus listener has no TLS. Keep it private, or put it behind a reverse proxy.
-
-Load balancers can probe `grpc.health.v1.Health/Check` on the gRPC port with the empty service name
-(`service = ""`). It reports `SERVING` when the head is fresh and deep reorg recovery is inactive,
-otherwise `NOT_SERVING`. Only the aggregate service is registered. `Watch` streams changes to the
-same status. The listener opens after initial catch-up; health checks cannot connect before then.
-Health uses the listener's TLS settings.
 
 ## Logs and traces
 
