@@ -2190,7 +2190,7 @@ dependencies = [
  "bytes",
  "getrandom 0.4.3",
  "lru-slab",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rand_pcg",
  "ring",
  "rustc-hash",
@@ -2245,9 +2245,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f5fa3a058cd35567ef9bfa5e75732bee0f9e4c55fa90477bef2dfcdbc4be80"
+checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -2984,9 +2984,9 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tonic"
-version = "0.14.6"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac2a5518c70fa84342385732db33fb3f44bc4cc748936eb5833d2df34d6445ef"
+checksum = "e2cdfc673aabd30fe8fee92e65837b644c37c5d47f0f97ae6d5e0f1237d15e1b"
 dependencies = [
  "async-trait",
  "axum",
@@ -3006,6 +3006,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
@@ -3014,9 +3015,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.14.6"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
+checksum = "ac6d916d206ed7bdda1778ddff9bda43303789c258877e7bc22fb44ee5c984b4"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -3026,9 +3027,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-health"
-version = "0.14.6"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcfab99db777fba2802f0dfa861d1628d1ae916fb199d29819941f139ae85082"
+checksum = "bc97d645691d64d96db1afe386d0d2918ac84ab56e2c91e153f22f6349a378cd"
 dependencies = [
  "prost",
  "tokio",
@@ -3039,9 +3040,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-prost"
-version = "0.14.6"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50849f68853be452acf590cde0b146665b8d507b3b8af17261df47e02c209ea0"
+checksum = "eba464054e2226f182a34489b8b079bf4c6e3e7ab5fd7fc30e024f24aa92a484"
 dependencies = [
  "bytes",
  "prost",
@@ -3050,9 +3051,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-prost-build"
-version = "0.14.6"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
+checksum = "2ea216ddc448e08e7839ab09e20e60b06b6a1c32745ccb212c0ebd161c199f1b"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -3712,7 +3713,7 @@ dependencies = [
  "blake2s_simd",
  "ff",
  "group",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rand_core 0.10.1",
  "rayon",
  "zakura-pairing",
@@ -3823,7 +3824,7 @@ dependencies = [
  "getset",
  "metrics",
  "pin-project",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rand_core 0.6.4",
  "rayon",
  "serde",
@@ -3894,7 +3895,7 @@ dependencies = [
  "ff",
  "group",
  "maybe-rayon",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rand_core 0.10.1",
  "tracing",
  "zakura-pasta-curves",
@@ -3980,7 +3981,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "pin-project",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rayon",
  "serde",
  "serde_json",
@@ -4039,7 +4040,7 @@ dependencies = [
  "maybe-rayon",
  "nonempty",
  "once_cell",
- "rand 0.10.2",
+ "rand 0.10.3",
  "serde",
  "subtle",
  "tracing",
@@ -4088,7 +4089,7 @@ dependencies = [
  "group",
  "maybe-rayon",
  "once_cell",
- "rand 0.10.2",
+ "rand 0.10.3",
  "static_assertions",
  "subtle",
 ]
@@ -4218,7 +4219,7 @@ dependencies = [
  "memchr",
  "metrics",
  "prost",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rustls",
  "semver",
  "serde",
@@ -4256,7 +4257,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd952053648eded47c8940fb1b98bb07681221669643c2a53df17ce3e667c78f"
 dependencies = [
  "pin-project-lite",
- "rand 0.10.2",
+ "rand 0.10.3",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -4279,7 +4280,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "once_cell",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rand_core 0.10.1",
  "rayon",
  "subtle",
@@ -4313,7 +4314,7 @@ checksum = "f45881bb2ae95492243292dabcb2a0b9bdc5cc84c57afd5cfaccef4a4aec2252"
 dependencies = [
  "blake2b_simd",
  "once_cell",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rayon",
  "subtle",
  "zakura-bento",
@@ -4412,7 +4413,7 @@ dependencies = [
  "insta",
  "itertools 0.14.0",
  "proptest",
- "rand 0.10.2",
+ "rand 0.10.3",
  "regex",
  "tokio",
  "tower",
@@ -4717,7 +4718,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "incrementalmerkletree",
- "rand 0.10.2",
+ "rand 0.10.3",
  "rustls",
  "serde_json",
  "tempfile",
