@@ -18,4 +18,7 @@ mod error;
 mod state_backend;
 
 pub use error::BackendError;
-pub use state_backend::{AddressUtxo, MinedTransaction, StateBackend, Subtrees, TreeState};
+pub use state_backend::{
+    AddressUtxo, BlockHandle, MinedTransaction, StateBackend, Subtrees, TransactionHandle,
+    TreeState,
+};

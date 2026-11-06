@@ -104,7 +104,7 @@ impl Snapshot {
     /// tree state request names a height (the attestor of the import) or a hash (the filler).
     async fn node(&self) -> (MockChain, MockNode) {
         let chain = MockChain::new(&self.blocks);
-        let hashes: Vec<_> = self.blocks.iter().map(Block::hash).collect();
+        let hashes: Vec<_> = self.blocks.iter().map(|block| block.hash()).collect();
         let serve = chain.clone();
         let node = MockNode::start(move |_, request| {
             if request.body["method"] != "z_gettreestate" {

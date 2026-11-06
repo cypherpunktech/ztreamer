@@ -96,7 +96,7 @@ impl CompactService {
                             .block(hash)
                             .await?
                             .ok_or_else(|| reorganized(block.height as u32))?;
-                        add_transparent_txs(&mut block, &full.transactions);
+                        add_transparent_txs(&mut block, full.view().transactions());
                         Ok(block)
                     }
                 })

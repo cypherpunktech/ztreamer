@@ -202,7 +202,7 @@ fn mempool_transparent_fields_are_opt_in_and_preserve_wire_values() {
         let mut block = proto::CompactBlock { vtx: legacy.clone(), ..Default::default() };
         block.vtx[0].index = 1;
         let mut block = project_block(block, pools, false);
-        add_transparent_txs(&mut block, &[transparent.clone().into(), orchard.clone().into()]);
+        add_transparent_txs(&mut block, [&transparent, &orchard]);
         let mut expected = compact.clone();
         if expected.len() > 1 {
             expected[1].index = 1;

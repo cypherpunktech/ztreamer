@@ -3,7 +3,7 @@
 use std::io;
 
 use zakura_chain::{
-    block::{self, Block},
+    block::{self, Block, BlockRef},
     serialization::{SerializationError, ZcashDeserialize as _, ZcashSerialize as _},
     transaction,
 };
@@ -84,10 +84,19 @@ impl TryFrom<&Block> for RawIndexBlock {
     /// The height comes from the coinbase input, the hash from the header and the transaction
     /// ids from the transactions.
     fn try_from(block: &Block) -> Result<Self, RawBlockError> {
+        Self::try_from(&**block)
+    }
+}
+
+impl TryFrom<&BlockRef> for RawIndexBlock {
+    type Error = RawBlockError;
+
+    /// Serializes a borrowed block while its owner retains any memory reservation.
+    fn try_from(block: &BlockRef) -> Result<Self, RawBlockError> {
         let hash = block.hash();
         let height = block.coinbase_height().ok_or(RawBlockError::CoinbaseHeight)?;
         let bytes = block.zcash_serialize_to_vec().map_err(RawBlockError::Serialize)?;
-        let txids = block.transactions.iter().map(|transaction| transaction.hash()).collect();
+        let txids = block.transactions().map(|transaction| transaction.hash()).collect();
         Ok(Self { height, hash, bytes, txids })
     }
 }

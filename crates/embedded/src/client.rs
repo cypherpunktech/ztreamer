@@ -1,12 +1,12 @@
 //! [`NodeClient`]: the application client of the in-process Zakura node.
 
-use std::sync::Arc;
 use tower::ServiceExt as _;
 use zakura_chain::{
-    block::{Block, Hash as BlockHash, Height as BlockHeight},
+    block::{Hash as BlockHash, Height as BlockHeight},
     chain_tip::ChainTip as _,
     transaction::{UnminedTx, UnminedTxId},
 };
+use zakura_node_services::block_memory::BlockHandle;
 use zakura_state::{ChainTipChange, HashOrHeight as BlockId};
 use ztreamer_index::index::range_meta::NodeId;
 use ztreamer_service::NodeVersion;
@@ -84,7 +84,7 @@ impl NodeClient {
     pub async fn block(
         &self,
         hash_or_height: impl Into<BlockId>,
-    ) -> Result<Option<Arc<Block>>, NodeError> {
+    ) -> Result<Option<BlockHandle>, NodeError> {
         let response = self
             .services
             .read_state

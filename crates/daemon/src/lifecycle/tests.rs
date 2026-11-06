@@ -372,7 +372,7 @@ async fn embedded_node_lifecycle(stop_by_signal: bool) {
         assert!(client.mempool_transactions().await.expect("mempool query succeeds").is_empty());
         assert_eq!(
             client.block(BlockHeight(0)).await.expect("block query succeeds"),
-            Some(genesis)
+            Some(genesis.into())
         );
 
         if stop_by_signal {

@@ -113,7 +113,7 @@ async fn block_parses_the_raw_answer() {
     let backend = backend(&mock).await;
     let expected = block_1();
     let block = backend.block(expected.hash()).await.unwrap().unwrap();
-    assert_eq!(*block, expected);
+    assert_eq!(block.zcash_serialize_to_vec().unwrap(), expected.zcash_serialize_to_vec().unwrap());
     assert!(backend.block(block::Hash([0x11; 32])).await.unwrap().is_none());
     let error = backend.block(block::Hash([0; 32])).await.unwrap_err();
     assert!(matches!(error, BackendError::Unexpected(_)), "{error}");

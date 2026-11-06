@@ -189,11 +189,11 @@ pub(crate) fn project_block(
     block
 }
 
-pub(crate) fn add_transparent_txs(
+pub(crate) fn add_transparent_txs<'a>(
     block: &mut proto::CompactBlock,
-    transactions: &[std::sync::Arc<transaction::Transaction>],
+    transactions: impl IntoIterator<Item = &'a transaction::Transaction>,
 ) {
-    for (index, tx) in transactions.iter().enumerate() {
+    for (index, tx) in transactions.into_iter().enumerate() {
         let vin: Vec<_> = tx
             .spent_outpoints()
             .map(|outpoint| proto::CompactTxIn {

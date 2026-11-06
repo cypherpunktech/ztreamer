@@ -596,7 +596,7 @@ mod tests {
             inputs: Vec::new(),
             outputs: Vec::new(),
             sapling_shielded_data: None,
-            orchard_shielded_data: Some(shielded.clone()),
+            orchard_shielded_data: Some(Box::new(shielded.clone())),
             ironwood_shielded_data: Some(shielded),
         };
         let bytes = transaction.zcash_serialize_to_vec().unwrap();
