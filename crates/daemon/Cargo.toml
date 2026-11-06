@@ -33,17 +33,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakurad = { workspace = true, features = ["indexer"] }
-ztreamer-backend = { path = "../backend" }
-ztreamer-embedded = { path = "../embedded" }
-ztreamer-import = { path = "../import" }
-ztreamer-index = { path = "../index" }
-ztreamer-p2p = { path = "../p2p" }
-ztreamer-protocol = { path = "../protocol" }
-ztreamer-remote = { path = "../remote" }
-ztreamer-replicator = { path = "../replicator" }
-ztreamer-service = { path = "../service" }
-ztreamer-snapshot = { path = "../snapshot" }
-ztreamer-sync = { path = "../sync" }
+ztreamer-backend = { path = "../backend", version = "0.1.0" }
+ztreamer-embedded = { path = "../embedded", version = "0.1.0" }
+ztreamer-import = { path = "../import", version = "0.1.0" }
+ztreamer-index = { path = "../index", version = "0.1.0" }
+ztreamer-p2p = { path = "../p2p", version = "0.1.0" }
+ztreamer-protocol = { path = "../protocol", version = "0.1.0" }
+ztreamer-remote = { path = "../remote", version = "0.1.0" }
+ztreamer-replicator = { path = "../replicator", version = "0.1.0" }
+ztreamer-service = { path = "../service", version = "0.1.0" }
+ztreamer-snapshot = { path = "../snapshot", version = "0.1.0" }
+ztreamer-sync = { path = "../sync", version = "0.1.0" }
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

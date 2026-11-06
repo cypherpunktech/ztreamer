@@ -45,15 +45,15 @@ tracing = "0.1"
 zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
-ztreamer-blocking = { path = "../blocking" }
-ztreamer-chain = { path = "../chain" }
-ztreamer-embedded = { path = "../embedded", optional = true }
-ztreamer-index = { path = "../index" }
-ztreamer-protocol = { path = "../protocol" }
-ztreamer-remote = { path = "../remote" }
-ztreamer-replicator = { path = "../replicator", optional = true }
-ztreamer-snapshot = { path = "../snapshot" }
-ztreamer-sync = { path = "../sync", optional = true }
+ztreamer-blocking = { path = "../blocking", version = "0.1.0" }
+ztreamer-chain = { path = "../chain", version = "0.1.0" }
+ztreamer-embedded = { path = "../embedded", version = "0.1.0", optional = true }
+ztreamer-index = { path = "../index", version = "0.1.0" }
+ztreamer-protocol = { path = "../protocol", version = "0.1.0" }
+ztreamer-remote = { path = "../remote", version = "0.1.0" }
+ztreamer-replicator = { path = "../replicator", version = "0.1.0", optional = true }
+ztreamer-snapshot = { path = "../snapshot", version = "0.1.0" }
+ztreamer-sync = { path = "../sync", version = "0.1.0", optional = true }
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }

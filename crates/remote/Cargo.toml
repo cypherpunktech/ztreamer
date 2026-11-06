@@ -46,13 +46,13 @@ zakura-chain.workspace = true
 zakura-rpc.workspace = true
 zakura-state.workspace = true
 zcash_primitives.workspace = true
-ztreamer-blocking = { path = "../blocking" }
-ztreamer-backend = { path = "../backend" }
-ztreamer-chain = { path = "../chain" }
-ztreamer-index = { path = "../index" }
-ztreamer-jsonrpc = { path = "../jsonrpc" }
-ztreamer-snapshot = { path = "../snapshot" }
-ztreamer-sync = { path = "../sync" }
+ztreamer-blocking = { path = "../blocking", version = "0.1.0" }
+ztreamer-backend = { path = "../backend", version = "0.1.0" }
+ztreamer-chain = { path = "../chain", version = "0.1.0" }
+ztreamer-index = { path = "../index", version = "0.1.0" }
+ztreamer-jsonrpc = { path = "../jsonrpc", version = "0.1.0" }
+ztreamer-snapshot = { path = "../snapshot", version = "0.1.0" }
+ztreamer-sync = { path = "../sync", version = "0.1.0" }
 
 [dev-dependencies]
 base64 = "0.23"

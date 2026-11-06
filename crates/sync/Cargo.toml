@@ -15,9 +15,9 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tonic = "0.14.6"
 tracing = "0.1"
 zakura-chain.workspace = true
-ztreamer-blocking = { path = "../blocking" }
-ztreamer-chain = { path = "../chain" }
-ztreamer-index = { path = "../index" }
+ztreamer-blocking = { path = "../blocking", version = "0.1.0" }
+ztreamer-chain = { path = "../chain", version = "0.1.0" }
+ztreamer-index = { path = "../index", version = "0.1.0" }
 
 [dev-dependencies]
 heed = { version = "0.22.1", default-features = false }

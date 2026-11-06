@@ -22,11 +22,11 @@ zakura-chain.workspace = true
 zakura-node-services.workspace = true
 zakura-state = { workspace = true, features = ["indexer"] }
 zakurad = { workspace = true, features = ["indexer"] }
-ztreamer-backend = { path = "../backend" }
-ztreamer-chain = { path = "../chain" }
-ztreamer-index = { path = "../index" }
-ztreamer-service = { path = "../service" }
-ztreamer-sync = { path = "../sync" }
+ztreamer-backend = { path = "../backend", version = "0.1.0" }
+ztreamer-chain = { path = "../chain", version = "0.1.0" }
+ztreamer-index = { path = "../index", version = "0.1.0" }
+ztreamer-service = { path = "../service", version = "0.1.0" }
+ztreamer-sync = { path = "../sync", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile = "3"
