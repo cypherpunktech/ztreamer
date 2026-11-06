@@ -19,11 +19,11 @@ eyre = "0.6"
 tracing = "0.1"
 zakura-chain.workspace = true
 zeroize = "1"
-ztreamer-daemon = { path = "../../crates/daemon" }
-ztreamer-index = { path = "../../crates/index" }
-ztreamer-remote = { path = "../../crates/remote" }
-ztreamer-replicator = { path = "../../crates/replicator" }
-ztreamer-sync = { path = "../../crates/sync" }
+ztreamer-daemon = { path = "../../crates/daemon", version = "0.1.0" }
+ztreamer-index = { path = "../../crates/index", version = "0.1.0" }
+ztreamer-remote = { path = "../../crates/remote", version = "0.1.0" }
+ztreamer-replicator = { path = "../../crates/replicator", version = "0.1.0" }
+ztreamer-sync = { path = "../../crates/sync", version = "0.1.0" }
 
 [dev-dependencies]
 serde_json = "1"

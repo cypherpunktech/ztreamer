@@ -14,4 +14,4 @@ thiserror = "2"
 tonic = "0.14.6"
 zakura-chain.workspace = true
 zakura-node-services.workspace = true
-ztreamer-snapshot = { path = "../snapshot" }
+ztreamer-snapshot = { path = "../snapshot", version = "0.1.0" }

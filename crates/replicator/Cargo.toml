@@ -25,12 +25,12 @@ tonic = "0.14.6"
 tracing = "0.1"
 zeroize = "1"
 zakura-chain.workspace = true
-ztreamer-backend = { path = "../backend" }
-ztreamer-chain = { path = "../chain" }
-ztreamer-index = { path = "../index" }
-ztreamer-protocol = { path = "../protocol" }
-ztreamer-snapshot = { path = "../snapshot" }
-ztreamer-sync = { path = "../sync" }
+ztreamer-backend = { path = "../backend", version = "0.1.0" }
+ztreamer-chain = { path = "../chain", version = "0.1.0" }
+ztreamer-index = { path = "../index", version = "0.1.0" }
+ztreamer-protocol = { path = "../protocol", version = "0.1.0" }
+ztreamer-snapshot = { path = "../snapshot", version = "0.1.0" }
+ztreamer-sync = { path = "../sync", version = "0.1.0" }
 
 [dev-dependencies]
 hex = "0.4"
