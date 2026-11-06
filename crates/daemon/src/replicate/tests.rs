@@ -6,7 +6,10 @@ use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
+use tonic::transport::{Endpoint, Server};
+use tonic_health::pb::{
+    HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
+};
 use zakura_chain::{block::Block, parameters::Network, serialization::ZcashSerialize as _};
 use ztreamer_chain::{
     codec::{CompactBlockRecord, RANGE_SIZE},
@@ -237,9 +240,16 @@ async fn a_fresh_replica_imports_three_epochs_then_follows_the_chain() {
     let (_chain, node) = snapshot.node().await;
     let dir = tempfile::tempdir().unwrap();
 
-    let (latest, info) = serve_until(&dir, &snapshot, &node, async |grpc| {
+    let (latest, (info, _health_watch)) = serve_until(&dir, &snapshot, &node, async |grpc| {
+        let channel =
+            Endpoint::from_shared(format!("http://{grpc}")).unwrap().connect().await.unwrap();
+        let mut health = HealthClient::new(channel);
+        let status = health.check(HealthCheckRequest { service: String::new() }).await.unwrap();
+        assert_eq!(status.into_inner().status(), ServingStatus::Serving);
+        let watch = health.watch(HealthCheckRequest { service: String::new() }).await.unwrap();
         let mut client = CompactTxStreamerClient::connect(format!("http://{grpc}")).await.unwrap();
-        client.get_lightd_info(Empty {}).await.unwrap().into_inner()
+        // Keep a health Watch open through shutdown: it must not hold the daemon open.
+        (client.get_lightd_info(Empty {}).await.unwrap().into_inner(), watch.into_inner())
     })
     .await;
 

@@ -25,6 +25,7 @@ percent-encoding = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
 tonic = { version = "0.14.6", features = ["tls-ring"] }
+tonic-health = "0.14.6"
 tower-http = { version = "0.7", default-features = false, features = ["trace"] }
 tower-layer = "0.3"
 tracing = "0.1"
