@@ -4571,6 +4571,7 @@ dependencies = [
  "thiserror",
  "tonic",
  "zakura-chain",
+ "zakura-node-services",
  "zakura-sapling-crypto",
  "ztreamer-snapshot",
 ]

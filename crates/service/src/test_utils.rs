@@ -17,15 +17,14 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Channel, Server};
 use zakura_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
-    ironwood, orchard,
+    block, ironwood, orchard,
     parameters::Network,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
 use ztreamer_backend::{
-    AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
+    AddressUtxo, BackendError, BlockHandle, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 use ztreamer_chain::codec::CompactBlockRecord;
 use ztreamer_index::index::{Index, IndexState};
@@ -67,7 +66,7 @@ impl StateBackend for EmptyChain {
         Ok(None)
     }
 
-    async fn block(&self, _hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
+    async fn block(&self, _hash: block::Hash) -> Result<Option<BlockHandle>, BackendError> {
         Ok(None)
     }
 

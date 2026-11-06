@@ -1,13 +1,12 @@
 //! The embedded Zakura node as a [`StateBackend`]: [`InProcessBackend`].
 
-use std::{collections::HashSet, ops::RangeInclusive, sync::Arc};
+use std::{collections::HashSet, ops::RangeInclusive};
 
 use sapling_crypto::Node as SaplingNode;
 use tower::ServiceExt as _;
 use zakura_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
-    ironwood, orchard,
+    block, ironwood, orchard,
     parameters::Network,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, Transaction, UnminedTx},
@@ -15,7 +14,7 @@ use zakura_chain::{
 };
 use zakura_state::{ReadRequest, ReadResponse, ReadStateService};
 use ztreamer_backend::{
-    AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
+    AddressUtxo, BackendError, BlockHandle, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 
 use crate::NodeClient;
@@ -94,7 +93,7 @@ impl StateBackend for InProcessBackend {
         }
     }
 
-    async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
+    async fn block(&self, hash: block::Hash) -> Result<Option<BlockHandle>, BackendError> {
         match self.read(ReadRequest::Block(hash.into())).await? {
             ReadResponse::Block(block) => Ok(block),
             _ => Err(unexpected("block")),

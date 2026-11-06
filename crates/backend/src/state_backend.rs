@@ -10,14 +10,14 @@ use std::{
 use sapling_crypto::Node as SaplingNode;
 use zakura_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
-    ironwood, orchard,
+    block, ironwood, orchard,
     parameters::Network,
     sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction, UnminedTx},
     transparent,
 };
+pub use zakura_node_services::block_memory::BlockHandle;
 use ztreamer_snapshot::{manifest_entry::Frontiers, pool::PoolRoots};
 
 use crate::BackendError;
@@ -36,7 +36,8 @@ pub trait StateBackend: Send + Sync + 'static {
     async fn tip_height(&self) -> Result<Option<block::Height>, BackendError>;
 
     /// A full block from the best chain by hash. `None` when the block is not in the best chain.
-    async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError>;
+    /// The handle retains the embedded node's memory reservation until its last clone drops.
+    async fn block(&self, hash: block::Hash) -> Result<Option<BlockHandle>, BackendError>;
 
     /// A mined transaction by id. `None` when it is not in the best chain.
     async fn transaction(

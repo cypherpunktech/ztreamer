@@ -24,7 +24,7 @@ use zakura_rpc::{
 };
 use zakura_state::HashOrHeight;
 use ztreamer_backend::{
-    AddressUtxo, BackendError, MinedTransaction, StateBackend, Subtrees, TreeState,
+    AddressUtxo, BackendError, BlockHandle, MinedTransaction, StateBackend, Subtrees, TreeState,
 };
 
 use super::{
@@ -48,7 +48,7 @@ impl StateBackend for RemoteBackend {
         Ok(Some(self.node.get_block_count().await.map_err(NodeCallError)?))
     }
 
-    async fn block(&self, hash: block::Hash) -> Result<Option<Arc<Block>>, BackendError> {
+    async fn block(&self, hash: block::Hash) -> Result<Option<BlockHandle>, BackendError> {
         let raw = match self.node.get_block_raw(HashOrHeight::Hash(hash)).await {
             Ok(raw) => raw,
             Err(error) if error.is_block_not_found() => return Ok(None),
@@ -61,7 +61,7 @@ impl StateBackend for RemoteBackend {
                 block.hash()
             )));
         }
-        Ok(Some(Arc::new(block)))
+        Ok(Some(Arc::new(block).into()))
     }
 
     async fn transaction(
