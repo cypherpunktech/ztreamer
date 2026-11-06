@@ -20,12 +20,7 @@
           pname = "ztreamerd";
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-            # Fetch each git dependency at the rev that `Cargo.lock` pins. The
-            # zakura crates then need no hash list that goes stale on each bump.
-            allowBuiltinFetchGit = true;
-          };
+          cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = with pkgs; [
             protobuf
             pkg-config
