@@ -1,0 +1,11 @@
+start->fetching 0.01 s
+start->import complete 433.6 s (7.23 min)
+start->following 433.8 s
+epochs logged 405
+epochs 0..1699999: 170 epochs, 30.4 s
+epochs 1700000..2199999: 101 epochs, 325.7 s
+epochs 2200000..3531000: 134 epochs, 32.0 s
+replica cpu_s 6392.1 over 432.1 s -> 14.8 cores avg
+source cpu_s 550.4 over 432.1 s -> 1.3 cores avg
+http cpu_s 8.2 over 432.1 s -> 0.0 cores avg
+http bytes 18161010220 -> 41.9 MB/s avg over import

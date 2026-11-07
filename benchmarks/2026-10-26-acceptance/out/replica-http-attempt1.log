@@ -1,0 +1,15 @@
+[2m2026-10-26T20:04:03.263731Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura credentials [3mauth[0m[2m=[0mCookie("/home/evalir/sandblast-bench/accept-7.4/source.cookie")
+[2m2026-10-26T20:04:03.266939Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Trying to open metrics endpoint at 127.0.0.1:39967...
+[2m2026-10-26T20:04:03.270263Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Opened metrics endpoint at 127.0.0.1:39967
+[2m2026-10-26T20:04:03.270274Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m using remote zakura [3mhost[0m[2m=[0m"127.0.0.1" [3mport[0m[2m=[0m28232
+[2m2026-10-26T20:04:03.286143Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura network [3mnetwork[0m[2m=[0mMainnet
+[2m2026-10-26T20:04:03.293889Z[0m [32m INFO[0m [2mztreamerd::replicate[0m[2m:[0m [3msources[0m[2m=[0m1 [3mfrom[0m[2m=[0mNone [3mimport_state[0m[2m=[0m"fetching"
+[2m2026-10-26T20:04:04.410582Z[0m [32m INFO[0m [2mztreamerd::lifecycle[0m[2m:[0m shutting down node and application
+Error: import the sealed ranges
+
+Caused by:
+   0: epoch through 9999 rejected
+   1: range check AttestedRoots failed at height 9999
+
+Location:
+    bin/ztreamerd/src/replicate.rs:206:30

@@ -1,0 +1,6 @@
+Oct 26 19:42:45 torvus-ovh ztreamerd[3990035]: 2026-10-26T19:42:45.178176Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking new blocks were written in current database form
+Oct 26 19:42:45 torvus-ovh ztreamerd[3990035]: 2026-10-26T19:42:45.178382Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: checking database format produced by new blocks in this i
+Oct 26 19:42:51 torvus-ovh ztreamerd[3990035]: 2026-10-26T19:42:51.232943Z  INFO zakura_state::service::finalized_state::disk_format::upgrade: database format is valid running_version=29.1.0+indexer i
+Oct 26 19:42:51 torvus-ovh systemd[1]: ztreamer.service: Deactivated successfully.
+Oct 26 19:42:51 torvus-ovh systemd[1]: Stopped ztreamer.service - Ztreamer light-wallet server with embedded archive Zakura mainnet node.
+Oct 26 19:42:51 torvus-ovh systemd[1]: ztreamer.service: Consumed 11min 3.068s CPU time over 1h 53min 57.338s wall clock time, 16G memory peak.

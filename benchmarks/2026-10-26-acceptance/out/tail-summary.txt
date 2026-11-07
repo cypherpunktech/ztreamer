@@ -1,0 +1,5 @@
+remote zakura is ready +0.079 s
+historical compact index complete +0.828 s
+serving CompactTxStreamer +0.894 s
+2026-10-26T20:33:28.693075Z  INFO ztreamer_indexer::pipeline: historical pipeline stage totals start_height=3529615 target_height=3531514 target_hash=0000000000531f88b39473d85c144e0da0aeaa95a3f19e23cccdfea77dd08632 fetch_read_seconds=1.723965465 fetch_header_read_seconds=0.0 fetch_transaction_read_seconds=0.0 fetch_txid_read_sec
+2026-10-26T20:33:28.694052Z  INFO ztreamerd: historical compact index complete height=3531514 elapsed_seconds=0.749381841

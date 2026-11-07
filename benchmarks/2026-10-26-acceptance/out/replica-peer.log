@@ -1,0 +1,288 @@
+[2m2026-10-26T20:26:37.382835Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura credentials [3mauth[0m[2m=[0mCookie("/home/evalir/sandblast-bench/accept-7.4/source.cookie")
+[2m2026-10-26T20:26:37.382924Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Trying to open metrics endpoint at 127.0.0.1:38967...
+[2m2026-10-26T20:26:37.383609Z[0m [32m INFO[0m [2mzakurad::components::metrics[0m[2m:[0m Opened metrics endpoint at 127.0.0.1:38967
+[2m2026-10-26T20:26:37.383615Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m using remote zakura [3mhost[0m[2m=[0m"127.0.0.1" [3mport[0m[2m=[0m28232
+[2m2026-10-26T20:26:37.387765Z[0m [32m INFO[0m [2mztreamerd::remote[0m[2m:[0m remote zakura network [3mnetwork[0m[2m=[0mMainnet
+[2m2026-10-26T20:26:37.389973Z[0m [32m INFO[0m [2mztreamerd::replicate[0m[2m:[0m [3msources[0m[2m=[0m1 [3mfrom[0m[2m=[0mNone [3mimport_state[0m[2m=[0m"fetching"
+[2m2026-10-26T20:26:37.400410Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m20000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.400538Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m60000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.403425Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m2000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.457151Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m9999 [3mranges[0m[2m=[0m10
+[2m2026-10-26T20:26:37.473836Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m19999 [3mranges[0m[2m=[0m20
+[2m2026-10-26T20:26:37.492564Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m29999 [3mranges[0m[2m=[0m30
+[2m2026-10-26T20:26:37.519673Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m39999 [3mranges[0m[2m=[0m40
+[2m2026-10-26T20:26:37.556928Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m49999 [3mranges[0m[2m=[0m50
+[2m2026-10-26T20:26:37.597348Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m59999 [3mranges[0m[2m=[0m60
+[2m2026-10-26T20:26:37.642367Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m69999 [3mranges[0m[2m=[0m70
+[2m2026-10-26T20:26:37.643369Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m130000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.643400Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m88000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.691294Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m79999 [3mranges[0m[2m=[0m80
+[2m2026-10-26T20:26:37.692410Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m108000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:37.779555Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m89999 [3mranges[0m[2m=[0m90
+[2m2026-10-26T20:26:37.831154Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m99999 [3mranges[0m[2m=[0m100
+[2m2026-10-26T20:26:37.923459Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m109999 [3mranges[0m[2m=[0m110
+[2m2026-10-26T20:26:37.978188Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m119999 [3mranges[0m[2m=[0m120
+[2m2026-10-26T20:26:38.034193Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m129999 [3mranges[0m[2m=[0m130
+[2m2026-10-26T20:26:38.091503Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m139999 [3mranges[0m[2m=[0m140
+[2m2026-10-26T20:26:38.150042Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m149999 [3mranges[0m[2m=[0m150
+[2m2026-10-26T20:26:38.211481Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m159999 [3mranges[0m[2m=[0m160
+[2m2026-10-26T20:26:38.212224Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m190000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:38.212256Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m220000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:38.219963Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m198000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:38.315966Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m169999 [3mranges[0m[2m=[0m170
+[2m2026-10-26T20:26:38.384547Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m179999 [3mranges[0m[2m=[0m180
+[2m2026-10-26T20:26:38.472262Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m189999 [3mranges[0m[2m=[0m190
+[2m2026-10-26T20:26:38.534633Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m199999 [3mranges[0m[2m=[0m200
+[2m2026-10-26T20:26:38.596424Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m209999 [3mranges[0m[2m=[0m210
+[2m2026-10-26T20:26:38.666057Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m219999 [3mranges[0m[2m=[0m220
+[2m2026-10-26T20:26:38.732001Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m229999 [3mranges[0m[2m=[0m230
+[2m2026-10-26T20:26:38.806878Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m239999 [3mranges[0m[2m=[0m240
+[2m2026-10-26T20:26:38.970378Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m249999 [3mranges[0m[2m=[0m250
+[2m2026-10-26T20:26:39.040494Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m259999 [3mranges[0m[2m=[0m260
+[2m2026-10-26T20:26:39.113164Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m269999 [3mranges[0m[2m=[0m270
+[2m2026-10-26T20:26:39.191080Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m279999 [3mranges[0m[2m=[0m280
+[2m2026-10-26T20:26:39.271175Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m289999 [3mranges[0m[2m=[0m290
+[2m2026-10-26T20:26:39.339833Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m299999 [3mranges[0m[2m=[0m300
+[2m2026-10-26T20:26:39.410514Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m309999 [3mranges[0m[2m=[0m310
+[2m2026-10-26T20:26:39.484802Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m319999 [3mranges[0m[2m=[0m320
+[2m2026-10-26T20:26:39.660256Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m329999 [3mranges[0m[2m=[0m330
+[2m2026-10-26T20:26:39.735565Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m339999 [3mranges[0m[2m=[0m340
+[2m2026-10-26T20:26:39.810506Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m349999 [3mranges[0m[2m=[0m350
+[2m2026-10-26T20:26:39.888467Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m359999 [3mranges[0m[2m=[0m360
+[2m2026-10-26T20:26:39.968541Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m369999 [3mranges[0m[2m=[0m370
+[2m2026-10-26T20:26:40.045700Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m379999 [3mranges[0m[2m=[0m380
+[2m2026-10-26T20:26:40.139517Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m389999 [3mranges[0m[2m=[0m390
+[2m2026-10-26T20:26:40.239407Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m399999 [3mranges[0m[2m=[0m400
+[2m2026-10-26T20:26:40.239894Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m450000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.239977Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m400000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.240019Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m440000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.240030Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m460000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.240741Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m411000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.241871Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m431000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.242838Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m451000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.242850Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m431000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.243567Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m403000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.245166Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m452000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.245186Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m424000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.245871Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m415000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.248029Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m406000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.249901Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m466000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.250541Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m408000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.252890Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m457000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:40.388903Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m409999 [3mranges[0m[2m=[0m410
+[2m2026-10-26T20:26:40.505756Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m419999 [3mranges[0m[2m=[0m420
+[2m2026-10-26T20:26:40.817334Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m429999 [3mranges[0m[2m=[0m430
+[2m2026-10-26T20:26:40.945693Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m439999 [3mranges[0m[2m=[0m440
+[2m2026-10-26T20:26:41.050014Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m449999 [3mranges[0m[2m=[0m450
+[2m2026-10-26T20:26:41.162030Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m459999 [3mranges[0m[2m=[0m460
+[2m2026-10-26T20:26:41.272923Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m469999 [3mranges[0m[2m=[0m470
+[2m2026-10-26T20:26:41.368244Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m479999 [3mranges[0m[2m=[0m480
+[2m2026-10-26T20:26:41.858548Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m489999 [3mranges[0m[2m=[0m490
+[2m2026-10-26T20:26:41.961830Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m499999 [3mranges[0m[2m=[0m500
+[2m2026-10-26T20:26:42.058806Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m509999 [3mranges[0m[2m=[0m510
+[2m2026-10-26T20:26:42.183946Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m519999 [3mranges[0m[2m=[0m520
+[2m2026-10-26T20:26:42.293074Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m529999 [3mranges[0m[2m=[0m530
+[2m2026-10-26T20:26:42.386881Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m539999 [3mranges[0m[2m=[0m540
+[2m2026-10-26T20:26:42.477546Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m549999 [3mranges[0m[2m=[0m550
+[2m2026-10-26T20:26:42.478555Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m600000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:42.478635Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m610000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:42.484835Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m584000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:42.487135Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m595000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:42.487169Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m614000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:42.487183Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m567000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:43.215312Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m559999 [3mranges[0m[2m=[0m560
+[2m2026-10-26T20:26:43.309415Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m569999 [3mranges[0m[2m=[0m570
+[2m2026-10-26T20:26:43.414913Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m579999 [3mranges[0m[2m=[0m580
+[2m2026-10-26T20:26:44.067033Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m589999 [3mranges[0m[2m=[0m590
+[2m2026-10-26T20:26:44.159968Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m599999 [3mranges[0m[2m=[0m600
+[2m2026-10-26T20:26:44.267409Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m609999 [3mranges[0m[2m=[0m610
+[2m2026-10-26T20:26:44.382171Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m619999 [3mranges[0m[2m=[0m620
+[2m2026-10-26T20:26:44.476399Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m629999 [3mranges[0m[2m=[0m630
+[2m2026-10-26T20:26:44.566945Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m639999 [3mranges[0m[2m=[0m640
+[2m2026-10-26T20:26:44.672406Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m649999 [3mranges[0m[2m=[0m650
+[2m2026-10-26T20:26:44.764437Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m659999 [3mranges[0m[2m=[0m660
+[2m2026-10-26T20:26:44.765915Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m720000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:44.774066Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m724000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:44.774091Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m686000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:44.774098Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m666000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:44.776451Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m725000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:44.776471Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m687000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:45.283685Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m669999 [3mranges[0m[2m=[0m670
+[2m2026-10-26T20:26:45.408329Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m679999 [3mranges[0m[2m=[0m680
+[2m2026-10-26T20:26:45.524846Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m689999 [3mranges[0m[2m=[0m690
+[2m2026-10-26T20:26:45.637134Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m699999 [3mranges[0m[2m=[0m700
+[2m2026-10-26T20:26:45.743415Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m709999 [3mranges[0m[2m=[0m710
+[2m2026-10-26T20:26:46.085119Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m719999 [3mranges[0m[2m=[0m720
+[2m2026-10-26T20:26:46.183594Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m729999 [3mranges[0m[2m=[0m730
+[2m2026-10-26T20:26:46.281878Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m739999 [3mranges[0m[2m=[0m740
+[2m2026-10-26T20:26:46.922901Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m749999 [3mranges[0m[2m=[0m750
+[2m2026-10-26T20:26:47.025128Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m759999 [3mranges[0m[2m=[0m760
+[2m2026-10-26T20:26:47.162448Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m769999 [3mranges[0m[2m=[0m770
+[2m2026-10-26T20:26:47.286323Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m779999 [3mranges[0m[2m=[0m780
+[2m2026-10-26T20:26:47.416686Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m789999 [3mranges[0m[2m=[0m790
+[2m2026-10-26T20:26:48.273925Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m799999 [3mranges[0m[2m=[0m800
+[2m2026-10-26T20:26:48.391026Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m809999 [3mranges[0m[2m=[0m810
+[2m2026-10-26T20:26:48.506661Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m819999 [3mranges[0m[2m=[0m820
+[2m2026-10-26T20:26:48.619805Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m829999 [3mranges[0m[2m=[0m830
+[2m2026-10-26T20:26:48.763131Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m839999 [3mranges[0m[2m=[0m840
+[2m2026-10-26T20:26:49.207095Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m849999 [3mranges[0m[2m=[0m850
+[2m2026-10-26T20:26:49.327826Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m859999 [3mranges[0m[2m=[0m860
+[2m2026-10-26T20:26:49.648285Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m869999 [3mranges[0m[2m=[0m870
+[2m2026-10-26T20:26:49.922523Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m879999 [3mranges[0m[2m=[0m880
+[2m2026-10-26T20:26:50.036655Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m889999 [3mranges[0m[2m=[0m890
+[2m2026-10-26T20:26:50.147076Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m899999 [3mranges[0m[2m=[0m900
+[2m2026-10-26T20:26:50.252624Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m909999 [3mranges[0m[2m=[0m910
+[2m2026-10-26T20:26:50.356317Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m919999 [3mranges[0m[2m=[0m920
+[2m2026-10-26T20:26:50.471169Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m929999 [3mranges[0m[2m=[0m930
+[2m2026-10-26T20:26:50.574573Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m939999 [3mranges[0m[2m=[0m940
+[2m2026-10-26T20:26:50.576252Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1000000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:50.581521Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m963000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:50.584428Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1013000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:50.587455Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1004000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:51.008290Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m949999 [3mranges[0m[2m=[0m950
+[2m2026-10-26T20:26:51.612892Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m959999 [3mranges[0m[2m=[0m960
+[2m2026-10-26T20:26:51.747113Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m969999 [3mranges[0m[2m=[0m970
+[2m2026-10-26T20:26:52.465151Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m979999 [3mranges[0m[2m=[0m980
+[2m2026-10-26T20:26:52.581779Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m989999 [3mranges[0m[2m=[0m990
+[2m2026-10-26T20:26:52.691752Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m999999 [3mranges[0m[2m=[0m1000
+[2m2026-10-26T20:26:52.800295Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1009999 [3mranges[0m[2m=[0m1010
+[2m2026-10-26T20:26:52.934114Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1019999 [3mranges[0m[2m=[0m1020
+[2m2026-10-26T20:26:53.057150Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1029999 [3mranges[0m[2m=[0m1030
+[2m2026-10-26T20:26:53.165409Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1039999 [3mranges[0m[2m=[0m1040
+[2m2026-10-26T20:26:53.274029Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1049999 [3mranges[0m[2m=[0m1050
+[2m2026-10-26T20:26:53.274637Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1100000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.274665Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1120000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.274715Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1051000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.274744Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1110000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.277722Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1091000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.278939Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1082000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.280467Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1062000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.283535Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1063000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.283557Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1113000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.284779Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1074000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.284792Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1063000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.288489Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1115000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.288523Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1057000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.288544Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1064000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.289951Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1057000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.289966Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1087000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.291268Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1096000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.293773Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1066000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.295170Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1089000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:53.297792Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1098000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:54.457707Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1059999 [3mranges[0m[2m=[0m1060
+[2m2026-10-26T20:26:55.636728Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1069999 [3mranges[0m[2m=[0m1070
+[2m2026-10-26T20:26:55.752317Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1079999 [3mranges[0m[2m=[0m1080
+[2m2026-10-26T20:26:55.862787Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1089999 [3mranges[0m[2m=[0m1090
+[2m2026-10-26T20:26:55.974632Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1099999 [3mranges[0m[2m=[0m1100
+[2m2026-10-26T20:26:56.086065Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1109999 [3mranges[0m[2m=[0m1110
+[2m2026-10-26T20:26:56.195552Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1119999 [3mranges[0m[2m=[0m1120
+[2m2026-10-26T20:26:56.321206Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1129999 [3mranges[0m[2m=[0m1130
+[2m2026-10-26T20:26:56.431289Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1139999 [3mranges[0m[2m=[0m1140
+[2m2026-10-26T20:26:56.431915Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1210000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.431933Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1141000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.431943Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1200000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.431962Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1151000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.433501Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1171000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.435685Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1211000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.435727Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1172000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.436997Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1193000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.440029Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1194000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.441130Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1204000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.442733Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1205000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:56.443746Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1196000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:57.828816Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1149999 [3mranges[0m[2m=[0m1150
+[2m2026-10-26T20:26:57.944858Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1159999 [3mranges[0m[2m=[0m1160
+[2m2026-10-26T20:26:58.074874Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1169999 [3mranges[0m[2m=[0m1170
+[2m2026-10-26T20:26:58.187060Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1179999 [3mranges[0m[2m=[0m1180
+[2m2026-10-26T20:26:58.292078Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1189999 [3mranges[0m[2m=[0m1190
+[2m2026-10-26T20:26:58.399111Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1199999 [3mranges[0m[2m=[0m1200
+[2m2026-10-26T20:26:58.524775Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1209999 [3mranges[0m[2m=[0m1210
+[2m2026-10-26T20:26:58.636342Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1219999 [3mranges[0m[2m=[0m1220
+[2m2026-10-26T20:26:58.637036Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1232000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.637056Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1280000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.637063Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1290000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.637070Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1222000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.640059Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1252000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.640884Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1224000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.643965Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1284000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.649693Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1277000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:58.651797Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1258000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:26:59.712836Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1229999 [3mranges[0m[2m=[0m1230
+[2m2026-10-26T20:26:59.830994Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1239999 [3mranges[0m[2m=[0m1240
+[2m2026-10-26T20:26:59.950458Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1249999 [3mranges[0m[2m=[0m1250
+[2m2026-10-26T20:27:00.191083Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1259999 [3mranges[0m[2m=[0m1260
+[2m2026-10-26T20:27:00.299404Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1269999 [3mranges[0m[2m=[0m1270
+[2m2026-10-26T20:27:00.409738Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1279999 [3mranges[0m[2m=[0m1280
+[2m2026-10-26T20:27:00.519885Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1289999 [3mranges[0m[2m=[0m1290
+[2m2026-10-26T20:27:00.625836Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1299999 [3mranges[0m[2m=[0m1300
+[2m2026-10-26T20:27:00.626291Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1350000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:01.111759Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1309999 [3mranges[0m[2m=[0m1310
+[2m2026-10-26T20:27:01.381454Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1319999 [3mranges[0m[2m=[0m1320
+[2m2026-10-26T20:27:01.517791Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1329999 [3mranges[0m[2m=[0m1330
+[2m2026-10-26T20:27:01.631002Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1339999 [3mranges[0m[2m=[0m1340
+[2m2026-10-26T20:27:01.756745Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1349999 [3mranges[0m[2m=[0m1350
+[2m2026-10-26T20:27:01.970473Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1359999 [3mranges[0m[2m=[0m1360
+[2m2026-10-26T20:27:02.091324Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1369999 [3mranges[0m[2m=[0m1370
+[2m2026-10-26T20:27:02.206105Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1379999 [3mranges[0m[2m=[0m1380
+[2m2026-10-26T20:27:02.331609Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1389999 [3mranges[0m[2m=[0m1390
+[2m2026-10-26T20:27:02.901047Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1399999 [3mranges[0m[2m=[0m1400
+[2m2026-10-26T20:27:03.834856Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1409999 [3mranges[0m[2m=[0m1410
+[2m2026-10-26T20:27:04.477840Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1419999 [3mranges[0m[2m=[0m1420
+[2m2026-10-26T20:27:04.627937Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1429999 [3mranges[0m[2m=[0m1430
+[2m2026-10-26T20:27:05.697848Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1439999 [3mranges[0m[2m=[0m1440
+[2m2026-10-26T20:27:05.831432Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1449999 [3mranges[0m[2m=[0m1450
+[2m2026-10-26T20:27:06.243692Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1459999 [3mranges[0m[2m=[0m1460
+[2m2026-10-26T20:27:06.373367Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1469999 [3mranges[0m[2m=[0m1470
+[2m2026-10-26T20:27:06.491850Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1479999 [3mranges[0m[2m=[0m1480
+[2m2026-10-26T20:27:06.608295Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1489999 [3mranges[0m[2m=[0m1490
+[2m2026-10-26T20:27:06.730579Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1499999 [3mranges[0m[2m=[0m1500
+[2m2026-10-26T20:27:06.848823Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1509999 [3mranges[0m[2m=[0m1510
+[2m2026-10-26T20:27:06.849350Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1580000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:06.849375Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1570000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:07.452664Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1519999 [3mranges[0m[2m=[0m1520
+[2m2026-10-26T20:27:07.671889Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1529999 [3mranges[0m[2m=[0m1530
+[2m2026-10-26T20:27:07.846512Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1539999 [3mranges[0m[2m=[0m1540
+[2m2026-10-26T20:27:08.248915Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1549999 [3mranges[0m[2m=[0m1550
+[2m2026-10-26T20:27:08.393027Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1559999 [3mranges[0m[2m=[0m1560
+[2m2026-10-26T20:27:08.548377Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1569999 [3mranges[0m[2m=[0m1570
+[2m2026-10-26T20:27:08.802299Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1579999 [3mranges[0m[2m=[0m1580
+[2m2026-10-26T20:27:08.949939Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1589999 [3mranges[0m[2m=[0m1590
+[2m2026-10-26T20:27:09.093055Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1599999 [3mranges[0m[2m=[0m1600
+[2m2026-10-26T20:27:09.576094Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1609999 [3mranges[0m[2m=[0m1610
+[2m2026-10-26T20:27:09.720358Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1619999 [3mranges[0m[2m=[0m1620
+[2m2026-10-26T20:27:09.882390Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1629999 [3mranges[0m[2m=[0m1630
+[2m2026-10-26T20:27:10.014635Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1639999 [3mranges[0m[2m=[0m1640
+[2m2026-10-26T20:27:10.151748Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1649999 [3mranges[0m[2m=[0m1650
+[2m2026-10-26T20:27:10.152710Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1710000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:10.170014Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1706000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:10.171652Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1698000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:27:10.955929Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1659999 [3mranges[0m[2m=[0m1660
+[2m2026-10-26T20:27:11.106633Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1669999 [3mranges[0m[2m=[0m1670
+[2m2026-10-26T20:27:11.267361Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1679999 [3mranges[0m[2m=[0m1680
+[2m2026-10-26T20:27:12.166446Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1689999 [3mranges[0m[2m=[0m1690
+[2m2026-10-26T20:27:12.322741Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1699999 [3mranges[0m[2m=[0m1700
+[2m2026-10-26T20:27:27.269075Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1709999 [3mranges[0m[2m=[0m1710
+[2m2026-10-26T20:28:06.849733Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1717999 [3mranges[0m[2m=[0m1718
+[2m2026-10-26T20:28:07.418879Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1725999 [3mranges[0m[2m=[0m1726
+[2m2026-10-26T20:28:07.838732Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1728999 [3mranges[0m[2m=[0m1729
+[2m2026-10-26T20:28:08.405509Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1730999 [3mranges[0m[2m=[0m1731
+[2m2026-10-26T20:28:09.031249Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1732999 [3mranges[0m[2m=[0m1733
+[2m2026-10-26T20:28:09.031672Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1742000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:28:09.031910Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1742000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:28:09.032077Z[0m [33m WARN[0m [2mztreamer_verify::fetch[0m[2m:[0m range transfer stopped; resuming [3merror[0m[2m=[0mgRPC call failed [3mstart_height[0m[2m=[0m1742000 [3moffset[0m[2m=[0m0
+[2m2026-10-26T20:28:09.032215Z[0m [33m WARN[0m [2mztreamer_verify::importer::sources[0m[2m:[0m blob fetch failed; asking next source [3msource[0m[2m=[0m0 [3mstart_height[0m[2m=[0m1742000 [3merror[0m[2m=[0mgRPC call failed
+[2m2026-10-26T20:28:39.453321Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1734999 [3mranges[0m[2m=[0m1735
+[2m2026-10-26T20:28:39.911259Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1735999 [3mranges[0m[2m=[0m1736
+[2m2026-10-26T20:28:40.748805Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1737999 [3mranges[0m[2m=[0m1738
+[2m2026-10-26T20:29:26.425459Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1739999 [3mranges[0m[2m=[0m1740
+[2m2026-10-26T20:29:26.841917Z[0m [32m INFO[0m [2mztreamer_verify::importer[0m[2m:[0m imported epoch [3mend_height[0m[2m=[0m1741999 [3mranges[0m[2m=[0m1742
+[2m2026-10-26T20:29:26.852634Z[0m [32m INFO[0m [2mztreamerd::lifecycle[0m[2m:[0m shutting down node and application
+Error: import the sealed ranges
+
+Caused by:
+   0: gRPC call failed
+   1: code: 'Some resource has been exhausted', message: "4 range streams are running"
+
+Location:
+    bin/ztreamerd/src/replicate.rs:206:30

@@ -1,0 +1,12 @@
+Gnuplot not found, using plotters backend
+Benchmarking epoch_verify/peak_range_1_060_000_sapling
+Benchmarking epoch_verify/peak_range_1_060_000_sapling: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 381.9s.
+Benchmarking epoch_verify/peak_range_1_060_000_sapling: Collecting 10 samples in estimated 381.87 s (10 iterations)
+Benchmarking epoch_verify/peak_range_1_060_000_sapling: Analyzing
+epoch_verify/peak_range_1_060_000_sapling
+                        time:   [38.245 s 38.272 s 38.296 s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+

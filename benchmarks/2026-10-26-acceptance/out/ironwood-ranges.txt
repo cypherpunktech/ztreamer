@@ -1,0 +1,1 @@
+{"ironwood_ranges": 103, "first_end": 3428999, "last_end": 3530999, "frontier_match": 103, "mismatch": 0, "epoch_ends_with_root_attested_in_import": 11}

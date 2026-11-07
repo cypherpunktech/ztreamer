@@ -1,0 +1,2 @@
+{"concurrency": 8, "wall_s": 34.74, "errors": 0, "getblockhash": {"n": 3531, "sum_s": 3.32, "p50_ms": 0.88, "p95_ms": 1.65, "max_ms": 3.4}, "z_gettreestate": {"n": 405, "sum_s": 269.8, "p50_ms": 395.8, "p95_ms": 2283.03, "max_ms": 7683.9}}
+source_cpu_s=518
