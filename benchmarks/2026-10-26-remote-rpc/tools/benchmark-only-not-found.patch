@@ -1,0 +1,17 @@
+diff --git a/crates/remote/src/error.rs b/crates/remote/src/error.rs
+index 8c5645e..5c28e71 100644
+--- a/crates/remote/src/error.rs
++++ b/crates/remote/src/error.rs
+@@ -190,7 +190,11 @@ impl RpcError {
+     /// It answers all other requests for a missing block, `getblock` included, with
+     /// [`RpcCode::INVALID_PARAMETER`].
+     pub const fn is_block_not_found(&self) -> bool {
+-        matches!(self.rpc_code(), Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER))
++        // BENCHMARK-ONLY PATCH: zakura v1.5.1 sends -32602 as -1 on the wire.
++        matches!(
++            self.rpc_code(),
++            Some(RpcCode::INVALID_PARAMS | RpcCode::INVALID_PARAMETER | RpcCode(-1))
++        )
+     }
+ 
+     /// True when the request did not reach the node: the connection, the DNS lookup or the TLS

@@ -1,0 +1,3 @@
+before: IndexState { durable_tip: Some(BlockId { height: 3531361, hash: block::Hash("00000000002692fec6c6ab3e8f41b770fc9821f2a8ce41295bf687fc4dbbb01f") }), sealed_through: Some(3530999), verified_through: None, generation: 4867, tree_sizes: TreeSizes { sapling: 73990173, orchard: 50478583, ironwood: 934496 } }
+after: IndexState { durable_tip: Some(BlockId { height: 3529461, hash: block::Hash("000000000070967adde8aea8d79b8fc513935cd8acf0042b01444ce6d338a543") }), sealed_through: Some(3528999), verified_through: None, generation: 4868, tree_sizes: TreeSizes { sapling: 73989465, orchard: 50478276, ironwood: 895315 } }
+continuity: ok
